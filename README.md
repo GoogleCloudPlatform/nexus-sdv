@@ -43,7 +43,6 @@ By bridging vehicle signals and data to the cloud, Nexus establishes a **unified
 We plan to continuously develop and maintain this project to provide you with more features and enable partners to offer complementary features. **We rely on your feedback and contributions.**
 
 ## Disclaimer
-
 This is not an officially supported Google product. This project is not
 eligible for the [Google Open Source Software Vulnerability Rewards
 Program](https://bughunters.google.com/open-source-security).
