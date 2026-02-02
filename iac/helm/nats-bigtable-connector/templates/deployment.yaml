@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nats-bigtable-connector
+  namespace: base-services
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nats-bigtable-connector
+  template:
+    metadata:
+      labels:
+        app: nats-bigtable-connector
+    spec:
+      serviceAccountName: nats-bigtable-connector-ksa
+      containers:
+        - name: connector
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["-c", "/config/config.yaml"]
+          env:
+            - name: NATS_USER
+              valueFrom:
+                secretKeyRef:
+                  name: nats-bigtable-connector-secret
+                  key: NATS_USER
+            - name: NATS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: nats-bigtable-connector-secret
+                  key: NATS_PASSWORD
+            - name: NATS_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: nats-bigtable-connector-secret
+                  key: NATS_HOST
+          volumeMounts:
+            - name: connector-config-volume
+              mountPath: /config
+            - name: connector-proto-volume
+              mountPath: /proto/telemetry.proto
+              subPath: telemetry.proto
+      volumes:
+        - name: connector-config-volume
+          configMap:
+            name: nats-bigtable-connector-config
+        - name: connector-proto-volume
+          configMap:
+            name: nats-bigtable-connector-proto

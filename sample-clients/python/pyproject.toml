@@ -1,0 +1,15 @@
+[project]
+name = "python"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "cryptography>=46.0.2",
+    "nats-py>=2.11.0",
+    "protobuf>=6.33.4",
+    "python-keycloak>=5.8.1",
+    "requests>=2.32.5",
+    "urllib3>=2.6.3",
+]
+

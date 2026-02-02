@@ -1,0 +1,13 @@
+image:
+  tag: "0.0.1-SNAPSHOT"
+  pullPolicy: Always
+
+# Log level for the auth callout service
+# Valid values: DEBUG, INFO, WARN, ERROR
+# Default: INFO (overridden to DEBUG via helmfile)
+logLevel: "DEBUG"
+
+service:
+  type: ClusterIP
+  annotations: {}
+  httpPort: 8080

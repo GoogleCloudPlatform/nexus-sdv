@@ -1,0 +1,247 @@
+---
+title: "Client Registration and Data Transmission"
+description: "A technical guide for OEM users explaining the Python Test client's registration, authentication and data transmission process to the GCP-based NATS cluster."
+---
+
+import { Steps } from '@astrojs/starlight/components';
+
+## 🎯 Getting Started
+
+This guide helps Nexus engineers and admins interact with the platform via clients. We assume you have a running Nexus instance, following the deployment steps covered earlier.
+
+All client interaction with Nexus is secured via **mutual TLS (mTLS)**. During the deployment of Nexus, all required cryptographic materials were created, and the platform is ready to use.
+
+To interact with the Nexus platform, every client follows a standardized four-stage lifecycle. This sequence ensures that all data transmissions are secure, authenticated, and authorized.
+
+![Nexus Client Communication Flow](assets/gs-client-overview-steps.png)
+
+
+<Steps>
+
+1.  **Registration**
+    The client establishes its identity within the system. During this phase, necessary credentials and metadata are provisioned so the platform recognizes the client as a valid participant.
+
+2.  **Authentication**
+    The client proves its identity to the platform. This typically involves a handshake or token exchange (e.g., using certificates or NKeys) to verify that the client is who they claim to be.
+
+3.  **Authorization**
+    Once authenticated, the platform evaluates the client's permissions. This step defines which resources the client is allowed to access and which actions (scopes) it can perform.
+
+4.  **Data Transmission**
+    With identity verified and permissions granted, the secure exchange of payload data begins. This is the operational phase where the actual business logic or telemetry flow occurs.
+
+</Steps>
+
+:::note[Enterprise Readiness]
+This communication flow is designed to integrate seamlessly with **OEM production workflows** and existing security infrastructures. The Registration and Authentication services within Nexus are backed by **dedicated PKI trust chains** to ensure maximum security and interoperability.
+:::
+
+## Sample Clients 
+
+We provide two ready-to-use clients: a **Go Client** and a **Python Client**. Both clients follow the communication flow described above and demonstrate how to interact with the Nexus platform effectively.
+
+These clients are designed for simplicity and can be executed via a single main script. Consequently, you will only need minimal prerequisites to run these scripts on your local machine.
+
+:::note[The Deployment Link]
+The clients rely on the environment configuration created during the bootstrapping process. They automatically look for the `.bootstrap_env` file (located in `iac/bootstrapping/`) to retrieve essential platform metadata such as your **GCP Project ID**, **NATS Hostnames**, and **Registration URLs**. Ensure this file is present and populated from your previous deployment steps.
+:::
+
+### Prerequisites and Setup
+
+* **Go (1.21+):** Required to build and run the Go vehicle client via make.
+* **Python 3.13+:** The recommended version for the Python client.
+* **uv:** The primary tool for managing Python dependencies and running the client script.
+* **Protobuf Compiler (protoc):** The Protobuf compiler must be installed for data transmission.
+* **GCloud CLI:** Essential for retrieving TLS certificates from the Google Cloud Secret Manager
+
+### Running the Go Client
+
+The Go client is designed to be built and executed using a **Makefile**. This automates the code generation from Protobuf files, the retrieval of necessary TLS certificates, and the final execution of the binary.
+
+To start the Go vehicle client, navigate to the client directory and execute the `all` target:
+
+```bash
+# Navigate to the Go client directory
+cd sample-clients/vehicle-client/
+
+# Build and run the client
+make all
+```
+
+When you run the command, you should see a sequence of logs detailing the build process, certificate retrieval, and the multi-step registration flow:
+
+```
+go mod download
+go mod verify
+all modules verified
+Generating protobuf code from ../../proto/telemetry.proto...
+protoc --proto_path=../../proto --go_out=telemetry --go_opt=paths=source_relative telemetry.proto
+go build -v -o vehicle-client .
+mkdir -p certificates
+gcloud secrets versions access latest --secret="REGISTRATION_SERVER_TLS_CERT" > certificates/REGISTRATION_SERVER_TLS_CERT.pem
+gcloud secrets versions access latest --secret="KEYCLOAK_TLS_CRT" > certificates/KEYCLOAK_TLS_CRT.pem
+./run-vehicle-client.sh
+==========================================
+Check for environment file
+==========================================
+Found environment file at ../../iac/bootstrapping/.bootstrap_env
+...
+...
+...
+1. Generating private key...
+2. Creating certificate signing request...
+3. Signing certificate with GCP CAS Factory CA...
+4. Downloading Factory CA certificate...
+5. Creating certificate chain...
+
+✓ Certificate generation complete!
+...
+...
+...
+2026/01/15 14:07:01 Starting vehicle client for VIN: VEHICLE001
+2026/01/15 14:07:01 Telemetry interval: 5 seconds
+2026/01/15 14:07:01 Step 1: Generating operational key pair...
+2026/01/15 14:07:01 Step 2: Creating Certificate Signing Request (CSR)...
+2026/01/15 14:07:01 Step 3: Loading factory-issued certificate for mTLS...
+2026/01/15 14:07:01 Step 4: Sending CSR to registration server at https://registration.sdv-dae.net:8080...
+2026/01/15 14:07:01   Server requested client certificate
+2026/01/15 14:07:01 Step 5: Parsing operational certificate...
+2026/01/15 14:07:01   Keycloak URL: https://keycloak.sdv-dae.net:8443
+2026/01/15 14:07:01   NATS URL: nats://nats.sdv-dae.net:4222
+2026/01/15 14:07:01   Certificate valid until: 2027-01-15 13:07:01 +0000 UTC
+2026/01/15 14:07:01   Saved operational certificate to operational-cert.pem
+2026/01/15 14:07:01   Saved operational key to operational-key.pem
+2026/01/15 14:07:01 ✓ Successfully registered and obtained operational certificate
+2026/01/15 14:07:01 Step 1: Configuring mTLS with operational certificate...
+2026/01/15 14:07:01 Step 2: Requesting JWT from Keycloak at https://keycloak.sdv-dae.net:8443...
+2026/01/15 14:07:01   Keycloak requested client certificate
+2026/01/15 14:07:02   Token expires in: 300 seconds
+2026/01/15 14:07:02 ✓ Successfully authenticated with Keycloak and obtained JWT
+2026/01/15 14:07:02 Connecting to NATS at nats://nats.sdv-dae.net:4222 with JWT...
+2026/01/15 14:07:02   Connected to NATS successfully
+2026/01/15 14:07:03 ✓ Successfully connected to NATS
+2026/01/15 14:07:03 Starting continuous telemetry publishing...
+2026/01/15 14:07:03 Step 1: Configuring mTLS with operational certificate...
+2026/01/15 14:07:03 Step 2: Requesting JWT from Keycloak at https://keycloak.sdv-dae.net:8443...
+2026/01/15 14:07:03   Keycloak requested client certificate
+2026/01/15 14:07:03   Token expires in: 300 seconds
+2026/01/15 14:07:03 JWT refreshed, expires at: 2026-01-15T14:22:03+01:00
+...
+```
+
+Once the client successfully registers and connects, it transitions into the operational phase, where you will see the continuous data transmission logs:
+
+```
+...
+2026/01/15 14:07:08 [1] Published protobuf to telemetry.VEHICLE001.battery: SoC=85.4%, Voltage=12.67V, Current=44.58A, Temp=25.6°C
+2026/01/15 14:07:13 [2] Published protobuf to telemetry.VEHICLE001.battery: SoC=85.3%, Voltage=12.72V, Current=45.71A, Temp=25.9°C
+2026/01/15 14:07:18 [3] Published protobuf to telemetry.VEHICLE001.battery: SoC=85.3%, Voltage=12.78V, Current=46.77A, Temp=25.6°C
+2026/01/15 14:07:23 [4] Published protobuf to telemetry.VEHICLE001.battery: SoC=85.2%, Voltage=12.72V, Current=45.90A, Temp=25.6°C
+2026/01/15 14:07:28 [5] Published protobuf to telemetry.VEHICLE001.battery: SoC=85.2%, Voltage=12.72V, Current=46.41A, Temp=25.6°C
+2026/01/15 14:07:33 [6] Published protobuf to telemetry.VEHICLE001.battery: SoC=85.1%, Voltage=12.67V, Current=48.16A, Temp=25.2°C
+2026/01/15 14:07:38 [7] Published protobuf to telemetry.VEHICLE001.battery: SoC=85.1%, Voltage=12.73V, Current=46.66A, Temp=25.0°C
+2026/01/15 14:07:43 [8] Published protobuf to telemetry.VEHICLE001.battery: SoC=85.0%, Voltage=12.76V, Current=45.38A, Temp=25.1°C
+2026/01/15 14:07:48 [9] Published protobuf to telemetry.VEHICLE001.battery: SoC=85.0%, Voltage=12.73V, Current=44.09A, Temp=24.9°C
+...
+```
+
+Once the client successfully registers and connects, it transitions into the operational phase, where you will see the continuous data transmission logs:  
+
+### Running the Python Client
+
+The Python client is executed via a dedicated shell script that loads environment variables from the bootstrapping configuration and prepares the identity verification (PKI). Execution is handled efficiently using **uv**.
+
+To start the Python vehicle client, navigate to the directory and run the launcher script:
+
+```bash
+# Navigate to the Python client directory
+cd sample-clients/python/
+
+# Execute the script with the desired PKI strategy
+./run-python-client.sh
+```
+
+The terminal output is similar to that of the Go Client. A successful run will conclude with the following logs in your shell:
+
+```
+...
+Successfully registered and received operational certificate.
+  Keycloak URL: https://...
+  NATS URL: nats://...
+Step 1: Configuring mTLS with operational certificate...
+Step 2: Requesting JWT from Keycloak at https://...
+Successfully retrieved access token.
+  Token expires in: 300 seconds
+Connecting to NATS at nats://...
+Connected. Sending 7 telemetry messages...
+Telemetry published (1/7).
+Telemetry published (2/7).
+Telemetry published (3/7).
+Telemetry published (4/7).
+Telemetry published (5/7).
+Telemetry published (6/7).
+Telemetry published (7/7).
+Successfully sent test telemetry data.
+```
+
+Now that both clients are successfully sending data to Nexus, you can verify the data ingestion in the platform.
+
+## Verifying Data Ingestion in BigTable
+
+After running the sample clients, you can verify that the telemetry data is being correctly ingested into your database via the Google Cloud Console.
+
+1.  Log in to the **Google Cloud Console** and navigate to your Nexus project.
+2.  Open **BigTable > Instances** and select your instance (e.g., `bigtable-production-storage`).
+3.  Click on **BigTable Studio** in the left-hand navigation menu.
+4.  Select the `telemetry` table. You will notice the table is structured into two distinct column families:
+    * **`static`**: Stores persistent vehicle metadata.
+    * **`dynamic`**: Stores time-series telemetry data like battery SoC, voltage, and temperature.
+
+To view the transmitted data, execute the following query in the SQL editor:
+
+```sql
+SELECT * FROM telemetry LIMIT 100;
+```
+
+### Data Characteristics
+
+The sample clients are programmed to demonstrate different aspects of the Nexus data schema:
+
+| Client | Primary Focus    | Column Families Used | Purpose                                                                                                          |
+| :--- |:-----------------|:---------------------|:-----------------------------------------------------------------------------------------------------------------|
+| **Go Client** | Real-time Stream | `dynamic`            | Simulates a continuous telemetry flow (e.g., battery metrics). |
+| **Python Client** | Identity & State | `static` & `dynamic` | Demonstrates identity state and metadata handling.|
+
+See this screenshot as example:
+
+![Nexus BigTable Ingested Data](assets/gs-client-bigtable.png)
+
+## Closing Considerations
+
+Nexus was developed to empower engineers to rapidly build Proof of Concepts (PoCs) for next-generation connected vehicle applications on a platform that mirrors production-grade environments as closely as possible. Despite its lightweight footprint, Nexus delivers the scalability and innovation of a cloud-native platform, underpinned by industry-standard security concepts like **PKI** and **mTLS**.
+
+#### Future Outlook
+We are only at the beginning of the Nexus journey. The two sample clients are designed to evolve into distinct roles within the ecosystem:
+
+* **Python Client**: Serving as the blueprint for **AAOS (Android Automotive OS)** integration. This pattern is intended to be transitioned into Android Automotive system services.
+* **Go Client**: Slated to evolve into the official **Nexus CLI**, providing a powerful command-line interface for platform management in future releases.
+
+:::tip[Join the Journey]
+Nexus thrives on real-world use cases. If you have feedback on the client communication flow or require specific features for your OEM production process, we encourage you to reach out or contribute to the development of our next-gen vehicle platform.
+:::
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

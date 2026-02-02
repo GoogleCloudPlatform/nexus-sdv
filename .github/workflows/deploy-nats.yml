@@ -1,0 +1,162 @@
+name: Deploy NATS service
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment (sandbox, dev, ...)"
+        required: true
+      pki_strategy:
+        type: string
+        default: "local"
+        description: "Passes on user decision for the platform's PKI setup"
+      helmAction:
+        type: choice
+        description: "Sets the action for the helmfile plugin: 'sync' forces an update and 'apply' checks for differences"
+        required: false
+        default: "sync"
+        options:
+          - apply
+          - sync
+
+  workflow_call:
+    inputs:
+      environment:
+        type: string
+        required: true
+      pki_strategy:
+        type: string
+        default: "local"
+        description: "Passes on user decision for the platform's PKI setup"
+      helmAction:
+        type: string
+        description: "Sets the action for the helmfile plugin: 'sync' forces an update and 'apply' checks for differences"
+        required: false
+        default: "sync"
+
+  push:
+    paths:
+      - "iac/helm/nats"
+      - ".github/workflows/deploy-nats.yml"
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  WORKLOAD_IDENTITY_PROVIDER: "projects/${{ vars.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/${{ vars.GCP_WORKLOAD_IDENTITY_POOL_ID }}/providers/${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER_ID }}"
+  GKE_CLUSTER_NAME: "${{ inputs.environment }}-gke"
+
+jobs:
+  deploy-nats:
+    name: Deploy NATS
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    environment: ${{ inputs.environment }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Configure authentication with access_token format for gcloud CLI compatibility
+      # Workload Identity Federation uses OIDC tokens from GitHub to authenticate to GCP.
+      # By default, the auth action provides an ID token, but gcloud CLI commands
+      # (get-credentials, dns record-sets, secrets, iam, etc.) require an OAuth 2.0 access token
+      # with the full permissions of the service account to function correctly.
+      - name: Configure Google Cloud Auth
+        uses: google-github-actions/auth@v2
+        with:
+          token_format: access_token
+          workload_identity_provider: projects/${{ vars.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/${{ vars.GCP_WORKLOAD_IDENTITY_POOL_ID }}/providers/${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER_ID }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - name: Import required secrets
+        uses: google-github-actions/get-secretmanager-secrets@v3
+        with:
+          secrets: |-
+            NATS_BASIC_AUTH_USER:projects/${{ vars.GCP_PROJECT_ID }}/secrets/NATS_SERVER_USER/versions/latest
+            NATS_BASIC_AUTH_PASSWORD:projects/${{ vars.GCP_PROJECT_ID }}/secrets/NATS_SERVER_PASSWORD/versions/latest
+            NATS_AUTH_CALLOUT_PASSWORD:projects/${{ vars.GCP_PROJECT_ID }}/secrets/NATS_AUTH_CALLOUT_PASSWORD/versions/latest
+            NATS_CONNECTOR_PASSWORD:projects/${{ vars.GCP_PROJECT_ID }}/secrets/NATS_CONNECTOR_PASSWORD/versions/latest
+            NATS_AUTH_CALLOUT_NKEY_PUB:projects/${{ vars.GCP_PROJECT_ID }}/secrets/NATS_AUTH_CALLOUT_NKEY_PUB/versions/latest
+            JWT_ACC_SIGNING_KEY:projects/${{ vars.GCP_PROJECT_ID }}/secrets/JWT_ACC_SIGNING_KEY/versions/latest
+          export_to_environment: true
+
+      - name: Import Base Domain and CA Pool Configuration (Remote Only)
+        if: ${{ (inputs.pki_strategy || 'local') == 'remote' }}
+        uses: google-github-actions/get-secretmanager-secrets@v3
+        with:
+          secrets: |-
+            BASE_DOMAIN:projects/${{ vars.GCP_PROJECT_ID }}/secrets/BASE_DOMAIN/versions/latest
+          export_to_environment: true
+
+      - name: Set BASE_DOMAIN for Local PKI (empty for IP-based)
+        if: ${{ (inputs.pki_strategy || 'local') == 'local' }}
+        run: echo "BASE_DOMAIN=" >> $GITHUB_ENV
+
+      - name: Set up Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+
+      - name: Configure Kubernetes Context
+        run: |
+          gcloud container clusters get-credentials ${{ env.GKE_CLUSTER_NAME }} --dns-endpoint --region=${{ vars.GCP_REGION }} --project=${{ vars.GCP_PROJECT_ID }}
+          gcloud components install gke-gcloud-auth-plugin --quiet
+
+      - name: Deploy NATS
+        uses: helmfile/helmfile-action@v2.0.4
+        with:
+          helm-version: "v3.19.0"
+          helmfile-workdirectory: iac/helm/helmfile.d
+          helmfile-args: >-
+            --file nats.yaml.gotmpl 
+            ${{ inputs.helmAction || 'apply' }} 
+            --wait 
+            --args "--timeout 10m" 
+            --state-values-set pkiStrategy=${{ inputs.pki_strategy  || 'local' }} 
+            --state-values-set baseDomain=${{ env.BASE_DOMAIN }}
+        env:
+          BASE_DOMAIN: ${{ env.BASE_DOMAIN }}
+
+      - name: Debug NATS deployment on failure
+        if: failure()
+        run: |
+          echo "=== NATS pods ==="
+          kubectl get pods -n base-services -l app.kubernetes.io/name=nats
+          echo "=== NATS pod logs ==="
+          kubectl logs -n base-services -l app.kubernetes.io/name=nats --tail=100 || true
+          echo "=== NATS pod describe ==="
+          kubectl describe pods -n base-services -l app.kubernetes.io/name=nats
+
+      - name: Create NATS_HOSTNAME secret
+        run: |
+          # REMOTE STRATEGY: Domain nutzen
+          if [[ "${{ inputs.pki_strategy }}" == "remote" ]]; then
+             HOSTNAME="nats.${{ env.BASE_DOMAIN }}"
+             echo "Using Remote Strategy. Hostname: $HOSTNAME"
+          
+             if ! gcloud secrets describe "NATS_HOSTNAME" --project="${{ vars.GCP_PROJECT_ID }}" &> /dev/null; then
+               gcloud secrets create "NATS_HOSTNAME" --replication-policy="automatic" --project="${{ vars.GCP_PROJECT_ID }}"
+             fi
+             echo -n "$HOSTNAME" | gcloud secrets versions add "NATS_HOSTNAME" --data-file=- --project="${{ vars.GCP_PROJECT_ID }}"
+             exit 0
+          fi
+
+          # LOCAL STRATEGY: IP nutzen (Deine bisherige Logik)
+          echo "Using Local Strategy. Waiting for NATS external IP..."
+          for i in {1..30}; do
+            IP=$(kubectl get svc nats -n base-services -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+            if [[ -n "$IP" ]]; then
+              echo "NATS IP found: $IP"
+              if ! gcloud secrets describe "NATS_HOSTNAME" --project="${{ vars.GCP_PROJECT_ID }}" &> /dev/null; then
+                echo "Create secret 'NATS_HOSTNAME'..."
+                gcloud secrets create "NATS_HOSTNAME" --replication-policy="automatic" --project="${{ vars.GCP_PROJECT_ID }}"
+              fi
+              echo "Add new version to secret 'NATS_HOSTNAME'..."
+              echo -n "$IP" | gcloud secrets versions add "NATS_HOSTNAME" --data-file=- --project="${{ vars.GCP_PROJECT_ID }}"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::NATS LoadBalancer IP not found after 5 minutes."
+          exit 1

@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "nats-callout.fullname" . | trim }}
+  annotations:
+    {{ toYaml .Values.service.annotations | nindent 4 }}
+  labels:
+    {{ include "nats-callout.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.httpPort }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{ include "nats-callout.selectorLabels" . | nindent 4 }}

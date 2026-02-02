@@ -1,0 +1,128 @@
+name: Build, Push and Deploy the Data-API service
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment (sandbox, dev, ...)"
+        required: true
+      helmAction:
+        type: choice
+        description: "Sets the action for the helmfile plugin: 'sync' forces an update and 'apply' checks for differences"
+        required: false
+        default: "sync"
+        options:
+          - apply
+          - sync
+
+  workflow_call:
+    inputs:
+      environment:
+        type: string
+        required: true
+
+  push:
+    paths:
+      - "base-services/data-api/**"
+      - ".github/workflows/build-push-deploy-data-api.yml"
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  # Disable Docker build summary to reduce GitHub Actions artifacts storage and log verbosity
+  # Build summaries include metrics, cache stats, and warnings but aren't needed for internal builds
+  DOCKER_BUILD_SUMMARY: false
+  WORKLOAD_IDENTITY_PROVIDER: "projects/${{ vars.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/${{ vars.GCP_WORKLOAD_IDENTITY_POOL_ID }}/providers/${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER_ID }}"
+  GKE_CLUSTER_NAME: "${{ inputs.environment }}-gke"
+
+jobs:
+  deploy-data-api:
+    name: Deploy the Data API
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    environment: ${{ inputs.environment }}
+
+    defaults:
+      run:
+        working-directory: ./base-services/data-api
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.0"
+          cache-dependency-path: base-services/data-api/go.sum
+
+      - name: Install protoc-gen-go
+        run: |-
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+
+      # Configure authentication with access_token format for gcloud CLI compatibility
+      # Workload Identity Federation uses OIDC tokens from GitHub to authenticate to GCP.
+      # By default, the auth action provides an ID token, but gcloud CLI commands
+      # (configure-docker, secrets, run deploy, etc.) require an OAuth 2.0 access token
+      # with the full permissions of the service account to function correctly.
+      - name: Configure Google Cloud Auth
+        uses: google-github-actions/auth@v2
+        with:
+          token_format: access_token
+          workload_identity_provider: projects/${{ vars.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/${{ vars.GCP_WORKLOAD_IDENTITY_POOL_ID }}/providers/${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER_ID }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - name: Import secrets
+        uses: google-github-actions/get-secretmanager-secrets@v3
+        with:
+          secrets: |-
+            IMAGE_REPO:projects/${{ vars.GCP_PROJECT_ID }}/secrets/IMAGE_REPO/versions/latest
+            DATA_API_BIGTABLE_CONNECTOR_GCP_SERVICE_ACCOUNT:projects/${{ vars.GCP_PROJECT_ID }}/secrets/DATA_API_BIGTABLE_CONNECTOR_GCP_SERVICE_ACCOUNT/versions/latest
+          export_to_environment: true
+
+      - name: "Docker auth"
+        run: |-
+          gcloud auth configure-docker ${{ vars.GCP_REGION }}-docker.pkg.dev --quiet
+
+      - name: Compile proto files
+        run: make proto
+
+      - name: Build and Push Data API
+        uses: docker/build-push-action@v6
+        with:
+          push: true
+          tags: ${{ env.IMAGE_REPO }}/data-api:latest
+          file: ./base-services/data-api/Dockerfile
+          context: ./base-services/data-api
+          # Disable provenance and SBOM attestations to reduce image size and improve compatibility
+          # Provenance: Build metadata about the image origin (can cause registry compatibility issues)
+          # SBOM: Software Bill of Materials listing all dependencies (not required for internal images)
+          # These attestations can also consume GitHub Actions artifacts storage (10GB limit per workflow run)
+          provenance: false
+          sbom: false
+
+      - name: Get GKE credentials and write kubeconfig
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ env.GKE_CLUSTER_NAME }}
+          location: ${{ vars.GCP_REGION }}
+          use_dns_based_endpoint: true
+
+      - name: Deploy Data API
+        uses: helmfile/helmfile-action@v2.0.4
+        env:
+          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          GCP_REGION: ${{ vars.GCP_REGION }}
+          DATA_API_BIGTABLE_CONNECTOR_GCP_SERVICE_ACCOUNT: ${{ env.DATA_API_BIGTABLE_CONNECTOR_GCP_SERVICE_ACCOUNT }}
+          IMAGE_REPO: ${{ env.IMAGE_REPO }}
+        with:
+          helm-version: "v3.19.0"
+          helmfile-workdirectory: iac/helm/helmfile.d
+          helmfile-args: --file data-api.yaml.gotmpl ${{ inputs.helmAction || 'apply' }}

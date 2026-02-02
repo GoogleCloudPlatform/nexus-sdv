@@ -1,0 +1,83 @@
+name: Deploy External DNS service
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment (sandbox, dev, ...)"
+        required: true
+
+  workflow_call:
+    inputs:
+      environment:
+        type: string
+        required: true
+
+  push:
+    paths:
+      - ".github/workflows/deploy-external-dns.yml"
+      - "iac/helm/external-dns/**"
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  WORKLOAD_IDENTITY_PROVIDER: "projects/${{ vars.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/${{ vars.GCP_WORKLOAD_IDENTITY_POOL_ID }}/providers/${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER_ID }}"
+  GKE_CLUSTER_NAME: "${{ inputs.environment }}-gke"
+
+jobs:
+  deploy-external-dns:
+    name: Deploy external dns
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    environment: ${{ inputs.environment }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure Google Cloud Auth
+        uses: google-github-actions/auth@v2
+        with:
+          token_format: access_token
+          workload_identity_provider: ${{ env.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - name: Import secrets
+        uses: google-github-actions/get-secretmanager-secrets@v3
+        with:
+          secrets: |-
+            BASE_DOMAIN:${{ vars.GCP_PROJECT_ID }}/BASE_DOMAIN
+          export_to_environment: true
+
+      - name: Set up Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+
+      - name: Configure Kubernetes Context
+        run: |
+          gcloud container clusters get-credentials ${{ env.GKE_CLUSTER_NAME }} --dns-endpoint --region=${{ vars.GCP_REGION }} --project=${{ vars.GCP_PROJECT_ID }}
+          gcloud components install gke-gcloud-auth-plugin --quiet
+
+      - name: Deploy External DNS
+        run: |
+          # Replace placeholders with actual values using Pipe
+          cat iac/helm/external-dns/deployment.yaml | \
+            sed "s|__GCP_PROJECT_ID__|${{ vars.GCP_PROJECT_ID }}|g" | \
+            sed "s|__BASE_DOMAIN__|${{ env.BASE_DOMAIN }}|g" | \
+            kubectl apply -f -
+
+      - name: Wait for External DNS to be ready
+        run: |
+          echo "Waiting for External DNS deployment..."
+          sleep 5
+          
+          # Wait for Deployment Availability (Standard K8s way)
+          if ! kubectl wait --for=condition=available deployment/external-dns -n external-dns --timeout=180s; then
+            echo "::error::External DNS failed to become ready."
+            kubectl describe pods -n external-dns
+            kubectl logs -n external-dns -l app.kubernetes.io/name=external-dns --tail=50
+            exit 1
+          fi
+          
+          echo "External DNS is ready!"

@@ -1,0 +1,87 @@
+name: Build and Push NATS Auth-Callout service
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment (sandbox, dev, ...)"
+        required: true
+      helmAction:
+        type: choice
+        description: "Sets the action for the helmfile plugin: 'sync' forces an update and 'apply' checks for differences"
+        required: false
+        default: "sync"
+        options:
+          - apply
+          - sync
+
+  workflow_call:
+    inputs:
+      environment:
+        type: string
+        required: true
+      helmAction:
+        type: string
+        description: "Sets the action for the helmfile plugin: 'sync' forces an update and 'apply' checks for differences"
+        required: false
+        default: "sync"
+
+  push:
+    paths:
+      - "base-services/auth-callout/**"
+      - "build-push-nats-auth-callout.yml"
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  # Disable Docker build summary to reduce GitHub Actions artifacts storage and log verbosity
+  # Build summaries include metrics, cache stats, and warnings but aren't needed for internal builds
+  DOCKER_BUILD_SUMMARY: false
+  WORKLOAD_IDENTITY_PROVIDER: "projects/${{ vars.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/${{ vars.GCP_WORKLOAD_IDENTITY_POOL_ID }}/providers/${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER_ID }}"
+  GKE_CLUSTER_NAME: "${{ inputs.environment }}-gke"
+
+jobs:
+  build:
+    name: Build Auth-Callout
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    environment: ${{ inputs.environment}}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Determine Version and store in GITHUB_ENV
+        working-directory: base-services/auth-callout
+        run: echo "VERSION=$(cat VERSION)" >> "${GITHUB_ENV}"
+
+      # Configure authentication with access_token format for gcloud CLI compatibility
+      # Workload Identity Federation uses OIDC tokens from GitHub to authenticate to GCP.
+      # By default, the auth action provides an ID token, but gcloud CLI commands
+      # (configure-docker, secrets, run deploy, etc.) require an OAuth 2.0 access token
+      # with the full permissions of the service account to function correctly.
+      - name: Configure Google Cloud Auth
+        uses: google-github-actions/auth@v2
+        with:
+          token_format: access_token
+          workload_identity_provider: ${{ env.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - name: Import secrets
+        uses: google-github-actions/get-secretmanager-secrets@v3
+        with:
+          secrets: |-
+            IMAGE_REPO:${{ vars.GCP_PROJECT_ID }}/IMAGE_REPO
+          export_to_environment: true
+
+      - name: Build container
+        working-directory: base-services/auth-callout
+        run: sh ./build.sh ${{ env.IMAGE_REPO }}
+
+      - name: "Docker auth"
+        run: |-
+          gcloud auth configure-docker ${{ vars.GCP_REGION }}-docker.pkg.dev --quiet
+
+      - name: Push Image
+        run: docker push ${{ env.IMAGE_REPO }}/nats-auth-callout:${{ env.VERSION }}

@@ -1,0 +1,154 @@
+name: Terraform Plan
+
+on:
+  pull_request:
+    paths:
+      - "iac/terraform/**"
+      - ".github/workflows/terraform-plan.yml"
+
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment (sandbox, dev, ...)"
+        required: true
+        default: "sandbox"
+
+  workflow_call:
+    inputs:
+      environment:
+        type: string
+        required: true
+        default: "sandbox"
+
+  push:
+    paths:
+      - "iac/terraform/**"
+      - ".github/workflows/terraform-plan.yml"
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+env:
+  WORKLOAD_IDENTITY_PROVIDER: projects/${{ vars.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/${{ vars.GCP_WORKLOAD_IDENTITY_POOL_ID }}/providers/${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER_ID }}
+  WORKING_DIRECTORY: "./iac/terraform"
+
+jobs:
+  terraform:
+    name: Terraform Plan
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    environment: ${{ inputs.environment || 'sandbox' }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.11.4"
+
+      - name: Configure Google Cloud Auth
+        uses: google-github-actions/auth@v2
+        with:
+          token_format: access_token
+          workload_identity_provider: projects/${{ vars.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/${{ vars.GCP_WORKLOAD_IDENTITY_POOL_ID }}/providers/${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER_ID }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - name: Terraform Init
+        id: init
+        run: |
+          terraform init -backend-config="bucket=${{ vars.GCP_PROJECT_ID }}-tfstate"
+        working-directory: ${{ env.WORKING_DIRECTORY }}
+
+      - name: Terraform Format
+        id: fmt
+        run: |
+          terraform fmt -check -diff
+        working-directory: ${{ env.WORKING_DIRECTORY }}
+
+      - name: Terraform Validate
+        id: validate
+        run: |
+          terraform validate -no-color
+        working-directory: ${{ env.WORKING_DIRECTORY }}
+
+      - uses: terraform-linters/setup-tflint@v4
+        name: Setup TFLint
+        with:
+          tflint_version: v0.57.0
+
+      - name: Init TFLint
+        run: |
+          tflint --init
+        working-directory: ${{ env.WORKING_DIRECTORY }}
+
+      - name: Run TFLint
+        run: |
+          tflint -f compact
+        working-directory: ${{ env.WORKING_DIRECTORY }}
+
+      - name: Terraform Plan
+        id: plan
+        run: |
+          terraform plan \
+            -var="project_id=${{ vars.GCP_PROJECT_ID }}" \
+            -var="environment=${{ inputs.environment || 'sandbox' }}" \
+            -var="region=${{ vars.GCP_REGION }}" \
+            -var="zone=${{ vars.GCP_REGION }}-a" \
+            -no-color \
+            -input=false \
+            -compact-warnings \
+            -out='./tfplan.out'
+        working-directory: ${{ env.WORKING_DIRECTORY }}
+
+      - name: Upload terraform plan output
+        id: "upload-folder"
+        uses: "google-github-actions/upload-cloud-storage@v2"
+        with:
+          destination: "${{ vars.GCP_PROJECT_ID }}-tfstate"
+          path: "${{ env.WORKING_DIRECTORY }}/tfplan.out"
+          process_gcloudignore: false
+
+      - name: Show Terraform Plan
+        uses: actions/github-script@v7
+        if: github.event_name == 'pull_request'
+        env:
+          PLAN: 'terraform\n${{ steps.plan.outputs.stdout }}'
+        with:
+          script: |
+            const output = `#### Terraform Plan \`
+            - Terraform Initialization ⚙️ \`${{ steps.init.outcome }}\`
+            - Terraform Validation 🤖 ${{ steps.validate.outputs.stdout }}
+            - Terraform Format and Style 🖌 \`${{ steps.fmt.outcome }}\`
+            - TFLint check 🧹 \`${{ steps.tflint.outputs.exitcode == '0' && 'success' || 'failure' }}\`
+
+            <details><summary>Show TFlint</summary>
+
+            \`\`\`\n
+            ${{ steps.tflint.outputs.stderr }}
+            ${{ steps.tflint.outputs.stdout }}
+            ${{ steps.tflint.outputs.exitcode == '0' && 'All good, it is empty here' || 'failure' }}
+            \`\`\`
+
+            </details>
+
+            - Terraform Plan 📖 \`${{ steps.plan.outcome }}\`
+
+            <details><summary>Show Plan</summary>
+
+            \`\`\`\n
+            ${process.env.PLAN}
+            \`\`\`
+
+            </details>
+
+            *Pusher: @${{ github.actor }}, Action: \`${{ github.event_name }}\`, Working Directory: \`${{ env.WORKING_DIRECTORY }}\`, Workflow: \`${{ github.workflow }}\`*`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            })

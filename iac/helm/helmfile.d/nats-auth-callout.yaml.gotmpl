@@ -1,0 +1,25 @@
+releases:
+  - name: nats-auth-callout
+    namespace: base-services
+    createNamespace: true
+    installed: true
+    chart: '../nats-auth-callout'
+    labels:
+      app: nats-auth-callout
+    values:
+      - ../nats-auth-callout/values.yaml
+    set:
+      - name: jwt.accSigningKey
+        value: '{{ requiredEnv "JWT_ACC_SIGNING_KEY" }}'
+      - name: keycloak.jwkB64
+        value: '{{ requiredEnv "KEYCLOAK_JWK_B64" }}'
+      - name: image.repository
+        value: '{{ requiredEnv "IMAGE_REPO" }}'
+      - name: nats.url
+        value: '{{ requiredEnv "NATS_CONNECT_URL" }}'
+      - name: nats.user
+        value: '{{ env "NATS_AUTH_CALLOUT_USER" | default "auth-callout-service" }}'
+      - name: nats.password
+        value: '{{ requiredEnv "NATS_AUTH_CALLOUT_PASSWORD" }}'
+      - name: logLevel
+        value: '{{ env "LOG_LEVEL" | default "DEBUG" }}'

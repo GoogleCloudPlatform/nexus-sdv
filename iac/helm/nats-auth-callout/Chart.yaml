@@ -1,0 +1,6 @@
+apiVersion: v2
+name: nats-auth-callout
+description: A Helm chart for deploying NATS auth callout service
+type: application
+version: 0.1.0
+appVersion: "0.0.1-SNAPSHOT"

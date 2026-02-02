@@ -1,0 +1,132 @@
+name: Build, Push and Deploy the Data-API Sampler service
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment (sandbox, dev, ...)"
+        required: true
+        default: "e2e-local"
+      helmAction:
+        type: choice
+        description: "Sets the action for the helmfile plugin: 'sync' forces an update and 'apply' checks for differences"
+        required: false
+        default: "sync"
+        options:
+          - apply
+          - sync
+
+  workflow_call:
+    inputs:
+      environment:
+        type: string
+        required: true
+
+  push:
+    paths:
+      - "sample-services/data-api-sampler/**"
+      - ".github/workflows/build-push-deploy-data-api-sampler.yml"
+      - "iac/helm/data-api-sampler/**"
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  # Disable Docker build summary to reduce GitHub Actions artifacts storage and log verbosity
+  # Build summaries include metrics, cache stats, and warnings but aren't needed for internal builds
+  DOCKER_BUILD_SUMMARY: false
+  WORKLOAD_IDENTITY_PROVIDER: "projects/${{ vars.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/${{ vars.GCP_WORKLOAD_IDENTITY_POOL_ID }}/providers/${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER_ID }}"
+  GKE_CLUSTER_NAME: "${{ inputs.environment || 'e2e-local' }}-gke"
+  DATA_API_URL: "34.7.154.91:8080"
+
+jobs:
+  deploy-data-api-sampler:
+    name: build, push and deploy the data-api sampler service
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    environment: ${{ inputs.environment }}
+
+    defaults:
+      run:
+        working-directory: ./sample-services/data-api-sampler
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Configure authentication with access_token format for gcloud CLI compatibility
+      # Workload Identity Federation uses OIDC tokens from GitHub to authenticate to GCP.
+      # By default, the auth action provides an ID token, but gcloud CLI commands
+      # (configure-docker, secrets, run deploy, etc.) require an OAuth 2.0 access token
+      # with the full permissions of the service account to function correctly.
+      - name: Configure Google Cloud Auth
+        uses: google-github-actions/auth@v2
+        with:
+          token_format: access_token
+          workload_identity_provider: projects/${{ vars.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/${{ vars.GCP_WORKLOAD_IDENTITY_POOL_ID }}/providers/${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER_ID }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - name: Import secrets
+        uses: google-github-actions/get-secretmanager-secrets@v3
+        with:
+          secrets: |-
+            IMAGE_REPO:${{ vars.GCP_PROJECT_ID }}/IMAGE_REPO
+          export_to_environment: true
+
+      - name: "Docker auth"
+        run: |-
+          gcloud auth configure-docker ${{ vars.GCP_REGION }}-docker.pkg.dev --quiet
+
+      - name: Build and Push Data-API Sampler service
+        uses: docker/build-push-action@v6
+        with:
+          push: true
+          tags: ${{ env.IMAGE_REPO }}/data-api-sampler:latest
+          file: ./sample-services/data-api-sampler/Dockerfile
+          context: ./sample-services/data-api-sampler
+          # Disable provenance and SBOM attestations to reduce image size and improve compatibility
+          # Provenance: Build metadata about the image origin (can cause registry compatibility issues)
+          # SBOM: Software Bill of Materials listing all dependencies (not required for internal images)
+          # These attestations can also consume GitHub Actions artifacts storage (10GB limit per workflow run)
+          provenance: false
+          sbom: false
+
+      - name: Get GKE credentials and write kubeconfig
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ env.GKE_CLUSTER_NAME }}
+          location: ${{ vars.GCP_REGION }}
+          use_dns_based_endpoint: true
+
+      - name: Get Data API IP
+        id: get_data_api_ip
+        run: |
+          echo "Waiting for DATA API IP..."
+
+          # Get Data API Server IP
+          for i in {1..10}; do
+            DATA_API_IP=$(kubectl get svc data-api -n base-services -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+            if [[ -n "$DATA_API_IP" ]]; then
+              echo "DATA API IP found: $DATA_API_IP"
+              echo "ip=$DATA_API_IP" >> $GITHUB_OUTPUT
+              break
+            fi
+            sleep 10
+          done
+
+          if [[ -z "$DATA_API_IP" ]]; then
+            echo "::error::Data API IP not found after 1:30 minutes."
+            exit 1
+          fi
+
+      - name: Deploy Data-API Sampler service
+        uses: helmfile/helmfile-action@v2.0.4
+        env:
+          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          GCP_REGION: ${{ vars.GCP_REGION }}
+          IMAGE_REPO: ${{ env.IMAGE_REPO }}
+          DATA_API_URL: ${{ steps.get_data_api_ip.outputs.ip }}:8080
+        with:
+          helm-version: "v3.19.0"
+          helmfile-workdirectory: iac/helm/helmfile.d
+          helmfile-args: --file data-api-sampler.yaml.gotmpl ${{ inputs.helmAction || 'sync' }}

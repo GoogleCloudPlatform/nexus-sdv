@@ -1,0 +1,24 @@
+keycloak:
+  adminUser: admin
+  logLevel: DEBUG
+  pkiStrategy: "local"
+  baseDomain: ""
+
+database:
+  enabled: true
+  vendor: "postgres"
+  host: "127.0.0.1"
+  port: "5432"
+  name: "keycloak"
+  username: "keycloak"
+  password: ""  # Will be set via helmfile or --set flag
+  existingSecret: ""  # Leave empty to use password field directly
+  existingSecretKey: "password"
+
+service:
+  type: LoadBalancer
+  annotations:
+    external-dns.alpha.kubernetes.io/hostname: keycloak.{{ .Values.baseDomain }}
+    external-dns.alpha.kubernetes.io/ttl: "300"
+  httpPort: 8080
+  httpsPort: 8443

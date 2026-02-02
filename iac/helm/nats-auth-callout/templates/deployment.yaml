@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "nats-callout.fullname" . | trim }}
+  labels: {{ include "nats-callout.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {{ include "nats-callout.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{ include "nats-callout.selectorLabels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}/nats-auth-callout:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: JWT_ACC_SIGNING_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: nats-auth-callout-secrets
+                  key: JWT_ACC_SIGNING_KEY
+            - name: KEYCLOAK_JWK_B64
+              valueFrom:
+                secretKeyRef:
+                  name: nats-auth-callout-secrets
+                  key: KEYCLOAK_JWK_B64
+            - name: NATS_URL
+              # Use internal Kubernetes service name with basic auth credentials
+              # The URL is constructed in the ExternalSecret template
+              valueFrom:
+                secretKeyRef:
+                  name: nats-auth-callout-secrets
+                  key: NATS_URL
+            - name: NATS_USER
+              valueFrom:
+                secretKeyRef:
+                  name: nats-auth-callout-secrets
+                  key: NATS_USER
+            - name: NATS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: nats-auth-callout-secrets
+                  key: NATS_PASSWORD
+            - name: LOG_LEVEL
+              value: {{ .Values.logLevel | default "INFO" | quote }}
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
