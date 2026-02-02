@@ -1,0 +1,82 @@
+{{- $pki_strategy := .StateValues.pkiStrategy | default "local" }}
+repositories:
+  - name: nats
+    url: https://nats-io.github.io/k8s/helm/charts/
+
+releases:
+  - name: nats
+    namespace: base-services
+    createNamespace: true
+    chart: "nats/nats"
+    labels:
+      app: nats
+    installed: true
+    values:
+      - ../nats/values.yaml
+      # Inline values to properly structure authorization config
+      - config:
+          merge:
+            # Define accounts for proper auth_callout isolation
+            accounts:
+              AUTH:
+                users:
+                  - user: auth-callout-service
+                    password: '{{ requiredEnv "NATS_AUTH_CALLOUT_PASSWORD" }}'
+              APP:
+                users:
+                  - user: '{{ requiredEnv "NATS_BASIC_AUTH_USER" }}'
+                    password: '{{ requiredEnv "NATS_BASIC_AUTH_PASSWORD" }}'
+              SYS: {}
+            # Specify system account for NATS server operations
+            system_account: SYS
+            # Authorization configuration
+            authorization:
+              # Global account users (same account as JWT-authenticated vehicles)
+              users:
+                - user: connector
+                  password: '{{ requiredEnv "NATS_CONNECTOR_PASSWORD" }}'
+                  permissions:
+                    subscribe:
+                      - "telemetry.>"
+                    publish: []
+              auth_callout:
+                issuer: '{{ requiredEnv "NATS_AUTH_CALLOUT_NKEY_PUB" }}'
+                # auth_users lists users who BYPASS the callout (authenticate directly)
+                # All users NOT in this list will go through the callout (e.g., vehicles with JWTs)
+                auth_users:
+                  - auth-callout-service                      # Auth service bypasses to respond to requests
+                  - connector                                 # Connector authenticates directly with password
+                  - '{{ requiredEnv "NATS_BASIC_AUTH_USER" }}' # Basic auth user bypasses callout
+                account: AUTH
+    set:
+      - name: pkiStrategy
+        value: {{ .StateValues.pkiStrategy | default "local" }}
+      {{- if eq $pki_strategy "remote" }}
+      - name: baseDomain
+        value: '{{ requiredEnv "BASE_DOMAIN" }}'
+      - name: service.merge.metadata.annotations.external-dns\.alpha\.kubernetes\.io/hostname
+        value: 'nats.{{ requiredEnv "BASE_DOMAIN" }}'
+      {{- else }}
+      - name: baseDomain
+        value: ""
+      {{- end }}
+      # User credentials for reference (kept for compatibility)
+      - name: natsUsers.basic.username
+        value: '{{ requiredEnv "NATS_BASIC_AUTH_USER" }}'
+      - name: natsUsers.basic.password
+        value: '{{ requiredEnv "NATS_BASIC_AUTH_PASSWORD" }}'
+      - name: natsUsers.authCallout.username
+        value: 'auth-callout-service'
+      - name: natsUsers.authCallout.password
+        value: '{{ requiredEnv "NATS_AUTH_CALLOUT_PASSWORD" }}'
+      - name: natsUsers.connector.username
+        value: 'connector'
+      - name: natsUsers.connector.password
+        value: '{{ requiredEnv "NATS_CONNECTOR_PASSWORD" }}'
+      - name: environment
+        value: '{{ env "ENVIRONMENT" | default "dev" }}'
+    {{- if eq $pki_strategy "remote" }}
+    setString:
+      - name: service.merge.metadata.annotations.external-dns\.alpha\.kubernetes\.io/ttl
+        value: "300"
+    {{- end }}

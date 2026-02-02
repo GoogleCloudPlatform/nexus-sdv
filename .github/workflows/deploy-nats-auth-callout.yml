@@ -1,0 +1,89 @@
+name: Deploy NATS Auth-Callout service
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment (sandbox, dev, ...)"
+        required: true
+      helmAction:
+        type: choice
+        description: "Sets the action for the helmfile plugin: 'sync' forces an update and 'apply' checks for differences"
+        required: false
+        default: "sync"
+        options:
+          - apply
+          - sync
+
+  workflow_call:
+    inputs:
+      environment:
+        type: string
+        required: true
+      helmAction:
+        type: string
+        description: "Sets the action for the helmfile plugin: 'sync' forces an update and 'apply' checks for differences"
+        required: false
+        default: "sync"
+
+  push:
+    paths:
+      - "iac/helm/nats-auth-callout"
+      - ".github/workflows/deploy-nats-auth-callout.yml"
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  WORKLOAD_IDENTITY_PROVIDER: "projects/${{ vars.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/${{ vars.GCP_WORKLOAD_IDENTITY_POOL_ID }}/providers/${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER_ID }}"
+  GKE_CLUSTER_NAME: "${{ inputs.environment }}-gke"
+
+jobs:
+  deploy-nats-auth-callout:
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    environment: ${{ inputs.environment }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure Google Cloud Auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - name: Import secrets
+        uses: google-github-actions/get-secretmanager-secrets@v3
+        with:
+          secrets: |-
+            NATS_AUTH_CALLOUT_PASSWORD:${{ vars.GCP_PROJECT_ID }}/NATS_AUTH_CALLOUT_PASSWORD
+            JWT_ACC_SIGNING_KEY:${{ vars.GCP_PROJECT_ID }}/JWT_ACC_SIGNING_KEY
+            KEYCLOAK_JWK_B64:${{ vars.GCP_PROJECT_ID }}/KEYCLOAK_JWK_B64
+            IMAGE_REPO:${{ vars.GCP_PROJECT_ID }}/IMAGE_REPO
+          export_to_environment: true
+
+      - name: Set up Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+
+      - name: Get GKE credentials and write kubeconfig
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ env.GKE_CLUSTER_NAME }}
+          location: ${{ vars.GCP_REGION }}
+          use_dns_based_endpoint: true
+
+      - name: Deploy nats-auth-callout
+        uses: helmfile/helmfile-action@v2.0.4
+        env:
+          JWT_ACC_SIGNING_KEY: ${{ env.JWT_ACC_SIGNING_KEY }}
+          KEYCLOAK_JWK_B64: ${{ env.KEYCLOAK_JWK_B64 }}
+          # Use dedicated auth-callout-service user (bypasses auth_callout, uses basic auth)
+          NATS_CONNECT_URL: "nats://auth-callout-service:${{ env.NATS_AUTH_CALLOUT_PASSWORD }}@nats:4222"
+          IMAGE_REPO: ${{ env.IMAGE_REPO }}
+        with:
+          helm-version: "v3.19.0"
+          helmfile-workdirectory: iac/helm/helmfile.d
+          helmfile-args: --file nats-auth-callout.yaml.gotmpl ${{ inputs.helmAction || 'apply' }}

@@ -1,0 +1,218 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "keycloak.fullname" . | trim  }}
+  labels:
+{{ include "keycloak.labels" . | indent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+{{ include "keycloak.selectorLabels" . | indent 6 }}
+  template:
+    metadata:
+      labels:
+{{ include "keycloak.selectorLabels" . | indent 8 }}
+    spec:
+      serviceAccountName: keycloak-ksa
+      initContainers:
+        - name: import-ca-certs
+          image: "eclipse-temurin:21-jre-alpine"
+          command:
+            - sh
+            - -c
+            - |
+              # Import Registration CA into PKCS12 truststore (more reliable than JKS)
+              keytool -import -noprompt \
+                -alias registration-ca \
+                -file /truststores/registration-ca.pem \
+                -keystore /truststore-output/truststore.p12 \
+                -storetype PKCS12 \
+                -storepass changeit
+              echo "✓ Registration CA imported successfully into PKCS12 truststore"
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "100m"
+            limits:
+              memory: "128Mi"
+              cpu: "200m"
+          volumeMounts:
+            - name: keycloak-truststore
+              mountPath: "/truststores"
+              readOnly: true
+            - name: truststore-volume
+              mountPath: "/truststore-output"
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "quay.io/keycloak/keycloak:{{ .Chart.AppVersion }}"
+          args:
+            - "start"
+            - "--import-realm"
+            - "--log-level={{ .Values.keycloak.logLevel }}"
+            - "--health-enabled=true"
+            - "--http-management-scheme=http"
+          env:
+            - name: KEYCLOAK_ADMIN
+              value: {{ .Values.keycloak.adminUser | quote }}
+            - name: KEYCLOAK_ADMIN_PASSWORD
+              value: {{ .Values.keycloak.adminPassword | quote }}
+            - name: KC_HTTP_ENABLED
+              value: "true"
+            - name: KC_HTTP_MANAGEMENT_PORT
+              value: "9000"
+            - name: KC_HOSTNAME
+              value: "keycloak"
+            - name: KC_HTTPS_PORT
+              value: "8443"
+            - name: KC_HTTPS_CLIENT_AUTH
+              value: "request"
+            - name: KC_HTTPS_CERTIFICATE_FILE
+              value: "/opt/keycloak/conf/certs/authserver.crt"
+            - name: KC_HTTPS_CERTIFICATE_KEY_FILE
+              value: "/opt/keycloak/conf/certs/authserver.key"
+            - name: KC_TRUSTSTORE_PATHS
+              value: "/opt/keycloak/truststore/truststore.p12"
+            {{- if .Values.database.enabled }}
+            - name: KC_DB
+              value: {{ .Values.database.vendor | quote }}
+            - name: KC_DB_URL_HOST
+              value: {{ .Values.database.host | quote }}
+            - name: KC_DB_URL_PORT
+              value: {{ .Values.database.port | quote }}
+            - name: KC_DB_URL_DATABASE
+              value: {{ .Values.database.name | quote }}
+            - name: KC_DB_USERNAME
+              value: {{ .Values.database.username | quote }}
+            - name: KC_DB_PASSWORD
+              value: {{ .Values.database.password | quote }}
+            # Connection pool and resilience settings for Cloud SQL Proxy
+            - name: KC_DB_POOL_INITIAL_SIZE
+              value: "5"
+            - name: KC_DB_POOL_MIN_SIZE
+              value: "5"
+            - name: KC_DB_POOL_MAX_SIZE
+              value: "20"
+            - name: KC_DB_URL_PROPERTIES
+              value: "?tcpKeepAlive=true&socketTimeout=60&connectTimeout=10&loginTimeout=10"
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+            - name: https
+              containerPort: 8443
+              protocol: TCP
+          startupProbe:
+            httpGet:
+              path: /health/started
+              port: 9000
+              scheme: HTTP
+            periodSeconds: 10
+            failureThreshold: 60
+            initialDelaySeconds: 60
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: 9000
+              scheme: HTTP
+            periodSeconds: 30
+            failureThreshold: 3
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 9000
+              scheme: HTTP
+            periodSeconds: 10
+            failureThreshold: 3
+            initialDelaySeconds: 60
+            timeoutSeconds: 5
+          resources:
+            requests:
+              memory: "1Gi"
+              cpu: "1000m"
+            limits:
+              memory: "2Gi"
+              cpu: "2000m"
+          volumeMounts:
+            {{- if and .Values.keycloak.tls.cert .Values.keycloak.tls.key }}
+            - name: keycloak-tls
+              mountPath: "/opt/keycloak/conf/certs"
+              readOnly: true
+            {{- end }}
+            - name: keycloak-truststore
+              mountPath: "/opt/keycloak/conf/truststores"
+              readOnly: true
+            - name: truststore-volume
+              mountPath: "/opt/keycloak/truststore"
+              readOnly: true
+            - name: keycloak-realm-import
+              mountPath: "/opt/keycloak/data/import"
+              readOnly: true
+        {{- if and .Values.database.enabled .Values.database.cloudsqlproxy.instanceConnectionName }}
+        - name: cloud-sql-proxy
+          image: "gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.18.0"
+          args:
+            - "--auto-iam-authn"
+            - "--structured-logs"
+            - "--health-check"
+            - "--http-address=0.0.0.0"
+            - "--http-port=9090"
+            - "--debug"
+            - "{{ .Values.database.cloudsqlproxy.instanceConnectionName }}"
+          ports:
+            - name: health
+              containerPort: 9090
+              protocol: TCP
+          startupProbe:
+            httpGet:
+              path: /startup
+              port: 9090
+              scheme: HTTP
+            initialDelaySeconds: 5
+            periodSeconds: 2
+            failureThreshold: 30
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /liveness
+              port: 9090
+              scheme: HTTP
+            periodSeconds: 10
+            failureThreshold: 3
+            timeoutSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readiness
+              port: 9090
+              scheme: HTTP
+            periodSeconds: 10
+            failureThreshold: 6
+            initialDelaySeconds: 10
+            timeoutSeconds: 10
+          securityContext:
+            runAsNonRoot: true
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "50m"
+            limits:
+              memory: "256Mi"
+              cpu: "100m"
+        {{- end }}
+      volumes:
+        {{- if and .Values.keycloak.tls.cert .Values.keycloak.tls.key }}
+        - name: keycloak-tls
+          secret:
+            secretName: {{ include "keycloak.fullname" . | trim  }}-tls
+        {{- end }}
+        - name: keycloak-truststore
+          configMap:
+            name: {{ include "keycloak.fullname" . | trim  }}-truststore
+        - name: truststore-volume
+          emptyDir: {}
+        - name: keycloak-realm-import
+          configMap:
+            name: {{ include "keycloak.fullname" . | trim  }}-realm-import

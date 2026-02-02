@@ -1,0 +1,75 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "registration-server.fullname" . | trim }}
+  labels:
+{{ include "registration-server.labels" . | indent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+{{ include "registration-server.selectorLabels" . | indent 6 }}
+  template:
+    metadata:
+      annotations:
+        # Force pod restart when certificate secret changes
+        checksum/certificates: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+      labels:
+{{ include "registration-server.labels" . | indent 8 }}
+    spec:
+      serviceAccountName: registration-ksa
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}/{{ .Values.image.name }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.port }}
+              protocol: TCP
+          {{- with .Values.livenessProbe }}
+          livenessProbe:
+{{ toYaml . | indent 12 }}
+          {{- end }}
+          {{- with .Values.readinessProbe }}
+          readinessProbe:
+{{ toYaml . | indent 12 }}
+          {{- end }}
+          env:
+            - name: NATS_URL
+              value: {{ .Values.urls.nats | quote }}
+            - name: KEYCLOAK_URL
+              value: {{ .Values.urls.keycloak | quote }}
+          volumeMounts:
+            - name: certificates-server
+              mountPath: "/certificates/server"
+              readOnly: true
+            - name: certificates-ca
+              mountPath: "/certificates/ca"
+              readOnly: true
+            - name: certificates-factory-ca
+              mountPath: "/certificates/trusted-factory-ca.crt.pem"
+              readOnly: true
+              subPath: trusted-factory-ca.crt.pem
+      volumes:
+        - name: certificates-server
+          secret:
+            secretName: {{ include "registration-server.fullname" . }}-certificates
+            items:
+              - key: server.crt.pem
+                path: server.crt.pem
+              - key: server.key.pem
+                path: server.key.pem
+        - name: certificates-ca
+          secret:
+            secretName: {{ include "registration-server.fullname" . }}-certificates
+            items:
+              - key: ca.crt.pem
+                path: ca.crt.pem
+              - key: ca.key.pem
+                path: ca.key.pem
+        - name: certificates-factory-ca
+          secret:
+            secretName: {{ include "registration-server.fullname" . }}-certificates
+            items:
+              - key: trusted-factory-ca.crt.pem
+                path: trusted-factory-ca.crt.pem

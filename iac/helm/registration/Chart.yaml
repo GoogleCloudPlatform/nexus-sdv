@@ -1,0 +1,6 @@
+apiVersion: v2
+name: registration-server
+description: A Helm chart for deploying the Registration Server
+type: application
+version: 0.1.0
+appVersion: "0.0.1-SNAPSHOT"

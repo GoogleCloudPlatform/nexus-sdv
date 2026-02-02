@@ -1,0 +1,6 @@
+apiVersion: v2
+name: nats-bigtable-connector
+description: A Helm chart for the NATS Bigtable Connector
+type: application
+version: 0.1.0
+appVersion: "latest"

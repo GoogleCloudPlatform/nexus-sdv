@@ -1,0 +1,424 @@
+name: Build, Push and Deploy Registration
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment (sandbox, dev, ...)"
+        required: true
+      pki_strategy:
+        type: string
+        default: "local"
+        description: "PKI Setup: 'local' (IP) or 'remote' (DNS/CAS)"
+      helmAction:
+        type: choice
+        description: "Sets the action for the helmfile plugin: 'sync' forces an update and 'apply' checks for differences"
+        required: false
+        default: "sync"
+        options:
+          - apply
+          - sync
+
+  workflow_call:
+    inputs:
+      environment:
+        type: string
+        required: true
+      pki_strategy:
+        type: string
+        default: "local"
+      helmAction:
+        type: string
+        default: "sync"
+        required: false
+
+  push:
+    paths:
+      - "base-services/registration/server/**"
+      - ".github/workflows/build-push-deploy-registration.yml"
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  WORKLOAD_IDENTITY_PROVIDER: "projects/${{ vars.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/${{ vars.GCP_WORKLOAD_IDENTITY_POOL_ID }}/providers/${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER_ID }}"
+  GKE_CLUSTER_NAME: "${{ inputs.environment || 'sandbox' }}-gke"
+  CERT_PATH: "base-services/registration/server/certificates"
+
+jobs:
+  build-deploy:
+    name: Build, Push and Deploy registration server
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    environment: ${{ inputs.environment || 'sandbox' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure Google Cloud Auth
+        uses: google-github-actions/auth@v2
+        with:
+          token_format: access_token
+          workload_identity_provider: ${{ env.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - name: Import general secrets for Registration server
+        uses: google-github-actions/get-secretmanager-secrets@v3
+        with:
+          secrets: |-
+            IMAGE_REPO:${{ vars.GCP_PROJECT_ID }}/IMAGE_REPO
+            KEYCLOAK_HOSTNAME:${{ vars.GCP_PROJECT_ID }}/KEYCLOAK_HOSTNAME
+            NATS_HOSTNAME:${{ vars.GCP_PROJECT_ID }}/NATS_HOSTNAME
+          export_to_environment: true
+
+      - name: Import additional secrets for Registration server based on remote PKI setup
+        if: ${{ inputs.pki_strategy == 'remote' }}
+        uses: google-github-actions/get-secretmanager-secrets@v3
+        with:
+          secrets: |-
+            BASE_DOMAIN:${{ vars.GCP_PROJECT_ID }}/BASE_DOMAIN
+            SERVER_CA_POOL:${{ vars.GCP_PROJECT_ID }}/SERVER_CA_POOL
+            SERVER_CA:${{ vars.GCP_PROJECT_ID }}/SERVER_CA
+            FACTORY_CA_POOL:${{ vars.GCP_PROJECT_ID }}/FACTORY_CA_POOL
+            FACTORY_CA:${{ vars.GCP_PROJECT_ID }}/FACTORY_CA
+          export_to_environment: true
+
+      - name: "Docker auth"
+        run: |-
+          gcloud auth configure-docker ${{ vars.GCP_REGION }}-docker.pkg.dev --quiet
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and Push Registration Server
+        uses: docker/build-push-action@v6
+        with:
+          file: ./base-services/registration/server/Dockerfile
+          push: true
+          tags: ${{ env.IMAGE_REPO }}/registration-server:${{ github.sha }}
+          context: .
+          cache-from: type=registry,ref=${{ env.IMAGE_REPO }}/registration-server:buildcache
+          cache-to: type=registry,ref=${{ env.IMAGE_REPO }}/registration-server:buildcache,mode=max
+
+      - name: Get GKE credentials
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ env.GKE_CLUSTER_NAME }}
+          location: ${{ vars.GCP_REGION }}
+          use_dns_based_endpoint: true
+
+      - name: Initial Deploy to get IP (Local Only)
+        if: ${{ inputs.pki_strategy == 'local' }}
+        uses: helmfile/helmfile-action@v2.0.4
+        env:
+          IMAGE_REPO: ${{ env.IMAGE_REPO }}
+          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          REGISTRATION_SERVER_TLS_CERT: "placeholder"
+          REGISTRATION_SERVER_TLS_KEY: "placeholder"
+          REGISTRATION_CA_CERT: "placeholder"
+          REGISTRATION_CA_KEY: "placeholder"
+          REGISTRATION_FACTORY_CA_CERT: "placeholder"
+        with:
+          helm-version: "v3.19.0"
+          helmfile-workdirectory: iac/helm/helmfile.d
+          helmfile-args: --file registration.yaml.gotmpl apply --state-values-set pkiStrategy=local --state-values-set baseDomain="" --state-values-set image.tag=latest
+
+      - name: Get External IPs (Local Only)
+        if: ${{ inputs.pki_strategy == 'local' }}
+        id: get_ip
+        run: |
+          echo "Waiting for LoadBalancer IPs..."
+
+          # Get Registration Server IP
+          for i in {1..30}; do
+            REG_IP=$(kubectl get svc registration-server -n base-services -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+            if [[ -n "$REG_IP" ]]; then
+              echo "Registration IP found: $REG_IP"
+              echo "ip=$REG_IP" >> $GITHUB_OUTPUT
+              break
+            fi
+            sleep 10
+          done
+
+          if [[ -z "$REG_IP" ]]; then
+            echo "::error::Registration IP not found after 5 minutes."
+            exit 1
+          fi
+
+          # Get Keycloak IP
+          for i in {1..30}; do
+            KEYCLOAK_IP=$(kubectl get svc keycloak -n base-services -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+            if [[ -n "$KEYCLOAK_IP" ]]; then
+              echo "Keycloak IP found: $KEYCLOAK_IP"
+              echo "keycloak_ip=$KEYCLOAK_IP" >> $GITHUB_OUTPUT
+              break
+            fi
+            sleep 10
+          done
+
+          if [[ -z "$KEYCLOAK_IP" ]]; then
+            echo "::warning::Keycloak IP not found, using internal service name"
+            echo "keycloak_ip=keycloak" >> $GITHUB_OUTPUT
+          fi
+
+          # Get NATS IP
+          for i in {1..30}; do
+            NATS_IP=$(kubectl get svc nats -n base-services -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+            if [[ -n "$NATS_IP" ]]; then
+              echo "NATS IP found: $NATS_IP"
+              echo "nats_ip=$NATS_IP" >> $GITHUB_OUTPUT
+              break
+            fi
+            sleep 10
+          done
+
+          if [[ -z "$NATS_IP" ]]; then
+            echo "::warning::NATS IP not found, using internal service name"
+            echo "nats_ip=nats" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Download CA Certificates from Secret Manager (Local Only)
+        if: ${{ inputs.pki_strategy == 'local' }}
+        run: |
+          echo "Downloading CA certificates and keys from Secret Manager..."
+          mkdir -p temp-pki
+
+          # Download Server CA (for signing server certificates)
+          gcloud secrets versions access latest --secret="SERVER_CA_CERT" --project="${{ vars.GCP_PROJECT_ID }}" > temp-pki/server-ca-cert.pem
+          gcloud secrets versions access latest --secret="SERVER_CA_KEY" --project="${{ vars.GCP_PROJECT_ID }}" > temp-pki/server-ca-key.pem
+
+          # Download Registration CA (for reference and upload to container)
+          gcloud secrets versions access latest --secret="REGISTRATION_CA_CERT" --project="${{ vars.GCP_PROJECT_ID }}" > temp-pki/registration-ca-cert.pem
+          gcloud secrets versions access latest --secret="REGISTRATION_CA_KEY" --project="${{ vars.GCP_PROJECT_ID }}" > temp-pki/registration-ca-key.pem
+
+          # Download Factory CA (for reference)
+          gcloud secrets versions access latest --secret="REGISTRATION_FACTORY_CA_CERT" --project="${{ vars.GCP_PROJECT_ID }}" > temp-pki/factory-ca-cert.pem
+
+          # Copy to PKI directory structure (config files from git, certs/keys from Secret Manager)
+          mkdir -p base-services/registration/pki/server-ca
+          mkdir -p base-services/registration/pki/registration-ca
+          mkdir -p base-services/registration/pki/factory-ca
+
+          cp temp-pki/server-ca-cert.pem base-services/registration/pki/server-ca/ca.crt.pem
+          cp temp-pki/server-ca-key.pem base-services/registration/pki/server-ca/ca.key.pem
+          cp temp-pki/registration-ca-cert.pem base-services/registration/pki/registration-ca/ca.crt.pem
+          cp temp-pki/registration-ca-key.pem base-services/registration/pki/registration-ca/ca.key.pem
+          cp temp-pki/factory-ca-cert.pem base-services/registration/pki/factory-ca/ca.crt.pem
+
+          echo "✓ CA certificates downloaded and placed in PKI structure"
+
+      - name: Generate Certificates via Local OpenSSL (Local Only)
+        if: ${{ inputs.pki_strategy == 'local' }}
+        working-directory: base-services/registration/pki
+        run: |
+          IP="${{ steps.get_ip.outputs.ip }}"
+          echo "Generating certificate for IP: $IP"
+
+          # Create registration directory and config file
+          mkdir -p server-ca/registration
+
+          cat > server-ca/registration/registration.conf <<EOF
+          [alt_names]
+          subjectAltName = IP:$IP
+          EOF
+
+          # Generate new private key for registration server
+          openssl genpkey -algorithm RSA -out server-ca/registration/registration.key.pem
+
+          # Generate CSR with SAN
+          openssl req -new \
+            -key server-ca/registration/registration.key.pem \
+            -out server-ca/registration/registration.csr.pem \
+            -subj "/CN=$IP" \
+            -addext "subjectAltName=IP:$IP"
+
+          # Sign with Server CA (simple signing, not using ca.conf database)
+          openssl x509 -req -days 365 \
+            -in server-ca/registration/registration.csr.pem \
+            -CA server-ca/ca.crt.pem \
+            -CAkey server-ca/ca.key.pem \
+            -CAcreateserial \
+            -out server-ca/registration/registration.crt.pem \
+            -extfile server-ca/registration/registration.conf \
+            -extensions alt_names
+
+          echo "✓ Local certificates generated"
+
+      - name: Upload Certificates to GCP Secret Manager (Local Only)
+        if: ${{ inputs.pki_strategy == 'local' }}
+        run: |
+          echo "Uploading certificates to Secret Manager..."
+
+          # Helper function to create secret if it doesn't exist, then add version
+          add_secret_version() {
+            local SECRET_NAME=$1
+            local FILE_PATH=$2
+
+            if ! gcloud secrets describe "$SECRET_NAME" --project="${{ vars.GCP_PROJECT_ID }}" &>/dev/null; then
+              echo "Creating secret: $SECRET_NAME"
+              gcloud secrets create "$SECRET_NAME" \
+                --replication-policy="automatic" \
+                --project="${{ vars.GCP_PROJECT_ID }}"
+            fi
+
+            echo "Adding version to: $SECRET_NAME"
+            gcloud secrets versions add "$SECRET_NAME" \
+              --data-file="$FILE_PATH" \
+              --project="${{ vars.GCP_PROJECT_ID }}"
+          }
+
+          add_secret_version "REGISTRATION_SERVER_TLS_CERT" "base-services/registration/pki/server-ca/registration/registration.crt.pem"
+          add_secret_version "REGISTRATION_SERVER_TLS_KEY" "base-services/registration/pki/server-ca/registration/registration.key.pem"
+          add_secret_version "REGISTRATION_CA_CERT" "base-services/registration/pki/registration-ca/ca.crt.pem"
+          add_secret_version "REGISTRATION_CA_KEY" "base-services/registration/pki/registration-ca/ca.key.pem"
+          add_secret_version "REGISTRATION_FACTORY_CA_CERT" "base-services/registration/pki/factory-ca/ca.crt.pem"
+
+          echo "✓ Certificates uploaded successfully"
+
+      - name: Download Remote CA Certificates (Remote Only)
+        if: ${{ inputs.pki_strategy == 'remote' }}
+        run: |
+          echo "Downloading CA certificates from Google Cloud CAS..."
+          mkdir -p temp-certs
+
+          # Use configured CA pool names from Secret Manager
+          SERVER_CA_POOL="${{ env.SERVER_CA_POOL }}"
+          FACTORY_CA_POOL="${{ env.FACTORY_CA_POOL }}"
+
+          echo "Using CA pools: Server=$SERVER_CA_POOL, Factory=$FACTORY_CA_POOL"
+
+          # Download Factory CA from GCP CAS
+          echo "Fetching Factory CA from $FACTORY_CA_POOL..."
+          gcloud privateca roots list \
+            --pool="$FACTORY_CA_POOL" \
+            --location="${{ vars.GCP_REGION }}" \
+            --format="value(pemCaCertificates)" \
+            --limit=1 > temp-certs/factory-ca-pool.crt.pem
+
+          if [ ! -s temp-certs/factory-ca-pool.crt.pem ]; then
+             echo "::error::Could not find CA in pool '$FACTORY_CA_POOL'"
+             exit 1
+          fi
+
+          echo "Factory CA downloaded successfully."
+          echo "Note: Registration CA is managed locally (private key needed for signing) and will be fetched from Secret Manager."
+
+      - name: Issue TLS Certificates via GCP CAS (Remote Only)
+        if: ${{ inputs.pki_strategy == 'remote' }}
+        run: |
+          HOSTNAME="registration.${{ env.BASE_DOMAIN }}"
+          CERT_ID="reg-server-$(date +%s)"
+
+          echo "Generating certificate for: $HOSTNAME"
+          mkdir -p temp-certs
+
+          # Generate key and CSR
+          openssl genpkey -algorithm RSA -out temp-certs/server.key.pem
+
+          openssl req -new \
+            -key temp-certs/server.key.pem \
+            -out temp-certs/server.csr.pem \
+            -subj "/CN=${HOSTNAME}" \
+            -addext "subjectAltName=DNS:${HOSTNAME}"
+
+          # Sign via GCP CAS using configured pool from Secret Manager
+          SERVER_CA_POOL="${{ env.SERVER_CA_POOL }}"
+          echo "Requesting signature from GCP CAS using pool: $SERVER_CA_POOL"
+          gcloud privateca certificates create "$CERT_ID" \
+            --issuer-pool="$SERVER_CA_POOL" \
+            --issuer-location="${{ vars.GCP_REGION }}" \
+            --csr="temp-certs/server.csr.pem" \
+            --cert-output-file="temp-certs/server.crt.pem" \
+            --validity="P30D" \
+            --quiet
+
+          echo "✓ Certificate issued via GCP CAS"
+
+      - name: Upload Certificates to GCP Secret Manager (Remote Only)
+        if: ${{ inputs.pki_strategy == 'remote' }}
+        run: |
+          echo "Uploading certificates to Secret Manager..."
+
+          # Helper function to create secret if it doesn't exist, then add version
+          add_secret_version() {
+            local SECRET_NAME=$1
+            local FILE_PATH=$2
+
+            if ! gcloud secrets describe "$SECRET_NAME" --project="${{ vars.GCP_PROJECT_ID }}" &>/dev/null; then
+              echo "Creating secret: $SECRET_NAME"
+              gcloud secrets create "$SECRET_NAME" \
+                --replication-policy="automatic" \
+                --project="${{ vars.GCP_PROJECT_ID }}"
+            fi
+
+            echo "Adding version to: $SECRET_NAME"
+            gcloud secrets versions add "$SECRET_NAME" \
+              --data-file="$FILE_PATH" \
+              --project="${{ vars.GCP_PROJECT_ID }}"
+          }
+
+          # Server identity certificates
+          add_secret_version "REGISTRATION_SERVER_TLS_CERT" "temp-certs/server.crt.pem"
+          add_secret_version "REGISTRATION_SERVER_TLS_KEY" "temp-certs/server.key.pem"
+
+          # Factory CA certificate (downloaded from GCP CAS)
+          add_secret_version "REGISTRATION_FACTORY_CA_CERT" "temp-certs/factory-ca-pool.crt.pem"
+
+          echo "✓ Certificates uploaded successfully"
+          echo "Note: Registration CA cert and key are managed locally by bootstrap script (in Secret Manager)"
+
+      - name: Fetch Certificates from Secret Manager for Helm
+        uses: google-github-actions/get-secretmanager-secrets@v3
+        with:
+          secrets: |-
+            REGISTRATION_SERVER_TLS_CERT:${{ vars.GCP_PROJECT_ID }}/REGISTRATION_SERVER_TLS_CERT
+            REGISTRATION_SERVER_TLS_KEY:${{ vars.GCP_PROJECT_ID }}/REGISTRATION_SERVER_TLS_KEY
+            REGISTRATION_CA_CERT:${{ vars.GCP_PROJECT_ID }}/REGISTRATION_CA_CERT
+            REGISTRATION_CA_KEY:${{ vars.GCP_PROJECT_ID }}/REGISTRATION_CA_KEY
+            REGISTRATION_FACTORY_CA_CERT:${{ vars.GCP_PROJECT_ID }}/REGISTRATION_FACTORY_CA_CERT
+          export_to_environment: true
+
+      - name: Deploy with Helmfile (Final)
+        uses: helmfile/helmfile-action@v2.0.4
+        with:
+          helm-version: "v3.19.0"
+          helmfile-workdirectory: iac/helm/helmfile.d
+          helmfile-args: >-
+            --file registration.yaml.gotmpl
+            ${{ inputs.helmAction || 'apply' }}
+            --state-values-set pkiStrategy=${{ inputs.pki_strategy }}
+            --state-values-set baseDomain=${{ env.BASE_DOMAIN }}
+            --state-values-set image.tag=${{ github.sha }}
+            ${{ inputs.pki_strategy == 'local' && format('--state-values-set keycloakExternalUrl=https://{0}:8443', steps.get_ip.outputs.keycloak_ip) || '' }}
+            ${{ inputs.pki_strategy == 'local' && format('--state-values-set natsExternalUrl=nats://{0}:4222', steps.get_ip.outputs.nats_ip) || '' }}
+
+      - name: Force Restart Registration Server to load new Certificates
+        if: ${{ inputs.pki_strategy == 'local' }}
+        run: |
+          echo "Restarting Registration Server StatefulSet to pick up new TLS certificates..."
+
+          kubectl rollout restart deployment,statefulset -n base-services -l app.kubernetes.io/name=registration-server
+
+          kubectl rollout status deployment,statefulset -n base-services -l app.kubernetes.io/name=registration-server --timeout=300s
+
+
+      - name: Create REGISTRATION_HOSTNAME secret
+        run: |
+          echo "Waiting for Registration server external IP..."
+          for i in {1..30}; do
+            IP=$(kubectl get svc registration-server -n base-services -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+            if [[ -n "$IP" ]]; then
+              echo "Registration server IP found: $IP"
+              if ! gcloud secrets describe "REGISTRATION_HOSTNAME" --project="${{ vars.GCP_PROJECT_ID }}" &> /dev/null; then
+                echo "Create secret 'REGISTRATION_HOSTNAME'..."
+                gcloud secrets create "REGISTRATION_HOSTNAME" --replication-policy="automatic" --project="${{ vars.GCP_PROJECT_ID }}"
+              fi
+              echo "Add new version to secret 'REGISTRATION_HOSTNAME'..."
+              echo -n "$IP" | gcloud secrets versions add "REGISTRATION_HOSTNAME" --data-file=- --project="${{ vars.GCP_PROJECT_ID }}"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::Registration server  LoadBalancer IP not found after 5 minutes."
+          exit 1
