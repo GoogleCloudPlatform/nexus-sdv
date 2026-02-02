@@ -1,0 +1,79 @@
+name: Deploy Platform
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment"
+        required: true
+      pki_strategy:
+        description: "Passes on user decision for the platform's PKI setup"
+        type: choice
+        options:
+          - local
+          - remote
+        default: "local"
+      base_domain:
+        description: "Base Domain (required if pki_strategy is 'remote')"
+        type: string
+        required: false
+  push:
+    paths:
+      - ".github/workflows/bootstrap-platform.yml"
+
+jobs:
+  build-push-nats-auth-callout:
+    uses: ./.github/workflows/build-push-nats-auth-callout.yml
+    with:
+      environment: ${{ inputs.environment }}
+    secrets: inherit
+
+  build-push-deploy-data-api:
+    uses: ./.github/workflows/build-push-deploy-data-api.yml
+    with:
+      environment: ${{ inputs.environment }}
+    secrets: inherit
+
+  deploy-external-dns:
+    if: ${{ inputs.pki_strategy == 'remote' }}
+    uses: ./.github/workflows/deploy-external-dns.yml
+    with:
+      environment: ${{ inputs.environment }}
+    secrets: inherit
+
+  deploy-keycloak:
+    uses: ./.github/workflows/deploy-keycloak.yml
+    with:
+      environment: ${{ inputs.environment }}
+      pki_strategy: ${{ inputs.pki_strategy }}
+    secrets: inherit
+
+  deploy-nats:
+    needs: deploy-keycloak
+    uses: ./.github/workflows/deploy-nats.yml
+    with:
+      environment: ${{ inputs.environment }}
+      pki_strategy: ${{ inputs.pki_strategy }}
+    secrets: inherit
+
+  deploy-registration:
+    uses: ./.github/workflows/build-push-deploy-registration.yml
+    needs: [deploy-keycloak, deploy-nats]
+    with:
+      environment: ${{ inputs.environment }}
+      pki_strategy: ${{ inputs.pki_strategy }}
+    secrets: inherit
+
+  deploy-nats-auth-callout: # TODO: remove nats dependency
+    uses: ./.github/workflows/deploy-nats-auth-callout.yml
+    needs: [deploy-keycloak, deploy-nats]
+    with:
+      environment: ${{ inputs.environment }}
+    secrets: inherit
+
+  deploy-nats-bigtable-connector: # TODO: remove nats dependency
+    uses: ./.github/workflows/deploy-nats-bigtable-connector.yml
+    needs: deploy-nats
+    with:
+      environment: ${{ inputs.environment }}
+    secrets: inherit

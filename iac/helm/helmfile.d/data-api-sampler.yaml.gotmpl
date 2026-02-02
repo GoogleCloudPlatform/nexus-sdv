@@ -1,0 +1,11 @@
+releases:
+  - name: data-api-sampler
+    namespace: sample-services
+    createNamespace: true
+    chart: ../data-api-sampler
+    values:
+      - image:
+          repository: {{ requiredEnv "IMAGE_REPO" }}/data-api-sampler
+          tag: 'latest'
+        dataApi:
+          url: {{ requiredEnv "DATA_API_URL" }}

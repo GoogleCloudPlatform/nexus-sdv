@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "data-api.fullname" . }}
+  labels:
+    {{- include "data-api.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "data-api.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "data-api.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: data-api-ksa
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: grpc
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: GCP_PROJECT
+              value: {{ .Values.gcp.projectId | quote }}
+            - name: BT_INSTANCE
+              value: {{ .Values.gcp.bigtableInstance | quote }}
+            - name: BT_TABLE
+              value: {{ .Values.gcp.bigtableTable | quote }}
+            - name: LOG_LEVEL
+              value: {{ .Values.env.logLevel | quote }}
+            - name: GRPC_ADDR
+              value: {{ .Values.env.grpcAddr | quote }}

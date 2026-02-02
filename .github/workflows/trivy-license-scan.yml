@@ -1,0 +1,67 @@
+name: License Compliance Scan
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  license-scan:
+    name: Trivy License Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          find . -name "requirements.txt" -exec pip install --no-deps -r {} +
+          # This tells us where site-packages is so we can verify if needed
+          python -c "import site; print(site.getsitepackages())"
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
+      - run: find . -name "go.mod" -execdir go mod download \;
+
+      - name: Run Trivy License Scan Full Report
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scanners: 'license'
+          severity: 'UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL'
+          list-all-pkgs: true
+          exit-code: 0
+          trivy-config: 'trivy.yaml' # contains 'license: full: true'
+          skip-dirs: 'sample-services/data-api-sampler'
+
+      - name: Run Trivy License Scan - Fail only HIGH & CRITICAL Severity
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scanners: 'license'
+          severity: 'HIGH,CRITICAL'
+          list-all-pkgs: true
+          exit-code: 1
+          trivy-config: 'trivy.yaml' # contains 'license: full: true'
+          skip-dirs: 'sample-services/data-api-sampler'
+          
+      - name: Run Trivy Vulnerability Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scanners: 'vuln' # Changed from 'license' to 'vuln'
+          severity: 'HIGH,CRITICAL'
+          exit-code: 1 # Fail the build if vulnerabilities are found
+          format: 'table'
+

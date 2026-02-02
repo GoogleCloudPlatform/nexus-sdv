@@ -1,0 +1,188 @@
+name: Build and Deploy MCP Servers
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment (sandbox, dev, ...)"
+        required: true
+        default: "sandbox"
+
+  workflow_call:
+    inputs:
+      environment:
+        type: string
+        required: true
+        default: "sandbox"
+
+  push:
+    paths:
+      - "sample-services/mcp-servers/**"
+      - ".github/workflows/deploy-mcp-servers.yml"
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  # Disable Docker build summary to reduce GitHub Actions artifacts storage and log verbosity
+  # Build summaries include metrics, cache stats, and warnings but aren't needed for internal builds
+  DOCKER_BUILD_NO_SUMMARY: true
+  GAR_REPOSITORY: "artifact-registry"
+  WORKLOAD_IDENTITY_PROVIDER: "projects/${{ vars.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/${{ vars.GCP_WORKLOAD_IDENTITY_POOL_ID }}/providers/${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER_ID }}"
+
+jobs:
+  deploy-repairshop:
+    name: Deploy the Repairshop MCP Server
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    environment: ${{ inputs.environment || 'sandbox' }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Configure authentication with access_token format for gcloud CLI compatibility
+      # Workload Identity Federation uses OIDC tokens from GitHub to authenticate to GCP.
+      # By default, the auth action provides an ID token, but gcloud CLI commands
+      # (configure-docker, run deploy, secrets, etc.) require an OAuth 2.0 access token
+      # with the full permissions of the service account to function correctly.
+      - name: Configure Google Cloud Auth
+        uses: google-github-actions/auth@v2
+        with:
+          token_format: access_token
+          workload_identity_provider: projects/${{ vars.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/${{ vars.GCP_WORKLOAD_IDENTITY_POOL_ID }}/providers/${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER_ID }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - name: Import secrets
+        uses: google-github-actions/get-secretmanager-secrets@v3
+        with:
+          secrets: |-
+            IMAGE_REPO:${{ vars.GCP_PROJECT_ID }}/IMAGE_REPO
+          export_to_environment: true
+
+      - name: "Docker auth"
+        run: |-
+          gcloud auth configure-docker ${{ vars.GCP_REGION }}-docker.pkg.dev --quiet
+
+      - name: Build and Push Repairshop Server
+        uses: docker/build-push-action@v6
+        with:
+          push: true
+          tags: ${{ env.IMAGE_REPO }}/repairshop:latest
+          file: ./sample-services/mcp-servers/repairshop/Dockerfile
+          context: ./sample-services/mcp-servers/repairshop
+          # Disable provenance and SBOM attestations to reduce image size and improve compatibility
+          # Provenance: Build metadata about the image origin (can cause registry compatibility issues)
+          # SBOM: Software Bill of Materials listing all dependencies (not required for internal images)
+          # These attestations can also consume GitHub Actions artifacts storage (10GB limit per workflow run)
+          provenance: false
+          sbom: false
+
+      - name: Deploy Repairshop Server
+        run: |-
+          gcloud run deploy repairshop-mcp-server \
+          --image ${{ env.IMAGE_REPO }}/repairshop:latest \
+          --region ${{ vars.GCP_REGION }} \
+          --port 8080
+
+  deploy-remote-lock:
+    name: Deploy the Remote Lock MCP Server
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    environment: ${{ inputs.environment || 'sandbox' }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Configure authentication with access_token format for gcloud CLI compatibility
+      # Workload Identity Federation uses OIDC tokens from GitHub to authenticate to GCP.
+      # By default, the auth action provides an ID token, but gcloud CLI commands
+      # (configure-docker, run deploy, secrets, etc.) require an OAuth 2.0 access token
+      # with the full permissions of the service account to function correctly.
+      - name: Configure Google Cloud Auth
+        uses: google-github-actions/auth@v2
+        with:
+          token_format: access_token
+          workload_identity_provider: projects/${{ vars.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/${{ vars.GCP_WORKLOAD_IDENTITY_POOL_ID }}/providers/${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER_ID }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - name: Import secrets
+        uses: google-github-actions/get-secretmanager-secrets@v3
+        with:
+          secrets: |-
+            IMAGE_REPO:${{ vars.GCP_PROJECT_ID }}/IMAGE_REPO
+            REMOTE_LOCK_SERVICE_URL:${{ vars.GCP_PROJECT_ID }}/REMOTE_LOCK_SERVICE_URL
+          export_to_environment: true
+
+      - name: "Docker auth"
+        run: |-
+          gcloud auth configure-docker ${{ vars.GCP_REGION }}-docker.pkg.dev --quiet
+
+      - name: Build and Push Remote Lock Server
+        uses: docker/build-push-action@v6
+        with:
+          push: true
+          tags: ${{ env.IMAGE_REPO }}/remote-lock-mcp-server:latest
+          file: ./sample-services/mcp-servers/remote-lock/Dockerfile
+          context: ./sample-services/mcp-servers/remote-lock
+          # Disable provenance and SBOM attestations to reduce image size and improve compatibility
+          # Provenance: Build metadata about the image origin (can cause registry compatibility issues)
+          # SBOM: Software Bill of Materials listing all dependencies (not required for internal images)
+          # These attestations can also consume GitHub Actions artifacts storage (10GB limit per workflow run)
+          provenance: false
+          sbom: false
+
+      - name: Deploy Remote Lock Server
+        run: |-
+          gcloud run deploy remote-lock-mcp-server \
+          --image ${{ env.IMAGE_REPO }}/remote-lock-mcp-server:latest \
+          --region ${{ vars.GCP_REGION }} \
+          --set-env-vars [REMOTE_LOCK_SERVICE_URL=${{ env.REMOTE_LOCK_SERVICE_URL }}] \
+          --port 8080
+
+  deploy-telemetry:
+    name: Deploy the Telemetry MCP Server
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    environment: ${{ inputs.environment || 'sandbox' }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Configure authentication with access_token format for gcloud CLI compatibility
+      # Workload Identity Federation uses OIDC tokens from GitHub to authenticate to GCP.
+      # By default, the auth action provides an ID token, but gcloud CLI commands
+      # (configure-docker, run deploy, secrets versions add, etc.) require an OAuth 2.0 access token
+      # with the full permissions of the service account to function correctly.
+      - name: Configure Google Cloud Auth
+        uses: google-github-actions/auth@v2
+        with:
+          token_format: access_token
+          workload_identity_provider: projects/${{ vars.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/${{ vars.GCP_WORKLOAD_IDENTITY_POOL_ID }}/providers/${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER_ID }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - name: Ensure telemetry tool secret exists
+        run: |
+          gcloud secrets create telemetry-mcp-tools-yaml \
+            --replication-policy="automatic" \
+            || true
+
+      - name: "Docker auth"
+        run: |-
+          gcloud auth configure-docker ${{ vars.GCP_REGION }}-docker.pkg.dev --quiet
+
+      - name: Upload Telemetry Tools Config to Secret Manager
+        run: |-
+          cat ./sample-services/mcp-servers/telemetry/tools.yaml | \
+          sed "s|__GCP_PROJECT_ID__|${{ vars.GCP_PROJECT_ID }}|g" | \
+          gcloud secrets versions add telemetry-mcp-tools-yaml --data-file=-
+
+      - name: Deploy Telemetry Server
+        run: |-
+          gcloud run deploy telemetry-mcp-server \
+          --image us-central1-docker.pkg.dev/database-toolbox/toolbox/toolbox:latest \
+          --region ${{ vars.GCP_REGION }} \
+          --service-account ${{ vars.GCP_SERVICE_ACCOUNT }} \
+          --set-secrets "/app/tools.yaml=telemetry-mcp-tools-yaml:latest" \
+          --args="--tools-file=/app/tools.yaml","--address=0.0.0.0","--port=8080" \
+          --port 8080

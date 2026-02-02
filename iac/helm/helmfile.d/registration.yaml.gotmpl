@@ -1,0 +1,41 @@
+releases:
+  - name: registration-server
+    namespace: base-services
+    createNamespace: true
+    chart: ../registration
+    values:
+      - ../registration/values.yaml
+      - image:
+          repository: '{{ requiredEnv "IMAGE_REPO" }}'
+          tag: '{{ .StateValues.image.tag | default "latest" }}'
+        pkiStrategy: {{ .StateValues.pkiStrategy | default "local" }}
+        baseDomain: '{{ .StateValues.baseDomain | default "" }}'
+        gcpProjectId: '{{ env "GCP_PROJECT_ID" }}'
+        urls:
+          {{ if eq (.StateValues.pkiStrategy | default "local") "remote" }}
+          keycloak: 'https://keycloak.{{ .StateValues.baseDomain }}:8443'
+          nats: 'nats://nats.{{ .StateValues.baseDomain }}:4222'
+          {{ else }}
+          # Local mode: Use external IPs if provided, otherwise use internal service names
+          {{ if hasKey .StateValues "keycloakExternalUrl" }}
+          keycloak: '{{ .StateValues.keycloakExternalUrl }}'
+          {{ else }}
+          keycloak: 'https://keycloak:8443'
+          {{ end }}
+          {{ if hasKey .StateValues "natsExternalUrl" }}
+          nats: '{{ .StateValues.natsExternalUrl }}'
+          {{ else }}
+          nats: 'nats://nats:4222'
+          {{ end }}
+          {{ end }}
+        certificates:
+          serverCert: |
+{{ requiredEnv "REGISTRATION_SERVER_TLS_CERT" | indent 12 }}
+          serverKey: |
+{{ requiredEnv "REGISTRATION_SERVER_TLS_KEY" | indent 12 }}
+          caCert: |
+{{ requiredEnv "REGISTRATION_CA_CERT" | indent 12 }}
+          caKey: |
+{{ requiredEnv "REGISTRATION_CA_KEY" | indent 12 }}
+          factoryCaCert: |
+{{ requiredEnv "REGISTRATION_FACTORY_CA_CERT" | indent 12 }}

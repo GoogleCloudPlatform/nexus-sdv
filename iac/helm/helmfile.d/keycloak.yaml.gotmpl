@@ -1,0 +1,29 @@
+releases:
+  - name: keycloak
+    namespace: base-services
+    createNamespace: true
+    chart: '../keycloak'
+    labels:
+      app: keycloak
+    installed: true
+    values:
+      - ../keycloak/values.yaml
+    set:
+      - name: pkiStrategy
+        value: {{ .StateValues.pkiStrategy | default "local" }}
+      - name: baseDomain
+        value: {{ .StateValues.baseDomain | default "" }}
+      - name: keycloak.tls.cert
+        value: '{{ requiredEnv "KEYCLOAK_TLS_CRT" }}'
+      - name: keycloak.tls.key
+        value: '{{ requiredEnv "KEYCLOAK_TLS_KEY" }}'
+      - name: keycloak.adminPassword
+        value: '{{ requiredEnv "KEYCLOAK_ADMIN_PASSWORD" }}'
+      - name: database.cloudsqlproxy.instanceConnectionName
+        value: '{{ requiredEnv "KEYCLOAK_INSTANCE_CON_SQL_PROXY" }}'
+      - name: database.gcpServiceAccount
+        value: '{{ requiredEnv "KEYCLOAK_GCP_SERVICE_ACCOUNT" }}'
+      - name: database.password
+        value: '{{ requiredEnv "KEYCLOAK_DB_PASSWORD" }}'
+      - name: environment
+        value: '{{ env "ENVIRONMENT" | default "dev" }}'

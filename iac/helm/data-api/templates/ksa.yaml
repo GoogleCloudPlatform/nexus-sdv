@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: data-api-ksa
+  labels:
+    {{- include "data-api.labels" . | nindent 4 }}
+  annotations:
+    iam.gke.io/gcp-service-account: {{ .Values.gcp.serviceAccount | quote }}

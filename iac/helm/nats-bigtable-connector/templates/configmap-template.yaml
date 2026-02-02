@@ -1,0 +1,88 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nats-bigtable-connector-config
+  namespace: base-services
+data:
+  config.yaml: |
+    logger:
+      level: DEBUG
+      format: logfmt
+      add_timestamp: true
+      static_fields:
+        '@service': wombat
+
+    input:
+      label: "nats_telemetry_cluster"
+      nats:
+        urls: ["nats://${NATS_USER}:${NATS_PASSWORD}@${NATS_HOST}"]
+        subject: telemetry.>
+        # Subscribe to all vehicle telemetry (telemetry.<VIN>.<sensor>)
+        # Credentials are injected via environment variables from Kubernetes secret
+        auto_replay_nacks: true
+        send_ack: true
+
+    pipeline:
+      processors:
+        - try:
+          - protobuf:
+              operator: to_json
+              message: telemetry.TelemetryMessage
+              use_proto_names: true
+              import_paths: [/proto]
+
+          - log:
+              level: DEBUG
+              message: "Message before processing"
+              fields_mapping: |
+                root = this
+
+          - mapping: |
+              root = this.sensor_data.map_each(reading -> {
+                "device_id": this.device_id,
+                "timestamp_str": reading.timestamp.ts_format("2006-01-02T15:04:05.000000000Z07:00"),
+                "family": match reading.data_type {
+                  "DYNAMIC" => "dynamic",
+                  1 => "dynamic",
+                  "STATIC" => "static",
+                  0 => "static",
+                  null => "static",
+                  _ => "static"
+                },
+                "sensor": reading.sensor,
+                "value": reading.value,
+              })
+
+          - unarchive:
+              format: json_array
+
+        - catch:
+          - log:
+              level: ERROR
+              message: "Failed to process message. Dropping it."
+              fields:
+                error: 'this.benthos_error'
+          - mapping: root = deleted()
+
+        - log:
+            level: DEBUG
+            message: "Message timestamp before bigtable"
+            fields_mapping: |
+              root.timestamp = this.timestamp_str
+
+    output:
+      label: "bigtable_output"
+      gcp_bigtable:
+        max_in_flight: 64
+        project: {{ .Values.gcp.projectId | quote }}
+        instance: "bigtable-production-storage"
+        table: "telemetry"
+
+        key: 'this.device_id + "#" + this.timestamp_str'
+
+        data: |
+          root = {
+            (this.family): {
+              (this.sensor): this.value
+            }
+          }

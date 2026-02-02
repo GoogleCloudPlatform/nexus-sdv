@@ -1,0 +1,40 @@
+@startuml Registration
+participant Factory
+participant "Factory CA" as Factory_CA
+participant Car
+participant "Registration Server" as Registration_Server
+participant "Registration CA" as Registration_CA
+participant Keycloak
+participant NATS
+participant "NATS Auth Callout" as NATS_Auth_Callout
+
+group Factory
+Factory -> Factory: Generate client key and\nCertificate Signing Request
+Factory -> Factory_CA: Client CSR
+Factory_CA -> Factory: Signed factory certificate
+Factory -> Car: Flash key, CSR and certificate
+end
+
+group Registration
+Car -> Registration_Server: Client CSR\n+\nfactory certificate
+Registration_Server -> Registration_Server: Check factory certificate\nis issued by trusted factory CA
+Registration_Server -> Registration_Server: Check CSR and certificate subject match\n(Authenticating the same client)
+Registration_Server -> Registration_CA: Client CSR
+Registration_CA -> Registration_Server: Signed operational certificate
+Registration_Server -> Car: Operational certificate\n+\nURLs (Keycloak, NATS)
+end
+
+group Keycloak Registration
+Car -> Keycloak: Operational certificate
+Keycloak -> Keycloak: Check certificate is issued\nby registration CA
+Keycloak -> Car: Access Token (JWT)
+end
+
+group Data Sending
+Car -> NATS: Access Token\n+\nData
+NATS -> NATS_Auth_Callout: Access Token
+NATS_Auth_Callout -> NATS_Auth_Callout: Check token is issued\nby keycloak server
+NATS_Auth_Callout -> NATS: NATS token (NKey)
+NATS -> : Process data
+end
+@enduml

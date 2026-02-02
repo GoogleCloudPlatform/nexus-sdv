@@ -1,0 +1,19 @@
+releases:
+  - name: data-api
+    namespace: base-services
+    chart: ../data-api
+    labels:
+      app: data-api
+    values:
+      - image:
+          repository: '{{ requiredEnv "IMAGE_REPO" }}/data-api'
+          tag: 'latest'
+      - gcp:
+          projectId: '{{ requiredEnv "GCP_PROJECT_ID" }}'
+          serviceAccount: '{{ requiredEnv "DATA_API_BIGTABLE_CONNECTOR_GCP_SERVICE_ACCOUNT" }}'
+          bigtableInstance: "bigtable-production-storage"
+          bigtableTable: "telemetry"
+      - env:
+          logLevel: "debug"
+      - service:
+          loadBalancerSourceRanges: []

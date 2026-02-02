@@ -1,0 +1,63 @@
+name: Test base services
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment (sandbox, dev, ...)"
+        required: true
+        default: "sandbox"
+
+  push:
+    paths:
+      - "base-services/**"
+      - ".github/workflows/test-base-services.yml"
+
+jobs:
+  test-data-api:
+    name: Test Data API Service
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+
+    defaults:
+      run:
+        working-directory: ./base-services/data-api
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v3
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.0"
+
+      - name: Install protoc-gen-go
+        run: |-
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Install Dependencies
+        run: make deps
+
+      - name: Compile proto files
+        run: make proto
+
+      - name: Build and start bigtable emulator and testable Data API
+        run: docker compose up -d
+
+      - name: Run integration tests
+        run: make test
+
+      - name: Stop services
+        if: always()
+        run: docker compose down
