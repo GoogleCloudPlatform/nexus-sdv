@@ -1,0 +1,15 @@
+releases:
+  - name: nats-bigtable-connector
+    namespace: base-services
+    chart: ../nats-bigtable-connector
+    labels:
+      app: nats-bigtable-connector
+    values:
+      - gcp:
+          projectId: '{{ requiredEnv "GCP_PROJECT_ID" }}'
+          serviceAccount: '{{ requiredEnv "BIGTABLE_CONNECTOR_GCP_SERVICE_ACCOUNT" }}'
+        nats:
+          # Credentials provided as separate values for secure secret management
+          user: '{{ env "NATS_CONNECTOR_USER" | default "connector" }}'
+          password: '{{ requiredEnv "NATS_CONNECTOR_PASSWORD" }}'
+          host: '{{ env "NATS_HOST" | default "nats.base-services.svc.cluster.local:4222" }}'

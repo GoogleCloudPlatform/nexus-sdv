@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: nats-bigtable-connector-ksa
+  namespace: base-services
+  annotations:
+    iam.gke.io/gcp-service-account: {{ .Values.gcp.serviceAccount | quote }}

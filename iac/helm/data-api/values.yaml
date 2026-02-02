@@ -1,0 +1,19 @@
+image:
+  repository: ""
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+service:
+  type: LoadBalancer
+  port: 8080
+  loadBalancerSourceRanges: []
+
+gcp:
+  projectId: ""
+  serviceAccount: ""
+  bigtableInstance: "bigtable-production-storage"
+  bigtableTable: "telemetry"
+
+env:
+  logLevel: "debug"
+  grpcAddr: "0.0.0.0:8080"

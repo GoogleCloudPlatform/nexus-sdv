@@ -1,0 +1,501 @@
+name: Deploy Keycloak service
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment (sandbox, dev, ...)"
+        required: true
+      pki_strategy:
+        type: string
+        default: "local"
+        description: "Passes on user decision for the platform's PKI setup"
+      helmAction:
+        type: choice
+        description: "Sets the action for the helmfile plugin: 'sync' forces an update and 'apply' checks for differences"
+        required: false
+        default: "sync"
+        options:
+          - apply
+          - sync
+
+  workflow_call:
+    inputs:
+      environment:
+        type: string
+        required: true
+      pki_strategy:
+        type: string
+        default: "local"
+        description: "Passes on user decision for the platform's PKI setup"
+      helmAction:
+        type: string
+        description: "Sets the action for the helmfile plugin: 'sync' forces an update and 'apply' checks for differences"
+        required: false
+        default: "sync"
+
+  push:
+    paths:
+      - "iac/helm/keycloak"
+      - ".github/workflows/deploy-keycloak.yml"
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  WORKLOAD_IDENTITY_PROVIDER: "projects/${{ vars.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/${{ vars.GCP_WORKLOAD_IDENTITY_POOL_ID }}/providers/${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER_ID }}"
+  GKE_CLUSTER_NAME: "${{ inputs.environment || 'sandbox' }}-gke"
+
+jobs:
+  deploy-keycloak:
+    name: Deploy keycloak
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    environment: ${{ inputs.environment || 'sandbox' }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Configure authentication with access_token format for gcloud CLI compatibility
+      # Workload Identity Federation uses OIDC tokens from GitHub to authenticate to GCP.
+      # By default, the auth action provides an ID token, but gcloud CLI commands
+      # (get-credentials, dns record-sets, secrets, iam, etc.) require an OAuth 2.0 access token
+      # with the full permissions of the service account to function correctly.
+      - name: Configure Google Cloud Auth
+        uses: google-github-actions/auth@v2
+        with:
+          token_format: access_token
+          workload_identity_provider: projects/${{ vars.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/${{ vars.GCP_WORKLOAD_IDENTITY_POOL_ID }}/providers/${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER_ID }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - name: Import general secrets for keycloak
+        uses: google-github-actions/get-secretmanager-secrets@v3
+        with:
+          secrets: |-
+            KEYCLOAK_ADMIN_PASSWORD:${{ vars.GCP_PROJECT_ID }}/KEYCLOAK_ADMIN_PASSWORD
+            KEYCLOAK_INSTANCE_CON_SQL_PROXY:${{ vars.GCP_PROJECT_ID }}/KEYCLOAK_INSTANCE_CON_SQL_PROXY
+            KEYCLOAK_GCP_SERVICE_ACCOUNT:${{ vars.GCP_PROJECT_ID }}/KEYCLOAK_GCP_SERVICE_ACCOUNT
+            KEYCLOAK_DB_PASSWORD:${{ vars.GCP_PROJECT_ID }}/KEYCLOAK_DB_PASSWORD
+
+            IMAGE_REPO:${{ vars.GCP_PROJECT_ID }}/IMAGE_REPO
+          export_to_environment: true
+
+      - name: Import additional secrets for keycloak based on local PKI setup
+        if: ${{ inputs.pki_strategy == 'local' }}
+        uses: google-github-actions/get-secretmanager-secrets@v3
+        with:
+          secrets: |-
+            KEYCLOAK_TLS_CRT:${{ vars.GCP_PROJECT_ID }}/KEYCLOAK_TLS_CRT
+            KEYCLOAK_TLS_KEY:${{ vars.GCP_PROJECT_ID }}/KEYCLOAK_TLS_KEY
+          export_to_environment: true
+
+      - name: Import Base Domain and CA Pool Configuration (Remote Only)
+        if: ${{ inputs.pki_strategy == 'remote' }}
+        uses: google-github-actions/get-secretmanager-secrets@v3
+        with:
+          secrets: |-
+            BASE_DOMAIN:${{ vars.GCP_PROJECT_ID }}/BASE_DOMAIN
+            SERVER_CA_POOL:${{ vars.GCP_PROJECT_ID }}/SERVER_CA_POOL
+            SERVER_CA:${{ vars.GCP_PROJECT_ID }}/SERVER_CA
+          export_to_environment: true
+
+      - name: Set BASE_DOMAIN for Local PKI (empty for IP-based)
+        if: ${{ inputs.pki_strategy == 'local' }}
+        run: echo "BASE_DOMAIN=" >> $GITHUB_ENV
+
+      - name: Set up Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+
+      - name: Configure Kubernetes Context
+        run: |
+          gcloud container clusters get-credentials ${{ env.GKE_CLUSTER_NAME }} --dns-endpoint --region=${{ vars.GCP_REGION }} --project=${{ vars.GCP_PROJECT_ID }}
+          gcloud components install gke-gcloud-auth-plugin --quiet
+
+      - name: Download CA Certificates from Secret Manager
+        run: |
+          echo "Downloading CA certificates from Secret Manager..."
+          mkdir -p temp-certs
+
+          # Download Registration CA (used for vehicle operational cert validation - both modes)
+          echo "Fetching Registration CA from Secret Manager..."
+          gcloud secrets versions access latest --secret="REGISTRATION_CA_CERT" --project="${{ vars.GCP_PROJECT_ID }}" > temp-certs/registration-ca.crt.pem
+
+          if [ ! -s temp-certs/registration-ca.crt.pem ]; then
+              echo "::error::Could not fetch Registration CA from Secret Manager"
+              exit 1
+          fi
+
+          # Download Server CA based on PKI strategy
+          if [[ "${{ inputs.pki_strategy }}" == "local" ]]; then
+            echo "LOCAL mode: Fetching self-signed Server CA from Secret Manager..."
+            gcloud secrets versions access latest --secret="SERVER_CA_CERT" --project="${{ vars.GCP_PROJECT_ID }}" > temp-certs/server-ca.crt.pem
+
+            if [ ! -s temp-certs/server-ca.crt.pem ]; then
+                echo "::error::Could not fetch Server CA from Secret Manager"
+                exit 1
+            fi
+            echo "✓ Self-signed Server CA fetched"
+          else
+            echo "REMOTE mode: Fetching Server CA from Google CAS..."
+            gcloud privateca roots list \
+              --pool="${{ env.SERVER_CA_POOL }}" \
+              --location="${{ vars.GCP_REGION }}" \
+              --format="value(pemCaCertificates)" \
+              --project="${{ vars.GCP_PROJECT_ID }}" \
+              --limit=1 > temp-certs/server-ca.crt.pem
+
+            if [ ! -s temp-certs/server-ca.crt.pem ]; then
+                echo "::error::Could not fetch Server CA from GCP CAS"
+                exit 1
+            fi
+            echo "✓ Server CA fetched from GCP CAS"
+          fi
+
+          echo "✓ All CA certificates fetched successfully"
+
+      - name: Prepare Keycloak chart with certificates
+        run: |
+          # Create the target directory if it doesn't exist
+          mkdir -p iac/helm/keycloak/files
+
+          # Copy CA certificates from Secret Manager (both LOCAL and REMOTE modes)
+          echo "Copying CA certificates into Helm chart..."
+          cp temp-certs/server-ca.crt.pem iac/helm/keycloak/files/server-ca.crt.pem
+          cp temp-certs/registration-ca.crt.pem iac/helm/keycloak/files/registration-ca.crt.pem
+
+          echo "✓ Certificates copied into Helm chart (from Secret Manager)"
+
+      - name: Deploy only the Keycloak Service for the local PKI setup
+        if: ${{ inputs.pki_strategy == 'local' }}
+        uses: helmfile/helmfile-action@v2.0.4
+        env:
+          BASE_DOMAIN: ""
+          ENVIRONMENT: ${{ inputs.environment || 'sandbox' }}
+          KEYCLOAK_TLS_CRT: ${{ env.KEYCLOAK_TLS_CRT }}
+          KEYCLOAK_TLS_KEY: ${{ env.KEYCLOAK_TLS_KEY }}
+          KEYCLOAK_ADMIN_PASSWORD: ${{ env.KEYCLOAK_ADMIN_PASSWORD }}
+          KEYCLOAK_INSTANCE_CON_SQL_PROXY: ${{ env.KEYCLOAK_INSTANCE_CON_SQL_PROXY }}
+          KEYCLOAK_GCP_SERVICE_ACCOUNT: ${{ env.KEYCLOAK_GCP_SERVICE_ACCOUNT }}
+          KEYCLOAK_DB_PASSWORD: ${{ env.KEYCLOAK_DB_PASSWORD }}
+        with:
+          helm-version: "v3.19.0"
+          helmfile-workdirectory: iac/helm/helmfile.d
+          helmfile-args: --file keycloak.yaml.gotmpl ${{ inputs.helmAction || 'apply' }} --state-values-set pkiStrategy=local --state-values-set baseDomain=""
+
+      - name: Get Keycloak service IP for local PKI setup
+        if: ${{ inputs.pki_strategy == 'local' }}
+        id: get_ip
+        run: |
+          echo "Waiting for Keycloak external IP..."
+          for i in {1..30}; do
+            IP=$(kubectl get svc keycloak -n base-services -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+            if [[ -n "$IP" ]]; then
+              echo "Keycloak IP found: $IP"
+              echo "ip=$IP" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::Keycloak LoadBalancer IP not found after 5 minutes."
+          exit 1
+
+      - name: Download Server CA from Secret Manager for local PKI setup
+        if: ${{ inputs.pki_strategy == 'local' }}
+        run: |
+          echo "Downloading Server CA from Secret Manager..."
+          mkdir -p temp-pki
+
+          # Download Server CA cert and key (needed for signing Keycloak certificate)
+          gcloud secrets versions access latest --secret="SERVER_CA_CERT" --project="${{ vars.GCP_PROJECT_ID }}" > temp-pki/server-ca-cert.pem
+          gcloud secrets versions access latest --secret="SERVER_CA_KEY" --project="${{ vars.GCP_PROJECT_ID }}" > temp-pki/server-ca-key.pem
+
+          # Create PKI directory structure and copy Server CA cert and key
+          # (PKI dir is in .gitignore, so we must create it)
+          mkdir -p base-services/registration/pki/server-ca
+          cp temp-pki/server-ca-cert.pem base-services/registration/pki/server-ca/ca.crt.pem
+          cp temp-pki/server-ca-key.pem base-services/registration/pki/server-ca/ca.key.pem
+
+          echo "✓ Server CA downloaded and ready for signing"
+
+      - name: Update certificate config and generate new cert for local PKI setup
+        if: ${{ inputs.pki_strategy == 'local' }}
+        working-directory: base-services/registration/pki
+        run: |
+          # Create directory structure for keycloak cert
+          mkdir -p server-ca/keycloak
+
+          # Create keycloak.conf with the real IP for certificate extensions
+          cat > server-ca/keycloak/keycloak.conf <<EOF
+          [alt_names]
+          subjectAltName = IP:${{ steps.get_ip.outputs.ip }}
+          EOF
+
+          # Generate a new private key
+          openssl genpkey -algorithm RSA -out server-ca/keycloak/keycloak.key.pem
+
+          # Generate the CSR with SAN (Subject Alternative Name) for the IP
+          openssl req -new -key server-ca/keycloak/keycloak.key.pem \
+            -out server-ca/keycloak/keycloak.csr.pem \
+            -subj "/CN=${{ steps.get_ip.outputs.ip }}" \
+            -addext "subjectAltName=IP:${{ steps.get_ip.outputs.ip }}"
+
+          # Sign the CSR with the Server CA to create the final certificate (valid for 365 days)
+          openssl x509 -req -days 365 \
+            -in server-ca/keycloak/keycloak.csr.pem \
+            -CA server-ca/ca.crt.pem \
+            -CAkey server-ca/ca.key.pem \
+            -CAcreateserial \
+            -out server-ca/keycloak/keycloak.crt.pem \
+            -extfile server-ca/keycloak/keycloak.conf \
+            -extensions alt_names
+
+      - name: Update GCP Secrets with new certificates for local PKI setup
+        if: ${{ inputs.pki_strategy == 'local' }}
+        run: |
+          # Create secrets if they don't exist
+          if ! gcloud secrets describe KEYCLOAK_TLS_CRT --project="${{ vars.GCP_PROJECT_ID }}" &>/dev/null; then
+            echo "Creating KEYCLOAK_TLS_CRT secret..."
+            gcloud secrets create KEYCLOAK_TLS_CRT --replication-policy="automatic" --project="${{ vars.GCP_PROJECT_ID }}"
+          fi
+          if ! gcloud secrets describe KEYCLOAK_TLS_KEY --project="${{ vars.GCP_PROJECT_ID }}" &>/dev/null; then
+            echo "Creating KEYCLOAK_TLS_KEY secret..."
+            gcloud secrets create KEYCLOAK_TLS_KEY --replication-policy="automatic" --project="${{ vars.GCP_PROJECT_ID }}"
+          fi
+
+          # Add new versions
+          gcloud secrets versions add KEYCLOAK_TLS_CRT --data-file="base-services/registration/pki/server-ca/keycloak/keycloak.crt.pem" --project="${{ vars.GCP_PROJECT_ID }}"
+          gcloud secrets versions add KEYCLOAK_TLS_KEY --data-file="base-services/registration/pki/server-ca/keycloak/keycloak.key.pem" --project="${{ vars.GCP_PROJECT_ID }}"
+
+      - name: Issue TLS Certs via GCP CAS for remote PKI setup
+        if: ${{ inputs.pki_strategy == 'remote' }}
+        run: |
+          # 1. Setup Variables
+          HOSTNAME="keycloak.${{ env.BASE_DOMAIN }}"
+          CERT_DIR="temp-certs"
+          # Unique ID für das Cert in CAS (verhindert Konflikte bei Re-Runs)
+          CERT_ID="keycloak-$(date +%s)" 
+                                     
+          echo "Generating certificate for: $HOSTNAME"
+                                     
+          # 2. Generate Private Key (Locally)
+          openssl genpkey -algorithm RSA -out $CERT_DIR/keycloak.key.pem
+                                     
+          # 3. Generate CSR (Locally)
+          # Wichtig: SAN (Subject Alt Name) ist für moderne Browser/Clients Pflicht!
+          openssl req -new -key $CERT_DIR/keycloak.key.pem \
+            -out $CERT_DIR/keycloak.csr.pem \
+            -subj "/CN=${HOSTNAME}" \
+            -addext "subjectAltName=DNS:${HOSTNAME}"
+                                     
+          # 4. Sign CSR via Google Cloud CAS using configured pool from Secret Manager
+          SERVER_CA_POOL="${{ env.SERVER_CA_POOL }}"
+          echo "Requesting signature from GCP CAS using pool: $SERVER_CA_POOL"
+          gcloud privateca certificates create "$CERT_ID" \
+            --issuer-pool="$SERVER_CA_POOL" \
+            --issuer-location="${{ vars.GCP_REGION }}" \
+            --csr="$CERT_DIR/keycloak.csr.pem" \
+            --cert-output-file="$CERT_DIR/keycloak.crt.pem" \
+            --validity="P30D" \
+            --quiet
+
+          # Download Server CA for verification purposes
+          echo "Fetching Server CA certificate from pool: $SERVER_CA_POOL"
+          gcloud privateca roots list \
+            --pool="$SERVER_CA_POOL" \
+            --location="${{ vars.GCP_REGION }}" \
+            --format="value(pemCaCertificates)" \
+            --limit=1 > $CERT_DIR/server-ca.crt.pem
+
+          if [ ! -s "$CERT_DIR/server-ca.crt.pem" ]; then
+            echo "::error::Could not fetch Server CA from pool '$SERVER_CA_POOL'"
+            exit 1
+          fi
+                                     
+          # Check success
+          if [ ! -s "$CERT_DIR/keycloak.crt.pem" ]; then
+            echo "::error::Certificate issuance failed or output is empty."
+            exit 1
+          fi
+
+          echo "Certificate issued successfully."
+
+      - name: Update GCP Secrets with new certificates
+        if: ${{ inputs.pki_strategy == 'remote' }}
+        run: |
+          # Create secrets if they don't exist
+          if ! gcloud secrets describe KEYCLOAK_TLS_CRT --project="${{ vars.GCP_PROJECT_ID }}" &>/dev/null; then
+            echo "Creating KEYCLOAK_TLS_CRT secret..."
+            gcloud secrets create KEYCLOAK_TLS_CRT --replication-policy="automatic" --project="${{ vars.GCP_PROJECT_ID }}"
+          fi
+          if ! gcloud secrets describe KEYCLOAK_TLS_KEY --project="${{ vars.GCP_PROJECT_ID }}" &>/dev/null; then
+            echo "Creating KEYCLOAK_TLS_KEY secret..."
+            gcloud secrets create KEYCLOAK_TLS_KEY --replication-policy="automatic" --project="${{ vars.GCP_PROJECT_ID }}"
+          fi
+
+          # Add new versions
+          gcloud secrets versions add KEYCLOAK_TLS_CRT --data-file="temp-certs/keycloak.crt.pem" --project="${{ vars.GCP_PROJECT_ID }}"
+          gcloud secrets versions add KEYCLOAK_TLS_KEY --data-file="temp-certs/keycloak.key.pem" --project="${{ vars.GCP_PROJECT_ID }}"
+
+      - name: Import keycloak tls certificate & key secrets
+        uses: google-github-actions/get-secretmanager-secrets@v3
+        with:
+          secrets: |-
+            KEYCLOAK_TLS_CRT:${{ vars.GCP_PROJECT_ID }}/KEYCLOAK_TLS_CRT
+            KEYCLOAK_TLS_KEY:${{ vars.GCP_PROJECT_ID }}/KEYCLOAK_TLS_KEY
+          export_to_environment: true
+
+      - name: Deploy final keycloak workload
+        uses: helmfile/helmfile-action@v2.0.4
+        with:
+          helm-version: "v3.19.0"
+          helmfile-workdirectory: iac/helm/helmfile.d
+          helmfile-args: --file keycloak.yaml.gotmpl ${{ inputs.helmAction || 'apply' }} --wait --state-values-set pkiStrategy=${{ inputs.pki_strategy }} --state-values-set baseDomain=${{ env.BASE_DOMAIN }}
+
+      - name: Force Restart Keycloak to load new Certificates
+        if: ${{ inputs.pki_strategy == 'local' }}
+        run: |
+          echo "Restarting Keycloak StatefulSet to pick up new TLS certificates..."
+          
+          kubectl rollout restart deployment,statefulset -n base-services -l app.kubernetes.io/name=keycloak
+          
+          kubectl rollout status deployment,statefulset -n base-services -l app.kubernetes.io/name=keycloak --timeout=300s
+
+      - name: create keycloak JWK secrets based on local PKI setup
+        if: ${{ inputs.pki_strategy == 'local' }}
+        run: |
+          # The IP address is already available from the previous 'get_ip' step
+          IP="${{ steps.get_ip.outputs.ip }}"
+          echo "Keycloak IP is: $IP"
+          
+          # Create the KEYCLOAK_HOSTNAME secret
+          if ! gcloud secrets describe "KEYCLOAK_HOSTNAME" --project="${{ vars.GCP_PROJECT_ID }}" &> /dev/null; then
+            echo "Create secret 'KEYCLOAK_HOSTNAME'..."
+            gcloud secrets create "KEYCLOAK_HOSTNAME" --replication-policy="automatic" --project="${{ vars.GCP_PROJECT_ID }}"
+          fi
+          gcloud secrets versions add KEYCLOAK_HOSTNAME --data-file=- --project="${{ vars.GCP_PROJECT_ID }}" <<< "$IP"
+
+          # Define the JWKS URL
+          JWKS_URL="https://${IP}:8443/realms/sdv-telemetry/protocol/openid-connect/certs"
+          echo "JWKS URL is: $JWKS_URL"
+
+          # Create the KEYCLOAK_JWK_URI secret
+          if ! gcloud secrets describe "KEYCLOAK_JWK_URI" --project="${{ vars.GCP_PROJECT_ID }}" &> /dev/null; then
+            echo "Create secret 'KEYCLOAK_JWK_URI'..."
+            gcloud secrets create "KEYCLOAK_JWK_URI" --replication-policy="automatic" --project="${{ vars.GCP_PROJECT_ID }}"
+          fi
+          gcloud secrets versions add KEYCLOAK_JWK_URI --data-file=- --project="${{ vars.GCP_PROJECT_ID }}" <<< "$JWKS_URL"
+
+          echo "Waiting for Keycloak JWKS endpoint to become available..."
+          for i in {1..30}; do
+            # JWKS endpoint is now accessible without client cert (KC_HTTPS_CLIENT_AUTH=request)
+            # Using -k to skip cert verification since we're using IP (DNS may not be ready)
+            HTTP_RESPONSE=$(curl --silent --show-error --fail \
+                                  --retry 5 --retry-delay 2 \
+                                  -k \
+                                  "$JWKS_URL" || true)
+
+            # Check if the response contains the 'keys' field, indicating a valid JWKS.
+            if [[ "$HTTP_RESPONSE" == *"keys"* ]]; then
+              echo "Successfully fetched JWKS."
+              KEYCLOAK_JWK_JSON="$HTTP_RESPONSE"
+              break
+            fi
+
+            echo "Attempt $i failed. Retrying in 10 seconds..."
+            sleep 10
+            KEYCLOAK_JWK_JSON="" # Reset variable on failure
+          done
+
+          if [[ -z "$KEYCLOAK_JWK_JSON" ]]; then
+            echo "::error::Could not fetch JWKS from Keycloak after 5 minutes."
+            exit 1
+          fi
+
+          # Base64 encode the JWK and create the final secret
+          KEYCLOAK_JWK_B64=$(echo -n "$KEYCLOAK_JWK_JSON" | base64 -w 0)
+          if ! gcloud secrets describe "KEYCLOAK_JWK_B64" --project="${{ vars.GCP_PROJECT_ID }}" &> /dev/null; then
+            echo "Create secret 'KEYCLOAK_JWK_B64'..."
+            gcloud secrets create "KEYCLOAK_JWK_B64" --replication-policy="automatic" --project="${{ vars.GCP_PROJECT_ID }}"
+          fi
+          printf '%s' "$KEYCLOAK_JWK_B64" | gcloud secrets versions add KEYCLOAK_JWK_B64 --data-file=- --project="${{ vars.GCP_PROJECT_ID }}"
+
+          echo "Keycloak secrets created successfully."
+
+      - name: create keycloak hostname secret
+        if: ${{ inputs.pki_strategy == 'remote' }}
+        run: |
+          # Define keycloak hostname
+          HOSTNAME="keycloak.${{ env.BASE_DOMAIN }}"
+          
+          # Create the KEYCLOAK_HOSTNAME secret
+          if ! gcloud secrets describe "KEYCLOAK_HOSTNAME" --project="${{ vars.GCP_PROJECT_ID }}" &> /dev/null; then
+            echo "Create secret 'KEYCLOAK_HOSTNAME'..."
+            gcloud secrets create "KEYCLOAK_HOSTNAME" --replication-policy="automatic" --project="${{ vars.GCP_PROJECT_ID }}"
+          fi
+          gcloud secrets versions add KEYCLOAK_HOSTNAME --data-file=- --project="${{ vars.GCP_PROJECT_ID }}" <<< "$HOSTNAME"
+
+      - name: create keycloak JWK secrets based on remote PKI setup
+        if: ${{ inputs.pki_strategy == 'remote' }}
+        run: |
+          # Get Keycloak LoadBalancer IP
+          echo "Waiting for Keycloak LoadBalancer IP..."
+          for i in {1..30}; do
+            IP=$(kubectl get svc keycloak -n base-services -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+            if [[ -n "$IP" ]]; then
+              echo "Keycloak IP found: $IP"
+              break
+            fi
+            if [[ $i -eq 30 ]]; then
+              echo "::error::Keycloak LoadBalancer IP not found after 5 minutes."
+              exit 1
+            fi
+            sleep 10
+          done
+
+          # Define the JWKS URL using IP instead of domain (DNS might not be propagated yet)
+          JWKS_URL="https://${IP}:8443/realms/sdv-telemetry/protocol/openid-connect/certs"
+          echo "JWKS URL is: $JWKS_URL"
+
+          # Create the KEYCLOAK_JWK_URI secret
+          if ! gcloud secrets describe "KEYCLOAK_JWK_URI" --project="${{ vars.GCP_PROJECT_ID }}" &> /dev/null; then
+            echo "Create secret 'KEYCLOAK_JWK_URI'..."
+            gcloud secrets create "KEYCLOAK_JWK_URI" --replication-policy="automatic" --project="${{ vars.GCP_PROJECT_ID }}"
+          fi
+          gcloud secrets versions add KEYCLOAK_JWK_URI --data-file=- --project="${{ vars.GCP_PROJECT_ID }}" <<< "$JWKS_URL"
+
+          echo "Waiting for Keycloak JWKS endpoint to become available..."
+          for i in {1..30}; do
+            # JWKS endpoint is now accessible without client cert (KC_HTTPS_CLIENT_AUTH=request)
+            # Using -k to skip cert verification since we're using IP (DNS may not be ready)
+            HTTP_RESPONSE=$(curl --silent --show-error --fail --retry 5 -k \
+                                  "$JWKS_URL" || true)
+
+            # Check if the response contains the 'keys' field, indicating a valid JWKS.
+            if [[ "$HTTP_RESPONSE" == *"keys"* ]]; then
+              echo "Successfully fetched JWKS."
+              KEYCLOAK_JWK_JSON="$HTTP_RESPONSE"
+              break
+            fi
+
+            echo "Attempt $i failed. Retrying in 10 seconds..."
+            sleep 10
+            KEYCLOAK_JWK_JSON="" # Reset variable on failure
+          done
+
+          if [[ -z "$KEYCLOAK_JWK_JSON" ]]; then
+            echo "::error::Could not fetch JWKS from Keycloak after 5 minutes."
+            exit 1
+          fi
+
+          # Base64 encode the JWK and create the final secret
+          KEYCLOAK_JWK_B64=$(echo -n "$KEYCLOAK_JWK_JSON" | base64 -w 0)
+          if ! gcloud secrets describe "KEYCLOAK_JWK_B64" --project="${{ vars.GCP_PROJECT_ID }}" &> /dev/null; then
+            echo "Create secret 'KEYCLOAK_JWK_B64'..."
+            gcloud secrets create "KEYCLOAK_JWK_B64" --replication-policy="automatic" --project="${{ vars.GCP_PROJECT_ID }}"
+          fi
+          printf '%s' "$KEYCLOAK_JWK_B64" | gcloud secrets versions add KEYCLOAK_JWK_B64 --data-file=- --project="${{ vars.GCP_PROJECT_ID }}"
+
+          echo "Keycloak secrets created successfully."

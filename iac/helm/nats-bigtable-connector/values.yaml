@@ -1,0 +1,11 @@
+image:
+  repository: ghcr.io/wombatwisdom/wombat
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+nats:
+  # URL with embedded credentials: nats://username:password@host:port
+  url: ""
+
+gcp:
+  projectId: ""

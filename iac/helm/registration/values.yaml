@@ -1,0 +1,45 @@
+replicaCount: 1
+
+image:
+  name: registration-server
+  pullPolicy: Always
+  pkiStrategy: "local"
+  baseDomain: ""
+
+service:
+  type: LoadBalancer
+  annotations:
+    external-dns.alpha.kubernetes.io/hostname: registration.{{ .Values.baseDomain }}
+    external-dns.alpha.kubernetes.io/ttl: "300"
+  port: 8080
+  httpPort: 8080
+  httpsPort: 8443
+
+livenessProbe:
+  httpGet:
+    path: /health
+    port: 8888
+readinessProbe:
+  httpGet:
+    path: /health
+    port: 8888
+
+# GCP Project ID for Workload Identity
+gcpProjectId: ""
+
+# Certificates (populated from Secret Manager at deployment time)
+# Hybrid PKI Strategy:
+# - Server certs (serverCert/serverKey): Generated via GCP CAS in remote mode, or local OpenSSL in local mode
+# - Registration CA (caCert/caKey): Always uses local key pair for signing vehicle CSRs
+# - Factory CA (factoryCaCert): Trusted CA certificate for authenticating factory-issued vehicle certificates
+certificates:
+  serverCert: ""
+  serverKey: ""
+  caCert: ""
+  caKey: ""
+  factoryCaCert: ""
+
+# Service URLs
+urls:
+  nats: ""
+  keycloak: ""

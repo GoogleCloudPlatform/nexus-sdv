@@ -1,0 +1,78 @@
+name: Build and Deploy AI Assistant
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment (sandbox, dev, ...)"
+        required: true
+        default: "sandbox"
+
+  workflow_call:
+    inputs:
+      environment:
+        type: string
+        required: true
+        default: "sandbox"
+
+  push:
+    paths:
+      - "sample-services/ai_assistant/**"
+      - ".github/workflows/build-push-ai-assistant.yml"
+
+env:
+  IMAGE_NAME: "ai-assistant"
+  SERVICE_ACCOUNT: "${{ vars.GCP_SERVICE_ACCOUNT }}"
+  WORKLOAD_IDENTITY_PROVIDER: "projects/${{ vars.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/${{ vars.GCP_WORKLOAD_IDENTITY_POOL_ID }}/providers/${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER_ID }}"
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+jobs:
+  login:
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    environment: ${{ inputs.environment || 'sandbox' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      # Configure authentication with access_token format for gcloud CLI compatibility
+      # Workload Identity Federation uses OIDC tokens from GitHub to authenticate to GCP.
+      # By default, the auth action provides an ID token, but gcloud CLI commands
+      # (configure-docker, secrets, run deploy, etc.) require an OAuth 2.0 access token
+      # with the full permissions of the service account to function correctly.
+      - name: Configure Google Cloud Auth
+        uses: google-github-actions/auth@v2
+        with:
+          token_format: access_token
+          workload_identity_provider: projects/${{ vars.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/${{ vars.GCP_WORKLOAD_IDENTITY_POOL_ID }}/providers/${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER_ID }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - name: Import secrets
+        uses: google-github-actions/get-secretmanager-secrets@v3
+        with:
+          secrets: |-
+            IMAGE_REPO:${{ vars.GCP_PROJECT_ID }}/IMAGE_REPO
+          export_to_environment: true
+
+      - name: "Docker auth"
+        run: |-
+          gcloud auth configure-docker ${{ vars.GCP_REGION }}-docker.pkg.dev --quiet
+
+      - name: Build and Push Container
+        working-directory: sample-services/ai_assistant
+        run: |-
+          docker build -t "${{ env.IMAGE_REPO }}/${{ env.IMAGE_NAME }}:latest" ./
+          docker push "${{ env.IMAGE_REPO }}/${{ env.IMAGE_NAME }}:latest"
+      - name: Deploy AI Assistant
+        run: |-
+          gcloud run deploy ${{ env.IMAGE_NAME }} \
+          --image '${{ env.IMAGE_REPO }}/${{ env.IMAGE_NAME }}:latest' \
+          --region ${{ vars.GCP_REGION }} \
+          --service-account ${{ vars.GCP_SERVICE_ACCOUNT }} \
+          --port=8080 \
+          --min-instances=1 \
+          --memory=1024Mi \
+          --set-env-vars GOOGLE_CLOUD_PROJECT=${{ vars.GCP_PROJECT_ID }},GOOGLE_CLOUD_LOCATION="global",GOOGLE_GENAI_USE_VERTEXAI="1"

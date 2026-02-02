@@ -1,0 +1,37 @@
+syntax = "proto3";
+
+package dataapi.v1;
+
+option go_package = "data-api/api/gen/dataapi/v1;dataapiv1";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+
+service TelemetryDataAPI {
+  // Streams telemetry points in chronological order (ascending ts).
+  rpc GetTelemetryData(GetTelemetryDataRequest) returns (stream TelemetryPoint);
+}
+
+message GetTelemetryDataRequest {
+    string vehicle_id = 1; // VIN for now; later vehicle_user_id
+    repeated string data_types = 2;
+
+    oneof time_selector {
+        bool latest = 3; // latest single datapoint
+        google.protobuf.Duration last_duration = 4; // e.g. "36000s" (last 10 hours)
+        TimeRange time_range = 5; // explicit time window
+    }
+}
+
+message TimeRange {
+    google.protobuf.Timestamp start = 1;
+    google.protobuf.Timestamp end = 2;
+}
+
+message TelemetryPoint {
+    google.protobuf.Timestamp timestamp = 1;
+
+    // Payload is keyed by data type (like "location.latLng.longitude")
+    // Values are raw bytes from bigtable
+    map<string, bytes> values = 2;
+}

@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nats-bigtable-connector-proto
+  namespace: base-services
+data:
+  telemetry.proto: |-
+{{ .Files.Get "files/telemetry.proto" | indent 4 }}

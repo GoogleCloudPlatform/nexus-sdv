@@ -1,0 +1,250 @@
+name: Build and Deploy Sample Services
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment (sandbox, dev, ...)"
+        required: true
+        default: "sandbox"
+
+  workflow_call:
+    inputs:
+      environment:
+        type: string
+        required: true
+        default: "sandbox"
+
+  push:
+    paths:
+      - "sample-services/**"
+      - ".github/workflows/deploy-services.yml"
+      - "proto/**"
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  GAR_REPOSITORY: "artifact-registry"
+  WORKLOAD_IDENTITY_PROVIDER: "projects/${{ vars.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/${{ vars.GCP_WORKLOAD_IDENTITY_POOL_ID }}/providers/${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER_ID }}"
+  GAR_LOCATION: ${{ vars.GCP_REGION }}
+  BATTERY_ALERT_URL: ${{ vars.BATTERY_ALERT_URL }}
+  DATA_API_URL: ${{ vars.BATTERY_ALERT_URL }} #Set in Github environment, until the services are moved to GKE.
+  GKE_CLUSTER_NAME: "${{ inputs.environment || 'sandbox' }}-gke"
+
+jobs:
+  deploy-remote-lock:
+    name: Deploy Remote-Lock Service
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    environment: ${{ inputs.environment || 'sandbox' }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure Google Cloud Auth
+        uses: google-github-actions/auth@v2
+        with:
+          token_format: access_token
+          workload_identity_provider: projects/${{ vars.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/${{ vars.GCP_WORKLOAD_IDENTITY_POOL_ID }}/providers/${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER_ID }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - name: Import secrets
+        uses: google-github-actions/get-secretmanager-secrets@v3
+        with:
+          secrets: |-
+            IMAGE_REPO:${{ vars.GCP_PROJECT_ID }}/IMAGE_REPO
+            NATS_USER:${{ vars.GCP_PROJECT_ID }}/NATS_SERVER_USER
+            NATS_PASSWORD:${{ vars.GCP_PROJECT_ID }}/NATS_SERVER_PASSWORD
+            NATS_HOSTNAME:${{ vars.GCP_PROJECT_ID }}/NATS_HOSTNAME
+          #            DATA_API_URL:${{ vars.GCP_PROJECT_ID }}/DATA_API_URL
+          export_to_environment: true
+
+      - name: Docker auth
+        run: |-
+          gcloud auth configure-docker ${{ env.GAR_LOCATION }}-docker.pkg.dev --quiet
+
+      - name: Build and Push Remote Lock Service
+        uses: docker/build-push-action@v6
+        with:
+          push: true
+          tags: ${{ env.IMAGE_REPO }}/remote-lock-service:latest
+          file: ./sample-services/remote-lock/Dockerfile
+          context: .
+
+      - name: Deploy Remote Lock Service
+        uses: "google-github-actions/deploy-cloudrun@v2"
+        id: deploy_remote_lock
+        with:
+          service: "remote-lock-service"
+          image: ${{ env.IMAGE_REPO }}/remote-lock-service:latest
+          region: ${{ env.GAR_LOCATION }}
+          env_vars: |
+            NATS_USER=${{ env.NATS_USER }}
+            NATS_PASSWORD=${{ env.NATS_PASSWORD }}
+            NATS_URL=${{ env.NATS_HOSTNAME }}
+
+      - name: Update REMOTE_LOCK_SERVICE_URL secret
+        run: |
+          # Ensure the secret exists
+          gcloud secrets describe REMOTE_LOCK_SERVICE_URL --project=${{ vars.GCP_PROJECT_ID }} 2>/dev/null || \
+            gcloud secrets create REMOTE_LOCK_SERVICE_URL \
+              --project=${{ vars.GCP_PROJECT_ID }} \
+              --replication-policy="automatic"
+
+          # Update the secret with the deployed service URL
+          echo -n "${{ steps.deploy_remote_lock.outputs.url }}" | \
+            gcloud secrets versions add REMOTE_LOCK_SERVICE_URL \
+              --project=${{ vars.GCP_PROJECT_ID }} \
+              --data-file=-
+
+  deploy-predictive-maintenance:
+    name: Deploy Predictive Maintenance service
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    environment: ${{ inputs.environment || 'sandbox' }}
+
+    defaults:
+      run:
+        working-directory: ./sample-services/predictive-battery-maintenance
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Install Python dependencies
+        run: uv sync
+
+      - name: Compile proto files
+        run: make proto
+
+      - name: Configure Google Cloud Auth
+        uses: google-github-actions/auth@v2
+        with:
+          token_format: access_token
+          workload_identity_provider: projects/${{ vars.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/${{ vars.GCP_WORKLOAD_IDENTITY_POOL_ID }}/providers/${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER_ID }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - name: Import secrets
+        uses: google-github-actions/get-secretmanager-secrets@v3
+        with:
+          secrets: |-
+            IMAGE_REPO:${{ vars.GCP_PROJECT_ID }}/IMAGE_REPO
+            NATS_USER:${{ vars.GCP_PROJECT_ID }}/NATS_SERVER_USER
+            NATS_PASSWORD:${{ vars.GCP_PROJECT_ID }}/NATS_SERVER_PASSWORD
+            NATS_URL:${{ vars.GCP_PROJECT_ID }}/NATS_HOSTNAME
+          export_to_environment: true
+
+      - name: Docker auth
+        run: |-
+          gcloud auth configure-docker ${{ env.GAR_LOCATION }}-docker.pkg.dev --quiet
+
+      - name: Build and Push Predictive Maintenance service
+        uses: docker/build-push-action@v6
+        with:
+          push: true
+          tags: ${{ env.IMAGE_REPO }}/predictive-battery-maintenance:latest
+          file: ./sample-services/predictive-battery-maintenance/Dockerfile
+          context: ./sample-services/predictive-battery-maintenance
+
+      - name: Deploy Predictive Maintenance service
+        uses: "google-github-actions/deploy-cloudrun@v2"
+        id: pred_deploy
+        with:
+          service: "predictive-maintenance"
+          image: ${{ env.IMAGE_REPO }}/predictive-battery-maintenance:latest
+          region: ${{ env.GAR_LOCATION }}
+          env_vars: |
+            DATA_API_URL=${{ env.DATA_API_URL }}
+
+  deploy-vhal-simulator:
+    name: Deploy VHAL Simulator service
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    needs: deploy-predictive-maintenance
+    environment: ${{ inputs.environment || 'sandbox' }}
+
+    defaults:
+      run:
+        working-directory: ./sample-services/vhal-simulator
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install Python protobuf dependencies
+        run: pip install grpcio-tools mypy-protobuf
+
+      - name: Compile proto files
+        run: make proto
+
+      - name: Configure Google Cloud Auth
+        uses: google-github-actions/auth@v2
+        with:
+          token_format: access_token
+          workload_identity_provider: projects/${{ vars.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/${{ vars.GCP_WORKLOAD_IDENTITY_POOL_ID }}/providers/${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER_ID }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - name: Import secrets
+        uses: google-github-actions/get-secretmanager-secrets@v3
+        with:
+          secrets: |-
+            IMAGE_REPO:${{ vars.GCP_PROJECT_ID }}/IMAGE_REPO
+            NATS_USER:${{ vars.GCP_PROJECT_ID }}/NATS_SERVER_USER
+            NATS_PASSWORD:${{ vars.GCP_PROJECT_ID }}/NATS_SERVER_PASSWORD
+            NATS_HOSTNAME:${{ vars.GCP_PROJECT_ID }}/NATS_HOSTNAME
+          export_to_environment: true
+
+      - name: Docker auth
+        run: |-
+          gcloud auth configure-docker ${{ env.GAR_LOCATION }}-docker.pkg.dev --quiet
+
+      - name: Build and Push VHAL Simulator service
+        uses: docker/build-push-action@v6
+        with:
+          push: true
+          tags: ${{ env.IMAGE_REPO }}/vhal-simulator:latest
+          file: ./sample-services/vhal-simulator/Dockerfile
+          context: ./sample-services/vhal-simulator
+
+
+
+      - name: 'Get Predictive Maintenance URL'
+        id: get_pred_url
+        run: |
+          SERVICE_URL=$(gcloud run services describe predictive-maintenance --region=${{ env.GAR_LOCATION }} --format='value(status.url)')
+          
+          echo $SERVICE_URL
+          
+          # Set the URL as an output variable for subsequent steps
+          echo "PRED_MAIN_URL=$SERVICE_URL" >> $GITHUB_ENV
+
+      - name: Deploy VHAL Simulator service
+        uses: "google-github-actions/deploy-cloudrun@v2"
+        with:
+          service: "vhal-simulator"
+          image: ${{ env.IMAGE_REPO }}/vhal-simulator:latest
+          region: ${{ env.GAR_LOCATION }}
+          env_vars: |
+            NATS_USER=${{ env.NATS_USER }}
+            NATS_PASSWORD=${{ env.NATS_PASSWORD }}
+            NATS_URL=${{ env.NATS_HOSTNAME }}
+            PRED_MAIN_URL=${{ env.PRED_MAIN_URL }}

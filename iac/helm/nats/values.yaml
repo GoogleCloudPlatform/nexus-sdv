@@ -1,0 +1,51 @@
+# NATS user credentials (will be overridden by helmfile)
+natsUsers:
+  basic:
+    username: "nats-user"
+    password: "placeholder"  # Set via helmfile
+  authCallout:
+    username: "auth-callout-service"
+    password: "placeholder"  # Set via helmfile
+  connector:
+    username: "connector"
+    password: "placeholder"  # Set via helmfile
+
+container:
+  merge:
+    resources:
+      requests:
+        cpu: "500m"
+        memory: 500Mi
+      limits:
+        cpu: "1000m"
+        memory: 1Gi
+  env:
+    GOMEMLIMIT: 800MiB
+
+service:
+  enabled: true
+  merge:
+    # Annotations are set via helmfile inline values
+    spec:
+      type: LoadBalancer
+  ports:
+    nats:
+      enabled: true
+    monitor:
+      enabled: true
+    cluster:
+      enabled: true
+
+config:
+  merge:
+    debug: true
+    trace: true
+    listen: 0.0.0.0:4222
+    http: 8222
+    cluster:
+      name: nats-cluster
+      listen: 0.0.0.0:4248
+      routes:
+        - nats://127.0.0.1:4248
+    # Authorization configuration is set via helmfile using config.merge.authorization.users
+    # This section is intentionally left minimal here and populated by helmfile set directives
