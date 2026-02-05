@@ -1,29 +1,39 @@
 # Nexus SDV: Getting Started Guide
 
-Welcome to the Nexus SDV ecosystem. This guide is designed to take you from a fresh repository to a fully functional connected vehicle cloud backend in just a few logical steps. Whether you are an architect evaluating the framework or a developer building custom services, the following sections provide the technical foundation and hands-on instructions needed to succeed.
+Welcome to the Nexus SDV ecosystem. This guide is designed to take you from a fresh repository to a fully functional connected vehicle cloud backend in just a few logical steps.
 
-## The Path to Your Own Platform
+## Official Online Documentation (Recommended)
 
-Follow these four steps to deploy, connect, and extend your Nexus instance:
+For the best experience, including a global search, streamlined navigation, and correctly rendered callouts, please visit our official documentation portal:
 
-* **[1. Deployment](deployment.mdx)** Learn how to provision your own Nexus instance on **Google Cloud** using Terraform and GitHub Actions. This guide covers the entire infrastructure setup.
-
-* **[2. Connected Clients](clients.md)** Once your platform is live, use our client examples to establish a secure **mTLS connection**. This section explains how to start communicating with the backend.
-
-* **[3. Custom Services](services.md)** Learn how to leverage Nexus as a foundation for differentiated automotive services based on our example.
-
-* **[4. Resource Teardown](teardown.mdx)** Essential for Proof of Concepts (PoC). This guide explains how to efficiently decommission your environment.
+**[docs.nexus-sdv.io](https://docs.nexus-sdv.io)**
 
 ---
 
-## Preview: Interactive Online Documentation
+## Local Repository Documentation
 
-While this GitHub-based documentation provides the core technical steps, we are currently finalizing a comprehensive, interactive documentation portal at **docs.nexus-sdv.io**.
+If you prefer to stay within the GitHub environment, you can follow the core technical steps right here. This path is ideal for a quick reference during development.
 
-The upcoming portal will offer a significantly enhanced user experience, including global search, and a streamlined navigation flow.
+### The Path to Your Own Platform
 
-| Home Page Sneak Peek | Deployment Guide Preview |
+Follow these four steps to deploy, connect, and extend your Nexus instance:
+
+* **[1. Deployment](deployment.mdx)** Provision your own Nexus instance on **Google Cloud** using Terraform and our interactive bootstrap script.
+  
+* **[2. Connected Clients](clients.mdx)** Establish a secure **mTLS connection** and start communicating with the backend using our client examples.
+
+* **[3. Custom Services](services.md)** Leverage Nexus as a foundation for differentiated automotive services based on our template.
+
+* **[4. Resource Teardown](teardown.mdx)** Essential for PoCs: Learn how to efficiently decommission your environment and clean up GCP resources.
+
+---
+
+## Interactive Experience & Visuals
+
+The online portal offers an enhanced user interface designed for architects and developers:
+
+| Home Page | Deployment Guide |
 | :--- | :--- |
 | ![Online Documentation Home](assets/Nexus-Online-Docs-Home.png) | ![Online Documentation Deployment](assets/Nexus-Online-Docs-Deploy.png) |
 
-> **Note on Content Rendering:** > The upcoming online documentation is developed with **Astro**. Consequently, you may notice specific formatting tags (such as `:::tip` or `:::note`). While these appear as plain text here on GitHub, they will be rendered as color-coded callout boxes in the final online version.
+> **Note on Content Rendering:** > This GitHub-based documentation is the source for our **Astro-based** portal. You may notice specific formatting tags (like `:::tip` or `<Tabs>`). These will appear as plain text here on GitHub but are rendered as professional, color-coded components at [docs.nexus-sdv.io](https://docs.nexus-sdv.io).

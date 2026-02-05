@@ -15,10 +15,7 @@ on:
         required: true
         default: "sandbox"
 
-  push:
-    paths:
-      - "sample-services/mcp-servers/**"
-      - ".github/workflows/deploy-mcp-servers.yml"
+
 
 permissions:
   id-token: write

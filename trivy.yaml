@@ -1,0 +1,7 @@
+# trivy.yaml
+license:
+  full: true  # Flag to find nested licenses for full report of License Scanning
+# Enable the following if you want fail only on legal risks, not showing up all severity levels
+#severity: 
+# - HIGH
+#  - CRITICAL

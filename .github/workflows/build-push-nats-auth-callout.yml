@@ -26,10 +26,7 @@ on:
         required: false
         default: "sync"
 
-  push:
-    paths:
-      - "base-services/auth-callout/**"
-      - "build-push-nats-auth-callout.yml"
+
 
 permissions:
   id-token: write

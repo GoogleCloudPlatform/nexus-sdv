@@ -34,10 +34,6 @@ on:
         required: false
         default: "sync"
 
-  push:
-    paths:
-      - "iac/helm/keycloak"
-      - ".github/workflows/deploy-keycloak.yml"
 
 permissions:
   id-token: write

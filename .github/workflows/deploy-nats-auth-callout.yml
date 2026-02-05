@@ -25,10 +25,7 @@ on:
         required: false
         default: "sync"
 
-  push:
-    paths:
-      - "iac/helm/nats-auth-callout"
-      - ".github/workflows/deploy-nats-auth-callout.yml"
+
 
 permissions:
   id-token: write

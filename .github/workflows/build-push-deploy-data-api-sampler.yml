@@ -22,11 +22,6 @@ on:
         type: string
         required: true
 
-  push:
-    paths:
-      - "sample-services/data-api-sampler/**"
-      - ".github/workflows/build-push-deploy-data-api-sampler.yml"
-      - "iac/helm/data-api-sampler/**"
 
 permissions:
   id-token: write

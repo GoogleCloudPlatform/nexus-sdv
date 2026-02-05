@@ -32,10 +32,6 @@ on:
         default: "sync"
         required: false
 
-  push:
-    paths:
-      - "base-services/registration/server/**"
-      - ".github/workflows/build-push-deploy-registration.yml"
 
 permissions:
   id-token: write

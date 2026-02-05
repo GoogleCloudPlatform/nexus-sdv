@@ -12,10 +12,7 @@ on:
         type: string
         required: true
 
-  push:
-    paths:
-      - ".github/workflows/deploy-external-dns.yml"
-      - "iac/helm/external-dns/**"
+
 
 permissions:
   id-token: write

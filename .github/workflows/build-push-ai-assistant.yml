@@ -15,10 +15,7 @@ on:
         required: true
         default: "sandbox"
 
-  push:
-    paths:
-      - "sample-services/ai_assistant/**"
-      - ".github/workflows/build-push-ai-assistant.yml"
+
 
 env:
   IMAGE_NAME: "ai-assistant"

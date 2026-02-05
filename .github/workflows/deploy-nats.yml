@@ -34,10 +34,7 @@ on:
         required: false
         default: "sync"
 
-  push:
-    paths:
-      - "iac/helm/nats"
-      - ".github/workflows/deploy-nats.yml"
+
 
 permissions:
   id-token: write

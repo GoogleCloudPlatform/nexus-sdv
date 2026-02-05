@@ -15,11 +15,7 @@ on:
         required: true
         default: "sandbox"
 
-  push:
-    paths:
-      - "sample-services/**"
-      - ".github/workflows/deploy-services.yml"
-      - "proto/**"
+
 
 permissions:
   id-token: write

@@ -13,7 +13,7 @@ The core objective is to provide a **simple, flexible, and standardized communic
 
 Nexus is designed to be deployed directly into your Google Cloud environment. To ensure a seamless and reproducible setup, the deployment is fully automated using **Terraform**.
 
-Follow our **[Setup Guide](docs/README.md)** to get started. You will find a comprehensive list of prerequisites and a step-by-step walkthrough on how to provision and configure **your own Nexus platform instance in Google Cloud**.
+Follow our **[Online Setup Guide](https://docs.nexus-sdv.io)** to get started. You will find a comprehensive list of prerequisites and a step-by-step walkthrough on how to provision and configure **your own Nexus platform instance in Google Cloud**.
 
 ## Architecture Overview
 

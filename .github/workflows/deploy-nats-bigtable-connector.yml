@@ -26,11 +26,7 @@ on:
         required: false
         default: "sync"
 
-  push:
-    paths:
-      - "iac/helm/nats-bigtable-connector"
-      - ".github/workflows/deploy-nats-bigtable-connector.yml"
-      - "proto/**"
+
 
 permissions:
   id-token: write

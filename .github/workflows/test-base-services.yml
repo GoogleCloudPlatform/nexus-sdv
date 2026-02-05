@@ -8,10 +8,6 @@ on:
         required: true
         default: "sandbox"
 
-  push:
-    paths:
-      - "base-services/**"
-      - ".github/workflows/test-base-services.yml"
 
 jobs:
   test-data-api:
