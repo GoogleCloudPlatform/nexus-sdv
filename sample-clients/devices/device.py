@@ -18,7 +18,6 @@ UID = "DEVICE001"
 DEVICE = "mcp"
 
 OPERATIONAL_CERTIFICATE_PATH = "certificates/operational.crt.pem"
-OPERATIONAL_KEY_PATH = "certificates/operational.key.pem"
 
 # CA paths for remote PKI (downloaded from GCP Secret Manager)
 REMOTE_KEYCLOAK_CA_PATH = "certificates/KEYCLOAK_TLS_CRT.pem"
@@ -46,7 +45,8 @@ def register(
     client_csr_path: str,
     client_certificate_path: str,
     registration_url: str,
-) -> tuple[str, str, str]:
+    operational_key_path: str,
+) -> tuple[str, str]:
     """Get operational certificate and URLs from registration server."""
 
     _, registration_ca_path = get_ca_paths(pki_strategy)
@@ -62,10 +62,10 @@ def register(
     )
 
     # Save operational key to file
-    operational_key_path = Path(OPERATIONAL_KEY_PATH)
+    operational_key_path = Path(operational_key_path)
     operational_key_path.parent.mkdir(parents=True, exist_ok=True)
     operational_key_path.write_bytes(operational_key_bytes)
-    print(f"  Saved operational key to {OPERATIONAL_KEY_PATH}")
+    print(f"  Saved operational key to {operational_key_path}")
 
     print("Step 2: Creating Certificate Signing Request (CSR) for operational certificate...")
     # Create CSR with operational key (not factory key)
@@ -118,7 +118,7 @@ def register(
     print(f"  Keycloak URL: {data['keycloak_url']}")
     print(f"  NATS URL: {data['nats_url']}")
 
-    return data["keycloak_url"].replace(" ", ""), data["nats_url"], OPERATIONAL_KEY_PATH
+    return data["keycloak_url"].replace(" ", ""), data["nats_url"]
 
 
 def get_access_token(
