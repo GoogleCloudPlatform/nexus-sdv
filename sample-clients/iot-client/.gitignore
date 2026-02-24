@@ -12,3 +12,6 @@ proto/telemetry.proto
 src/telemetry.pb.c
 src/telemetry.pb.h
 src/google/protobuf/*
+
+# User-specific config (copy config.example.h to config.h and edit)
+include/config.h
