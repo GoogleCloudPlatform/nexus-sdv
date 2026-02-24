@@ -19,4 +19,8 @@ AuthResult keycloak_get_token(
 
 void auth_result_free(AuthResult *result);
 
+// Check if a JWT token's exp claim is at least min_remaining_seconds in the future.
+// Decodes the JWT payload (base64url) and compares exp against current time().
+bool token_valid_for(const char *jwt, int min_remaining_seconds);
+
 #endif

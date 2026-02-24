@@ -1,3 +1,5 @@
+// User-specific config (copy config.example.h to config.h and edit)
+
 #ifndef CONFIG_H
 #define CONFIG_H
 
@@ -10,13 +12,22 @@
 // ---- Device Identity ----
 #define DEVICE_ID              "DEVICE001"
 
+// ---- Keycloak ----
+#define KEYCLOAK_URL           "https://keycloak.example.com"
+#define TOKEN_MIN_REMAINING_S  120
+
+// ---- Certificate Paths (LittleFS) ----
+#define OP_CERT_PATH           "/certs/operational.crt.pem"
+#define OP_KEY_PATH            "/certs/operational.key.pem"
+#define CA_CERT_PATH           "/certs/ca.crt.pem"
+
 // ---- NATS ----
 #define NATS_URL               "nats://localhost:4222"
 #define NATS_CONNECT_TIMEOUT_MS 10000
 #define NATS_DEFAULT_PORT       4222
 
 // ---- Telemetry ----
-#define TELEMETRY_INTERVAL_MS  300000
+#define TELEMETRY_INTERVAL_MS  300000  // 1000*60*5 ms
 #define TELEMETRY_PREFIX       "prod.bigtable"
 #define SCHEMA_VERSION         1
 

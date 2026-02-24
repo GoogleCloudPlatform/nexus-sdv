@@ -3,6 +3,38 @@
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
+#include <time.h>
+
+// Base64url alphabet: A-Z a-z 0-9 - _
+static int b64url_char_value(char c) {
+    if (c >= 'A' && c <= 'Z') return c - 'A';
+    if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+    if (c >= '0' && c <= '9') return c - '0' + 52;
+    if (c == '-') return 62;
+    if (c == '_') return 63;
+    return -1;
+}
+
+// Decode base64url string into output buffer. Returns decoded length, or -1 on error.
+static int base64url_decode(const char *input, size_t input_len, uint8_t *output, size_t output_size) {
+    size_t out_pos = 0;
+    uint32_t accum = 0;
+    int bits = 0;
+
+    for (size_t i = 0; i < input_len; i++) {
+        if (input[i] == '=') break;
+        int val = b64url_char_value(input[i]);
+        if (val < 0) return -1;
+        accum = (accum << 6) | val;
+        bits += 6;
+        if (bits >= 8) {
+            bits -= 8;
+            if (out_pos >= output_size) return -1;
+            output[out_pos++] = (uint8_t)(accum >> bits) & 0xFF;
+        }
+    }
+    return (int)out_pos;
+}
 
 AuthResult keycloak_get_token(
     const char *keycloak_url,
@@ -75,4 +107,47 @@ void auth_result_free(AuthResult *result) {
     result->access_token = nullptr;
     result->expires_in = 0;
     result->success = false;
+}
+
+bool token_valid_for(const char *jwt, int min_remaining_seconds) {
+    if (!jwt) return false;
+
+    // Find the payload segment (between first and second '.')
+    const char *first_dot = strchr(jwt, '.');
+    if (!first_dot) return false;
+    const char *payload_start = first_dot + 1;
+
+    const char *second_dot = strchr(payload_start, '.');
+    if (!second_dot) return false;
+
+    size_t payload_len = second_dot - payload_start;
+
+    // Decode base64url payload (JWT payloads are typically <1KB)
+    uint8_t decoded[1024];
+    int decoded_len = base64url_decode(payload_start, payload_len, decoded, sizeof(decoded) - 1);
+    if (decoded_len < 0) {
+        Serial.println("[Auth] Failed to decode JWT payload.");
+        return false;
+    }
+    decoded[decoded_len] = '\0';
+
+    // Parse JSON and extract exp claim
+    JsonDocument doc;
+    DeserializationError err = deserializeJson(doc, (const char *)decoded);
+    if (err) {
+        Serial.printf("[Auth] JWT payload parse error: %s\n", err.c_str());
+        return false;
+    }
+
+    time_t exp = doc["exp"] | (time_t)0;
+    if (exp == 0) {
+        Serial.println("[Auth] No exp claim in JWT.");
+        return false;
+    }
+
+    time_t now = time(nullptr);
+    int remaining = (int)(exp - now);
+    Serial.printf("[Auth] Token expires in %d s.\n", remaining);
+
+    return remaining >= min_remaining_seconds;
 }
