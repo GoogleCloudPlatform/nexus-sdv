@@ -2,6 +2,12 @@
 This directory contains a simple python client which goes through the entire registration process and sends test data to nats.
 
 ## Setup
+
+1. Create virtual env: `uv venv`
+2. Activate the venv in your shell session
+3. Install dependencies: `uv sync`
+
+## Bootstrapping
 First, generate the protobuf files:
 ```bash
 make proto
