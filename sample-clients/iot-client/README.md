@@ -1,6 +1,9 @@
-# Nexus SDV IoT Client (ESP32)
+# Nexus IoT Client (ESP32)
 
-ESP32 firmware that demonstrates the Nexus SDV vehicle-to-cloud telemetry flow: registration, authentication, and protobuf telemetry publishing via NATS.
+This firmware demonstrates the Nexus platform for IoT use cases such as geolocation of things like construction equipment:
+Authentication via Keycloak and Protobuf telemetry publishing via NATS.
+
+The initial registration (factory certificate → registration server → operational certificate) is handled by an external program. This firmware assumes pre-provisioned operational certificates on the device filesystem.
 
 ## Why Nanopb?
 
@@ -19,13 +22,20 @@ This means the entire TelemetryMessage struct has a known size at compile time �
 - `max_count:8` on `sensor_data` means the firmware can send at most 8 sensor readings per message — a deliberate constraint that keeps the struct small enough to live on the stack.
 - The `-DPB_FIELD_32BIT=1` build flag in `platformio.ini` allows field tags above 255 and structs larger than 255 bytes, at the cost of slightly larger generated code.
 
+### Why this client?
+
+This IoT client is a fully functional reference implementation that covers the complete device-to-cloud path — 
+from certificate-based authentication through Keycloak (mTLS, JWT) to protobuf-encoded telemetry publishing via NATS,
+including deep sleep power management and as an example GPS integration.
+It is built entirely on open standards and open-source tooling, with no proprietary dependencies or vendor lock-in.
+
 ## Prerequisites
 
 - [PlatformIO CLI](https://docs.platformio.org/en/latest/core/installation/methods/installer-script.html) or the VSCode PlatformIO extension
-- `protoc` compiler (`brew install protobuf`)
+- [protoc](https://protobuf.dev/installation/) compiler (`brew install protobuf`)
 - [Nanopb](https://github.com/nanopb/nanopb) protoc plugin (`brew install nanopb`)
-- ESP32 development board (ESP32, ESP32-S3, ESP32-C3)
-- Factory certificate and key (generated via the platform's PKI tooling)
+- ESP32 development board
+- Operational certificate, private key, and CA certificate (obtained via the external registration program)
 
 ## Quick Start
 
@@ -40,31 +50,28 @@ This copies `telemetry.proto` from the shared `proto/` directory and generates `
 
 ### 2. Configure
 
-Edit `include/config.h` with your settings:
+```bash
+make config
+```
+
+This copies `config.example.h` to `include/config.h` (which is gitignored). Then edit `include/config.h` with your settings:
 
 ```c
 #define WIFI_SSID           "your-wifi-ssid"
 #define WIFI_PASSWORD       "your-wifi-password"
 #define DEVICE_ID           "DEVICE001"
-#define REGISTRATION_URL    "https://registration.sdv-lal.com:8080"
+#define KEYCLOAK_URL        "https://keycloak.example.com"
+#define NATS_URL            "nats://nats-server.example.com:4222"
 ```
 
 ### 3. Provision certificates
 
-Copy your factory certificates into `data/certs/`:
+Place the operational certificates (obtained from the external registration program) into `data/certs/`:
 
-**Local PKI (development):**
-```bash
-cp ../vehicle-VEHICLE001-factory-chain.pem data/certs/factory.crt.pem
-cp ../vehicle-VEHICLE001-factory-key.pem data/certs/factory.key.pem
-cp ../../base-services/registration/pki/server-ca/ca.crt.pem data/certs/ca.crt.pem
 ```
-
-**Remote PKI (GCP):**
-```bash
-cp ../vehicle-VEHICLE001-factory-chain.pem data/certs/factory.crt.pem
-cp ../vehicle-VEHICLE001-factory-key.pem data/certs/factory.key.pem
-gcloud secrets versions access latest --secret="REGISTRATION_SERVER_TLS_CERT" > data/certs/ca.crt.pem
+data/certs/operational.crt.pem   # Operational certificate
+data/certs/operational.key.pem   # Operational private key
+data/certs/ca.crt.pem            # CA certificate (for Keycloak TLS verification)
 ```
 
 ### 4. Upload filesystem and firmware
@@ -80,7 +87,7 @@ Or all at once:
 make all
 ```
 
-### Start a local development NATS Server
+### How to start a local development NATS Server
 
 ```bash
 docker run -p 4222:4222 nats:latest --debug -V
@@ -90,12 +97,21 @@ See [NATS Server commandline options](https://hub.docker.com/_/nats#commandline-
 
 ## Lifecycle
 
-The firmware executes the same 4-stage flow as the Python and Go clients:
+The firmware executes a 5-step flow:
 
-1. **WiFi + NTP** -- Connect to WiFi, sync time for TLS validation
-2. **Registration** -- Generate RSA-2048 keypair + CSR, POST to registration server via mTLS (factory cert), receive operational certificate and service URLs
+1. **WiFi + NTP** -- Connect to WiFi, sync time via NTP (required for TLS certificate validation)
+2. **Load Certificates** -- Mount LittleFS, load operational cert/key and CA cert from flash
 3. **Authentication** -- Get JWT from Keycloak via mTLS (operational cert), `client_credentials` grant
-4. **Telemetry** -- Connect to NATS with JWT, publish protobuf-serialized `TelemetryMessage`
+4. **NATS Connect** -- Connect to NATS broker with JWT authentication
+5. **Telemetry Loop** -- Publish protobuf-serialized `TelemetryMessage` at a configurable interval
+
+The JWT token is automatically refreshed before it expires. When a refresh is needed, the firmware disconnects from NATS, requests a new token from Keycloak, and reconnects.
+
+```
+WiFi → NTP → Load Certs → Authenticate → NATS Connect → Send Telemetry
+                            ↑                                    |
+                            └──── (token expiring) ──────────────┘
+```
 
 ## Serial Output
 
@@ -105,56 +121,55 @@ Expected output on successful run:
 ==========================================
   Nexus SDV IoT Client
 ==========================================
-  VIN:              VEHICLE001
-  Registration URL: https://registration.sdv-lal.com:8080
-  Telemetry interval: 5000 ms
+  DEVICE ID:             DEVICE001
+  Keycloak URL:          https://keycloak.example.com
+  NATS URL:              nats://nats-server.example.com:4222
+  Telemetry interval:    300000 ms
+  Free heap:             286068 bytes
 ==========================================
 
-[Main] Step 1/7: Connecting to WiFi...
+[Main] Step 1/5: Connecting to WiFi...
 [WiFi] Connected. IP: 192.168.1.42
-[Main] Synchronizing time via NTP...
-[Main] Time synced: 2025-01-15 10:30:00 UTC
-[Main] Step 2/7: Loading certificates...
-[CertMgr] LittleFS mounted, factory certificates verified.
-[Main] Step 3/7: Generating operational keypair...
-[CertMgr] Key generated in 23456 ms.
-[Main] Step 4/7: Creating CSR...
-[CertMgr] CSR created for VIN:VEHICLE001 (512 bytes)
-[Main] Step 5/7: Registering with server...
-[Reg] Registration successful.
-[Main] Step 6/7: Getting JWT from Keycloak...
+[Main] Step 2/5: Synchronizing time via NTP...
+[Main] Time synced: 2026-02-24 10:30:00 UTC
+[Main] Step 3/5: Loading certificates...
+[CertMgr] LittleFS mounted.
+[CertMgr] Loaded /certs/operational.crt.pem (1234 bytes)
+[CertMgr] Loaded /certs/operational.key.pem (1704 bytes)
+[CertMgr] Loaded /certs/ca.crt.pem (1234 bytes)
+[Main] Step 4/5: Getting JWT from Keycloak...
 [Auth] Token acquired (expires in 300 s).
-[Main] Step 7/7: Connecting to NATS...
+[Main] Token valid for 300 s.
+[Main] Step 5/5: Connecting to NATS...
 [NATS] Connected and authenticated.
-[Main] Sending 7 telemetry messages (interval: 5000 ms)...
-[Telemetry] Published 128 bytes to telemetry.prod.bigtable.VEHICLE001
-[Main] Message 1/7 sent.
+[Telemetry] Published 160 bytes to telemetry.prod.bigtable.DEVICE001
+[Main] Message 1 sent.
 ...
-==========================================
-  IoT Client completed successfully.
-==========================================
+[Main] Token expiring soon. Re-authenticating...
+[Main] Step 4/5: Getting JWT from Keycloak...
+[Auth] Token acquired (expires in 300 s).
+[Main] Step 5/5: Connecting to NATS...
+[NATS] Connected and authenticated.
 ```
 
 ## Architecture
 
 ```
-+------------------+     +--------------------+     +----------+     +------+
-| ESP32            |     | Registration       |     | Keycloak |     | NATS |
-|                  |     | Server             |     |          |     |      |
-| 1. Generate RSA  |     |                    |     |          |     |      |
-|    keypair + CSR |     |                    |     |          |     |      |
-|                  |     |                    |     |          |     |      |
-| 2. POST CSR ----+---->| Validate & sign    |     |          |     |      |
-|    (mTLS:factory)|     | Return op cert     |     |          |     |      |
-|    <-------------+-----| + URLs             |     |          |     |      |
-|                  |     |                    |     |          |     |      |
-| 3. Get JWT ------+-----+--------------------+---->| Validate |     |      |
-|    (mTLS:op cert)|     |                    |     | Return   |     |      |
-|    <-------------+-----+--------------------+-----| JWT      |     |      |
-|                  |     |                    |     |          |     |      |
-| 4. PUB telemetry-+-----+--------------------+-----+----------+---->| Auth |
-|    (JWT token)   |     |                    |     |          |     | Store|
-+------------------+     +--------------------+     +----------+     +------+
++------------------+     +----------+     +------+
+| ESP32            |     | Keycloak |     | NATS |
+|                  |     |          |     |      |
+| 1. Load op cert  |     |          |     |      |
+|    + key from    |     |          |     |      |
+|    LittleFS      |     |          |     |      |
+|                  |     |          |     |      |
+| 2. Get JWT ------+---->| Validate |     |      |
+|    (mTLS:op cert)|     | cert     |     |      |
+|    <-------------+-----| Return   |     |      |
+|                  |     | JWT      |     |      |
+|                  |     |          |     |      |
+| 3. PUB telemetry-+-----+----------+---->| Auth |
+|    (JWT token)   |     |          |     | Store|
++------------------+     +----------+     +------+
 ```
 
 ## Board Support
@@ -163,6 +178,7 @@ Expected output on successful run:
 |-------|-------------|--------|
 | ESP32 DevKit | `esp32dev` | Primary target |
 | ESP32-S3 DevKit | `esp32s3` | Supported |
+| WEMOS D1 Mini ESP32 | `esp32_d1_mini` | Supported |
 
 Other PlatformIO Arduino-compatible boards with WiFi and mbedTLS may work with minimal changes.
 
@@ -170,14 +186,14 @@ Other PlatformIO Arduino-compatible boards with WiFi and mbedTLS may work with m
 
 | Library | Purpose |
 |---------|---------|
-| mbedTLS (built-in) | RSA key generation, X.509 CSR, TLS/mTLS |
+| mbedTLS (built-in) | TLS/mTLS for Keycloak authentication |
 | Nanopb | Lightweight protobuf encoding (~3KB code) |
-| ArduinoJson | JSON parsing for registration/auth responses |
+| ArduinoJson | JSON parsing for Keycloak token response |
 | LittleFS | Certificate storage on flash |
 
 ## Notes
 
-- **RSA key generation** takes 15-60 seconds on ESP32 due to limited CPU. The firmware logs progress.
-- **Operational certificates** are persisted to LittleFS after registration, surviving reboots. To re-register, delete them from the filesystem or reflash.
+- **Certificates** are pre-provisioned via `make uploadfs`. The initial registration (factory cert → registration server → operational cert) is handled by an external program.
+- **Token refresh** happens automatically. The firmware re-authenticates with Keycloak 30 seconds before the JWT expires, then reconnects to NATS with the new token.
 - The **NATS client** is a minimal implementation supporting only CONNECT, PUB, and PING/PONG -- sufficient for telemetry publishing.
 - **Protobuf messages** use Nanopb for minimal memory footprint. The `.options` file constrains field sizes for static allocation.
