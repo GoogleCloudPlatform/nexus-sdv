@@ -17,7 +17,8 @@ from cryptography.x509.oid import NameOID
 UID = "DEVICE001"
 DEVICE = "mcp"
 
-OPERATIONAL_CERTIFICATE_PATH = "certificates/operational.crt.pem"
+OPERATIONAL_CERTIFICATE_FILE = "operational.crt.pem"
+OPERATIONAL_KEY_FILE = "operational.key.pem"
 
 # CA paths for remote PKI (downloaded from GCP Secret Manager)
 REMOTE_KEYCLOAK_CA_PATH = "certificates/KEYCLOAK_TLS_CRT.pem"
@@ -45,10 +46,9 @@ def register(
     client_csr_path: str,
     client_certificate_path: str,
     registration_url: str,
-    operational_key_path: str,
+    operational_path: str,
 ) -> tuple[str, str]:
     """Get operational certificate and URLs from registration server."""
-
     _, registration_ca_path = get_ca_paths(pki_strategy)
 
     print("Step 1: Generating operational key pair...")
@@ -62,7 +62,7 @@ def register(
     )
 
     # Save operational key to file
-    operational_key_path = Path(operational_key_path)
+    operational_key_path = Path(operational_path) / OPERATIONAL_KEY_FILE
     operational_key_path.parent.mkdir(parents=True, exist_ok=True)
     operational_key_path.write_bytes(operational_key_bytes)
     print(f"  Saved operational key to {operational_key_path}")
@@ -72,7 +72,7 @@ def register(
     # Note: Use DirectoryString with UTF8String encoding to match Go client behavior
     # The registration server requires CN to be encoded as UTF8String
     # DEVICE is set to VIN (matches factory cert and Go client behavior)
-    cn_value = f"VIN:{uid} DEVICE:{uid}"
+    cn_value = f"VIN:{uid} DEVICE:ESP32"
 
     # Use _UnvalidatedDirectoryString to force UTF8String encoding
     from cryptography.x509.name import _ASN1Type
@@ -109,10 +109,10 @@ def register(
     data = response.json()
 
     print("Step 4: Parsing operational certificate...")
-    operational_certificate_path = Path(OPERATIONAL_CERTIFICATE_PATH)
+    operational_certificate_path = Path(operational_path) / OPERATIONAL_CERTIFICATE_FILE
     operational_certificate_path.parent.mkdir(parents=True, exist_ok=True)
     operational_certificate_path.write_text(data["certificate"])
-    print(f"  Saved operational certificate to {OPERATIONAL_CERTIFICATE_PATH}")
+    print(f"  Saved operational certificate to {operational_path + OPERATIONAL_CERTIFICATE_FILE}")
 
     print("Successfully registered and received operational certificate.")
     print(f"  Keycloak URL: {data['keycloak_url']}")
@@ -124,7 +124,7 @@ def register(
 def get_access_token(
     pki_strategy: str,
     keycloak_server_url: str,
-    operational_key_path: str,
+    operational_path: str,
 ) -> tuple[str, int]:
     """Get access token from Keycloak server."""
 
@@ -137,7 +137,7 @@ def get_access_token(
             keycloak_server_url,
             client_id="car",
             realm_name="sdv-telemetry",
-            cert=(OPERATIONAL_CERTIFICATE_PATH, operational_key_path),
+            cert=(operational_path + OPERATIONAL_CERTIFICATE_FILE, operational_path + OPERATIONAL_KEY_FILE),
             verify=keycloak_ca_path,
         )
 
