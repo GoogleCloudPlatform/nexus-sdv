@@ -31,4 +31,8 @@
 #define TELEMETRY_PREFIX       "prod.bigtable"
 #define SCHEMA_VERSION         1
 
+// ---- GPS (GY-NEO M8N on UART2) ----
+#define GPS_RX_PIN             16
+#define GPS_TX_PIN             17
+
 #endif

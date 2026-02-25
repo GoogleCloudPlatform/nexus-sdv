@@ -6,7 +6,7 @@
 #include <pb_encode.h>
 #include "telemetry.pb.h"
 
-bool telemetry_send_message(NatsClient *nc, const char *vin, const char *prefix, int index, int interval_sec) {
+bool telemetry_send_message(NatsClient *nc, const char *vin, const char *prefix, int index, int interval_sec, const GpsData *gps) {
 
     telemetry_TelemetryMessage msg = telemetry_TelemetryMessage_init_zero;
 
@@ -23,32 +23,65 @@ bool telemetry_send_message(NatsClient *nc, const char *vin, const char *prefix,
     struct timeval tv;
     gettimeofday(&tv, NULL);
 
-    // Sensor readings (matching Python client pattern)
-    msg.sensor_data_count = 3;
+    int idx = 0;
 
     // Reading 1: time_passed (DYNAMIC)
-    msg.sensor_data[0].has_timestamp = true;
-    msg.sensor_data[0].timestamp.seconds = (int64_t)tv.tv_sec;
-    msg.sensor_data[0].timestamp.nanos = (int32_t)(tv.tv_usec * 1000);
-    snprintf(msg.sensor_data[0].value, sizeof(msg.sensor_data[0].value), "%d seconds", index * interval_sec);
-    msg.sensor_data[0].data_type = telemetry_DataType_DYNAMIC;
-    strncpy(msg.sensor_data[0].sensor, "time_passed", sizeof(msg.sensor_data[0].sensor) - 1);
+    msg.sensor_data[idx].has_timestamp = true;
+    msg.sensor_data[idx].timestamp.seconds = (int64_t)tv.tv_sec;
+    msg.sensor_data[idx].timestamp.nanos = (int32_t)(tv.tv_usec * 1000);
+    snprintf(msg.sensor_data[idx].value, sizeof(msg.sensor_data[idx].value), "%d seconds", index * interval_sec);
+    msg.sensor_data[idx].data_type = telemetry_DataType_DYNAMIC;
+    strncpy(msg.sensor_data[idx].sensor, "time_passed", sizeof(msg.sensor_data[idx].sensor) - 1);
+    idx++;
 
     // Reading 2: index (STATIC)
-    msg.sensor_data[1].has_timestamp = true;
-    msg.sensor_data[1].timestamp.seconds = (int64_t)tv.tv_sec;
-    msg.sensor_data[1].timestamp.nanos = (int32_t)(tv.tv_usec * 1000);
-    snprintf(msg.sensor_data[1].value, sizeof(msg.sensor_data[1].value), "%d", index);
-    msg.sensor_data[1].data_type = telemetry_DataType_STATIC;
-    strncpy(msg.sensor_data[1].sensor, "index", sizeof(msg.sensor_data[1].sensor) - 1);
+    msg.sensor_data[idx].has_timestamp = true;
+    msg.sensor_data[idx].timestamp.seconds = (int64_t)tv.tv_sec;
+    msg.sensor_data[idx].timestamp.nanos = (int32_t)(tv.tv_usec * 1000);
+    snprintf(msg.sensor_data[idx].value, sizeof(msg.sensor_data[idx].value), "%d", index);
+    msg.sensor_data[idx].data_type = telemetry_DataType_STATIC;
+    strncpy(msg.sensor_data[idx].sensor, "index", sizeof(msg.sensor_data[idx].sensor) - 1);
+    idx++;
 
     // Reading 3: test_key (STATIC)
-    msg.sensor_data[2].has_timestamp = true;
-    msg.sensor_data[2].timestamp.seconds = (int64_t)tv.tv_sec;
-    msg.sensor_data[2].timestamp.nanos = (int32_t)(tv.tv_usec * 1000);
-    strncpy(msg.sensor_data[2].value, "test_value", sizeof(msg.sensor_data[2].value) - 1);
-    msg.sensor_data[2].data_type = telemetry_DataType_STATIC;
-    strncpy(msg.sensor_data[2].sensor, "test_key", sizeof(msg.sensor_data[2].sensor) - 1);
+    msg.sensor_data[idx].has_timestamp = true;
+    msg.sensor_data[idx].timestamp.seconds = (int64_t)tv.tv_sec;
+    msg.sensor_data[idx].timestamp.nanos = (int32_t)(tv.tv_usec * 1000);
+    strncpy(msg.sensor_data[idx].value, "test_value", sizeof(msg.sensor_data[idx].value) - 1);
+    msg.sensor_data[idx].data_type = telemetry_DataType_STATIC;
+    strncpy(msg.sensor_data[idx].sensor, "test_key", sizeof(msg.sensor_data[idx].sensor) - 1);
+    idx++;
+
+    // GPS readings (only when fix is available)
+    if (gps && gps->valid) {
+        msg.sensor_data[idx].has_timestamp = true;
+        msg.sensor_data[idx].timestamp.seconds = (int64_t)tv.tv_sec;
+        msg.sensor_data[idx].timestamp.nanos = (int32_t)(tv.tv_usec * 1000);
+        snprintf(msg.sensor_data[idx].value, sizeof(msg.sensor_data[idx].value), "%.6f", gps->latitude);
+        msg.sensor_data[idx].data_type = telemetry_DataType_DYNAMIC;
+        strncpy(msg.sensor_data[idx].sensor, "gps.latitude", sizeof(msg.sensor_data[idx].sensor) - 1);
+        idx++;
+
+        msg.sensor_data[idx].has_timestamp = true;
+        msg.sensor_data[idx].timestamp.seconds = (int64_t)tv.tv_sec;
+        msg.sensor_data[idx].timestamp.nanos = (int32_t)(tv.tv_usec * 1000);
+        snprintf(msg.sensor_data[idx].value, sizeof(msg.sensor_data[idx].value), "%.6f", gps->longitude);
+        msg.sensor_data[idx].data_type = telemetry_DataType_DYNAMIC;
+        strncpy(msg.sensor_data[idx].sensor, "gps.longitude", sizeof(msg.sensor_data[idx].sensor) - 1);
+        idx++;
+
+        msg.sensor_data[idx].has_timestamp = true;
+        msg.sensor_data[idx].timestamp.seconds = (int64_t)tv.tv_sec;
+        msg.sensor_data[idx].timestamp.nanos = (int32_t)(tv.tv_usec * 1000);
+        snprintf(msg.sensor_data[idx].value, sizeof(msg.sensor_data[idx].value), "%.2f", gps->altitude);
+        msg.sensor_data[idx].data_type = telemetry_DataType_DYNAMIC;
+        strncpy(msg.sensor_data[idx].sensor, "gps.altitude", sizeof(msg.sensor_data[idx].sensor) - 1);
+        idx++;
+
+        Serial.printf("[Telemetry] GPS: lat=%.6f lng=%.6f alt=%.2f\n", gps->latitude, gps->longitude, gps->altitude);
+    }
+
+    msg.sensor_data_count = idx;
 
     // Encode to protobuf binary
     uint8_t buffer[512];

@@ -4,6 +4,7 @@
 #include "cert_manager.h"
 #include "keycloak_auth.h"
 #include "nats_client.h"
+#include "gps_manager.h"
 #include "telemetry_sender.h"
 
 enum ClientState {
@@ -44,9 +45,13 @@ void setup() {
     Serial.printf("  Telemetry interval: %d ms\n", TELEMETRY_INTERVAL_MS);
     Serial.printf("  Free heap: %u bytes\n", ESP.getFreeHeap());
     Serial.println("==========================================\n");
+
+    gps_init(GPS_RX_PIN, GPS_TX_PIN);
 }
 
 void loop() {
+    gps_feed();
+
     switch (currentState) {
 
     case STATE_WIFI_CONNECT:
@@ -152,7 +157,8 @@ void loop() {
 
         if (lastSendTime == 0 || (millis() - lastSendTime) >= (unsigned long)TELEMETRY_INTERVAL_MS) {
             int interval_sec = TELEMETRY_INTERVAL_MS / 1000;
-            if (telemetry_send_message(natsClient, DEVICE_ID, TELEMETRY_PREFIX, messageIndex, interval_sec)) {
+            GpsData gpsData = gps_get_data();
+            if (telemetry_send_message(natsClient, DEVICE_ID, TELEMETRY_PREFIX, messageIndex, interval_sec, &gpsData)) {
                 Serial.printf("[Main] Message %d sent.\n", messageIndex + 1);
                 messageIndex++;
             } else {
