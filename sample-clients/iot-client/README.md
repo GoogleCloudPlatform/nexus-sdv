@@ -49,6 +49,16 @@ Then edit `include/config.h` with your settings:
 #define NATS_URL            "nats://nats-server.example.com:4222"
 ```
 
+#### Config Flags
+
+| Flag                    | Default | Description                                                                                                         |
+|-------------------------|---------|---------------------------------------------------------------------------------------------------------------------|
+| `SKIP_KEYCLOAK_AUTH`    | `false` | Skip certificate loading and Keycloak authentication. Connects to NATS without a JWT. Useful for local development. |
+| `DEEP_SLEEP_ENABLED`    | `false` | When true, send one telemetry message per wake cycle and enter deep sleep. When false, run continuously.            |
+| `DEEP_SLEEP_DURATION_S` | `300`   | Deep sleep duration in seconds (5 minutes).                                                                         |
+| `GPS_WAIT_FOR_FIX`      | `false` | Wait for a GPS fix before connecting to NATS. Sends without GPS if the timeout expires.                             |
+| `GPS_FIX_TIMEOUT_S`     | `90`    | Maximum seconds to wait for a GPS fix before sending without it. Set to `0` to wait indefinitely.                   |
+
 ### 3. Provision certificates
 
 Place the operational certificates (obtained from the external registration program) into `data/certs/`:
@@ -107,7 +117,9 @@ Expected output on successful run:
   DEVICE ID:             DEVICE001
   Keycloak URL:          https://keycloak.example.com
   NATS URL:              nats://nats-server.example.com:4222
+  Keycloak auth:         enabled
   Telemetry interval:    300000 ms
+  Deep sleep:            OFF
   Free heap:             286068 bytes
 ==========================================
 

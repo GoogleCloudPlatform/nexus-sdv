@@ -40,16 +40,22 @@ STATE_WIFI_CONNECT
   STATE_NTP_SYNC
         |
         v
-  STATE_LOAD_CERTS
+  STATE_LOAD_CERTS          (skipped if SKIP_KEYCLOAK_AUTH)
         |
         v
-  STATE_AUTHENTICATE  <------+
+  STATE_AUTHENTICATE  <------+  (skipped if SKIP_KEYCLOAK_AUTH)
+        |                     |
+        v                     |
+  STATE_GPS_WAIT              |  (only if GPS_WAIT_FOR_FIX)
         |                     |
         v                     |
   STATE_NATS_CONNECT          |  token expiring
         |                     |
         v                     |
   STATE_SEND_TELEMETRY  ------+
+        |
+        v
+  STATE_DEEP_SLEEP              (only if DEEP_SLEEP_ENABLED)
 ```
 
 ### Why a state machine?
@@ -59,7 +65,7 @@ Arduino's (we use the Arduino framework [via PlatformIO's `framework = arduino`]
 - **Retry with backoff**: each state can independently retry on failure without restarting from scratch.
 - **Token refresh**: the telemetry loop transitions back to `STATE_AUTHENTICATE` when the JWT is expiring, then returns to `STATE_NATS_CONNECT` without re-loading certificates.
 - **NATS keepalive**: the `STATE_SEND_TELEMETRY` state calls `nats_process()` on every `loop()` iteration to respond to PING/PONG, even between telemetry sends.
-- **Deep sleep readiness**: the state machine can be entered at any point after a wake-up. With JWT persistence (future work), a device waking from deep sleep can skip directly to `STATE_AUTHENTICATE` or `STATE_NATS_CONNECT`.
+- **Deep sleep**: the state machine restarts from `STATE_WIFI_CONNECT` on each wake. JWT caching to LittleFS allows `STATE_AUTHENTICATE` to skip Keycloak if the cached token is still valid.
 
 ## Security Architecture
 
@@ -181,28 +187,42 @@ if (token && token[0] != '\0') {
 This allows the same client to work with both authenticated (JWT) and unauthenticated (local development) NATS servers.
 
 
-## Deep Sleep Considerations
+## Deep Sleep
 
-The current firmware runs continuously, but the architecture is designed for a future deep sleep mode where the ESP32 wakes periodically (e.g., every 10 minutes) to send telemetry.
+When `DEEP_SLEEP_ENABLED` is true, the ESP32 wakes, sends one telemetry message, and enters deep sleep for `DEEP_SLEEP_DURATION_S` seconds. When false, the firmware runs continuously with a persistent NATS connection.
 
 **What survives deep sleep:**
-- LittleFS (flash storage): certificates, potentially cached JWT
-- RTC memory (~8KB): small state like wake counter
+- LittleFS (flash storage): certificates, cached JWT
+- RTC memory (~8KB): `messageIndex` counter (`RTC_DATA_ATTR`)
 
 **What does not survive deep sleep:**
 - All RAM (static variables, heap allocations)
 - `millis()` counter (resets to 0)
 - WiFi connection, TCP sockets, NATS connection
 
-**Implications for the current design:**
+### JWT Caching
 
-| Concern          | Current approach                         | Deep sleep ready?                                    |
-| ---------------- | ---------------------------------------- | ---------------------------------------------------- |
-| Token validation | JWT `exp` claim vs `time()`              | Yes -- absolute timestamp, not relative timer        |
-| Certificates     | Loaded from LittleFS each boot           | Yes -- LittleFS survives deep sleep                  |
-| WiFi             | Reconnects on each state machine entry   | Yes -- would reconnect on wake                       |
-| NATS             | Persistent TCP connection with keepalive | No -- connection is per-wake-cycle                   |
-| JWT storage      | In-memory only                           | Needs work -- must persist to LittleFS or RTC memory |
+After acquiring a JWT from Keycloak, the firmware saves it to LittleFS at `/cache/jwt.txt`. On the next wake cycle, `STATE_AUTHENTICATE` loads the cached token first and checks it with `token_valid_for()`. If the token is still valid, the Keycloak roundtrip is skipped entirely. This is possible because the JWT `exp` claim is an absolute Unix timestamp validated against NTP time, not a relative timer.
 
-The token validation via `exp` claim was specifically chosen over `millis()`-based tracking to enable this transition.
-A deep sleep implementation would add JWT persistence to LittleFS and enter the state machine at `STATE_AUTHENTICATE` (checking the cached token first) rather than `STATE_WIFI_CONNECT`.
+### GPS Fix Wait
+
+GPS modules need 26-60 seconds for a cold start fix after power-on. After boot, the firmware reaches `STATE_SEND_TELEMETRY` within ~5-8 seconds — too fast for a fix. When `GPS_WAIT_FOR_FIX` is true, a `STATE_GPS_WAIT` state is inserted *before* `STATE_NATS_CONNECT`:
+
+```
+STATE_AUTHENTICATE (or STATE_NTP_SYNC if auth skipped)
+      |
+      v
+STATE_GPS_WAIT  ← feeds GPS until fix or GPS_FIX_TIMEOUT_S
+      |
+      v
+STATE_NATS_CONNECT → STATE_SEND_TELEMETRY → STATE_DEEP_SLEEP
+```
+
+The GPS wait happens before NATS connect so there is no idle TCP connection to keep alive during the wait. If no fix is acquired within the timeout, telemetry is sent without GPS data (existing graceful fallback).
+
+### Wake Cycle Flow
+
+```
+Wake from deep sleep → setup() → loop():
+  WiFi → NTP → Certs → Auth (cached JWT?) → [GPS wait?] → NATS → Send 1 message → Sleep
+```

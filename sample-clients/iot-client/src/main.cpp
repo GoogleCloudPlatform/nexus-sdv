@@ -12,6 +12,7 @@ enum ClientState {
     STATE_NTP_SYNC,
     STATE_LOAD_CERTS,
     STATE_AUTHENTICATE,
+    STATE_GPS_WAIT,
     STATE_NATS_CONNECT,
     STATE_SEND_TELEMETRY,
     STATE_DEEP_SLEEP,
@@ -33,6 +34,9 @@ static NatsClient *natsClient = nullptr;
 RTC_DATA_ATTR int messageIndex = 0;
 static unsigned long lastSendTime = 0;
 
+// Tracks when STATE_GPS_WAIT was entered to enforce GPS_FIX_TIMEOUT_S
+static unsigned long gpsWaitStart = 0;
+
 // JWT cache path (LittleFS) for deep sleep persistence
 static const char *JWT_CACHE_PATH = "/cache/jwt.txt";
 
@@ -46,11 +50,11 @@ void setup() {
     Serial.printf("  DEVICE ID:             %s\n", DEVICE_ID);
     Serial.printf("  Keycloak URL:          %s\n", KEYCLOAK_URL);
     Serial.printf("  NATS URL:              %s\n", NATS_URL);
-    Serial.printf("  Auth:                %s\n", SKIP_KEYCLOAK_AUTH ? "SKIP" : "Keycloak");
-    Serial.printf("  Telemetry interval: %d ms\n", TELEMETRY_INTERVAL_MS);
-    Serial.printf("  Deep sleep:          %s\n", DEEP_SLEEP_ENABLED ? "ON" : "OFF");
+    Serial.printf("  Keycloak auth:         %s\n", SKIP_KEYCLOAK_AUTH ? "skipped" : "enabled");
+    Serial.printf("  Telemetry interval:    %d ms\n", TELEMETRY_INTERVAL_MS);
+    Serial.printf("  Deep sleep:            %s\n", DEEP_SLEEP_ENABLED ? "ON" : "OFF");
     if (DEEP_SLEEP_ENABLED) {
-        Serial.printf("  Sleep duration:      %d s\n", DEEP_SLEEP_DURATION_S);
+        Serial.printf("  Sleep duration:    %d s\n", DEEP_SLEEP_DURATION_S);
     }
     Serial.printf("  Free heap: %u bytes\n", ESP.getFreeHeap());
     Serial.println("==========================================\n");
@@ -91,7 +95,11 @@ void loop() {
                 char tbuf[32];
                 strftime(tbuf, sizeof(tbuf), "%Y-%m-%d %H:%M:%S UTC", &timeinfo);
                 Serial.printf("[Main] Time synced: %s\n", tbuf);
-                currentState = SKIP_KEYCLOAK_AUTH ? STATE_NATS_CONNECT : STATE_LOAD_CERTS;
+                if (SKIP_KEYCLOAK_AUTH) {
+                    currentState = GPS_WAIT_FOR_FIX ? STATE_GPS_WAIT : STATE_NATS_CONNECT;
+                } else {
+                    currentState = STATE_LOAD_CERTS;
+                }
             } else {
                 Serial.println("[Main] NTP sync failed. Retrying...");
                 delay(2000);
@@ -126,7 +134,7 @@ void loop() {
                 if (cached && token_valid_for(cached, TOKEN_MIN_REMAINING_S)) {
                     Serial.println("[Main] Using cached JWT.");
                     accessToken = cached;
-                    currentState = STATE_NATS_CONNECT;
+                    currentState = GPS_WAIT_FOR_FIX ? STATE_GPS_WAIT : STATE_NATS_CONNECT;
                     break;
                 }
                 free(cached);
@@ -138,7 +146,7 @@ void loop() {
                 accessToken = auth.access_token;
                 // Cache JWT for deep sleep persistence
                 fs_save_file(JWT_CACHE_PATH, accessToken);
-                currentState = STATE_NATS_CONNECT;
+                currentState = GPS_WAIT_FOR_FIX ? STATE_GPS_WAIT : STATE_NATS_CONNECT;
             } else {
                 Serial.println("[Main] Authentication failed. Retrying in 5s...");
                 delay(5000);
@@ -157,6 +165,33 @@ void loop() {
             nats_destroy(natsClient);
             natsClient = nullptr;
             delay(5000);
+        }
+        break;
+
+    case STATE_GPS_WAIT:
+        {
+            if (gpsWaitStart == 0) {
+                gpsWaitStart = millis();
+                Serial.printf("[Main] Waiting for GPS fix (timeout: %d s)...\n", GPS_FIX_TIMEOUT_S);
+            }
+
+            GpsData gpsCheck = gps_get_data();
+            unsigned long elapsed = millis() - gpsWaitStart;
+
+            if (gpsCheck.valid) {
+                Serial.printf("[Main] GPS fix acquired after %lu s.\n", elapsed / 1000);
+                gpsWaitStart = 0;
+                currentState = STATE_NATS_CONNECT;
+            } else if (GPS_FIX_TIMEOUT_S > 0 && elapsed >= (unsigned long)GPS_FIX_TIMEOUT_S * 1000) {
+                Serial.printf("[Main] GPS fix timeout after %d s. Sending without GPS.\n", GPS_FIX_TIMEOUT_S);
+                gpsWaitStart = 0;
+                currentState = STATE_NATS_CONNECT;
+            } else {
+                if (elapsed % 10000 < 150) {
+                    Serial.printf("[Main] Waiting for GPS fix... %lu s / %d s\n", elapsed / 1000, GPS_FIX_TIMEOUT_S);
+                }
+                delay(100);
+            }
         }
         break;
 

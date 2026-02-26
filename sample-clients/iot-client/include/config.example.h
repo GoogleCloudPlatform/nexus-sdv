@@ -28,13 +28,15 @@
 #define NATS_DEFAULT_PORT       4222
 
 // ---- Telemetry ----
-#define TELEMETRY_INTERVAL_MS  300000  // 1000*60*5 ms
+#define TELEMETRY_INTERVAL_MS  300000  // 5min > 1000ms * 60s * 5min = 300.000ms
 #define TELEMETRY_PREFIX       "prod.bigtable"
 #define SCHEMA_VERSION         1
 
 // ---- GPS (GY-NEO M8N on UART2) ----
 #define GPS_RX_PIN             16
 #define GPS_TX_PIN             17
+#define GPS_WAIT_FOR_FIX       false
+#define GPS_FIX_TIMEOUT_S      90
 
 // ---- Deep Sleep ----
 #define DEEP_SLEEP_ENABLED     false
