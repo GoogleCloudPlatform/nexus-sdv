@@ -54,7 +54,7 @@ void setup() {
     Serial.printf("  Telemetry interval:    %d ms\n", TELEMETRY_INTERVAL_MS);
     Serial.printf("  Deep sleep:            %s\n", DEEP_SLEEP_ENABLED ? "ON" : "OFF");
     if (DEEP_SLEEP_ENABLED) {
-        Serial.printf("  Sleep duration:    %d s\n", DEEP_SLEEP_DURATION_S);
+        Serial.printf("  Sleep duration:        %d s\n", DEEP_SLEEP_DURATION_S);
     }
     Serial.printf("  Free heap: %u bytes\n", ESP.getFreeHeap());
     Serial.println("==========================================\n");
@@ -241,6 +241,7 @@ void loop() {
         free(opKeyPem);    opKeyPem    = nullptr;
         free(caCertPem);   caCertPem   = nullptr;
         free(accessToken); accessToken = nullptr;
+        gps_enter_powersave_mode();
         Serial.printf("[Main] Sleeping for %d seconds. Goodnight.\n", DEEP_SLEEP_DURATION_S);
         Serial.flush();
         esp_deep_sleep(DEEP_SLEEP_DURATION_S * 1000000ULL);

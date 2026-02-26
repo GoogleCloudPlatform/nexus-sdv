@@ -2,6 +2,30 @@
 
 This document explains the architecture decisions and design rationale behind the ESP32 IoT client firmware.
 
+## Table of Contents
+
+- [IoT Client Architecture](#iot-client-architecture)
+  - [Table of Contents](#table-of-contents)
+  - [Overview](#overview)
+  - [State Machine](#state-machine)
+    - [Why a state machine?](#why-a-state-machine)
+  - [Security Architecture](#security-architecture)
+    - [Certificate Lifecycle](#certificate-lifecycle)
+    - [JWT Token Validation](#jwt-token-validation)
+  - [Protobuf with Nanopb](#protobuf-with-nanopb)
+    - [Why Nanopb?](#why-nanopb)
+    - [The `.options` File](#the-options-file)
+  - [NATS Client](#nats-client)
+    - [Why a Custom Client?](#why-a-custom-client)
+    - [Minimal Protocol Implementation](#minimal-protocol-implementation)
+    - [C++ Object Lifecycle](#c-object-lifecycle)
+    - [Optional Authentication](#optional-authentication)
+  - [Deep Sleep](#deep-sleep)
+    - [JWT Caching](#jwt-caching)
+    - [GPS Fix Wait](#gps-fix-wait)
+    - [GPS Power Saving](#gps-power-saving)
+    - [Wake Cycle Flow](#wake-cycle-flow)
+
 ## Overview
 
 The IoT client runs on an ESP32 microcontroller with ~520KB of SRAM, no OS, and no heap management like a desktop system.
@@ -219,6 +243,15 @@ STATE_NATS_CONNECT → STATE_SEND_TELEMETRY → STATE_DEEP_SLEEP
 ```
 
 The GPS wait happens before NATS connect so there is no idle TCP connection to keep alive during the wait. If no fix is acquired within the timeout, telemetry is sent without GPS data (existing graceful fallback).
+
+### GPS Power Saving
+
+Before entering deep sleep, `gps_enter_powersave_mode()` sends a UBX-RXM-PMREQ command to put the GPS module into backup mode.
+On the next boot, `gps_init()` wakes the module by pulling the TX pin LOW for 200ms via GPIO, creating a falling edge on the module's RX line.
+This runs on every boot (cold boot and deep sleep wake) — the GPS receiver treats the pulse as a UART break condition and discards it harmlessly when not in backup mode.
+
+If the module has battery-backed RAM (VBAT pin with coin cell), it retains satellite ephemeris data and can do a **hot start** (~1-2 seconds to fix) instead of a cold start (~30-60 seconds).
+Without a backup battery, the module still enters low power but requires a full cold start on wake.
 
 ### Wake Cycle Flow
 

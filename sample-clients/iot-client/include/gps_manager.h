@@ -19,4 +19,7 @@ void gps_feed();
 // Return a snapshot of the current GPS state.
 GpsData gps_get_data();
 
+// Put GPS module into backup / power saving mode. Wakes on next gps_init() call.
+void gps_enter_powersave_mode();
+
 #endif
