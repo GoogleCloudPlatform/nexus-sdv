@@ -1,7 +1,7 @@
 #include <Arduino.h>
 #include "config.h"
 #include "wifi_manager.h"
-#include "cert_manager.h"
+#include "fs_manager.h"
 #include "keycloak_auth.h"
 #include "nats_client.h"
 #include "gps_manager.h"
@@ -14,6 +14,7 @@ enum ClientState {
     STATE_AUTHENTICATE,
     STATE_NATS_CONNECT,
     STATE_SEND_TELEMETRY,
+    STATE_DEEP_SLEEP,
     STATE_ERROR
 };
 
@@ -29,8 +30,11 @@ static char *accessToken = nullptr;
 
 // NATS + telemetry state
 static NatsClient *natsClient = nullptr;
-static int messageIndex = 0;
+RTC_DATA_ATTR int messageIndex = 0;
 static unsigned long lastSendTime = 0;
+
+// JWT cache path (LittleFS) for deep sleep persistence
+static const char *JWT_CACHE_PATH = "/cache/jwt.txt";
 
 void setup() {
     Serial.begin(115200);
@@ -43,6 +47,10 @@ void setup() {
     Serial.printf("  Keycloak URL:          %s\n", KEYCLOAK_URL);
     Serial.printf("  NATS URL:              %s\n", NATS_URL);
     Serial.printf("  Telemetry interval: %d ms\n", TELEMETRY_INTERVAL_MS);
+    Serial.printf("  Deep sleep:          %s\n", DEEP_SLEEP_ENABLED ? "ON" : "OFF");
+    if (DEEP_SLEEP_ENABLED) {
+        Serial.printf("  Sleep duration:      %d s\n", DEEP_SLEEP_DURATION_S);
+    }
     Serial.printf("  Free heap: %u bytes\n", ESP.getFreeHeap());
     Serial.println("==========================================\n");
 
@@ -92,13 +100,13 @@ void loop() {
 
     case STATE_LOAD_CERTS:
         Serial.println("[Main] Step 3/5: Loading certificates...");
-        if (!cert_manager_init()) {
+        if (!fs_init()) {
             currentState = STATE_ERROR;
             break;
         }
-        opCertPem = cert_load_pem(OP_CERT_PATH);
-        opKeyPem  = cert_load_pem(OP_KEY_PATH);
-        caCertPem = cert_load_pem(CA_CERT_PATH);
+        opCertPem = fs_load_file(OP_CERT_PATH);
+        opKeyPem  = fs_load_file(OP_KEY_PATH);
+        caCertPem = fs_load_file(CA_CERT_PATH);
         if (opCertPem && opKeyPem && caCertPem) {
             Serial.printf("[Main] Free heap after cert load: %u bytes\n", ESP.getFreeHeap());
             currentState = STATE_AUTHENTICATE;
@@ -111,10 +119,24 @@ void loop() {
     case STATE_AUTHENTICATE:
         Serial.println("[Main] Step 4/5: Getting JWT from Keycloak...");
         {
+            // Try cached JWT first (useful after deep sleep wake)
+            if (!accessToken) {
+                char *cached = fs_load_file(JWT_CACHE_PATH);
+                if (cached && token_valid_for(cached, TOKEN_MIN_REMAINING_S)) {
+                    Serial.println("[Main] Using cached JWT.");
+                    accessToken = cached;
+                    currentState = STATE_NATS_CONNECT;
+                    break;
+                }
+                free(cached);
+            }
+
             AuthResult auth = keycloak_get_token(KEYCLOAK_URL, opCertPem, opKeyPem, caCertPem);
             if (auth.success) {
                 free(accessToken);
                 accessToken = auth.access_token;
+                // Cache JWT for deep sleep persistence
+                fs_save_file(JWT_CACHE_PATH, accessToken);
                 currentState = STATE_NATS_CONNECT;
             } else {
                 Serial.println("[Main] Authentication failed. Retrying in 5s...");
@@ -156,7 +178,7 @@ void loop() {
         }
 
         if (lastSendTime == 0 || (millis() - lastSendTime) >= (unsigned long)TELEMETRY_INTERVAL_MS) {
-            int interval_sec = TELEMETRY_INTERVAL_MS / 1000;
+            int interval_sec = DEEP_SLEEP_ENABLED ? DEEP_SLEEP_DURATION_S : TELEMETRY_INTERVAL_MS / 1000;
             GpsData gpsData = gps_get_data();
             if (telemetry_send_message(natsClient, DEVICE_ID, TELEMETRY_PREFIX, messageIndex, interval_sec, &gpsData)) {
                 Serial.printf("[Main] Message %d sent.\n", messageIndex + 1);
@@ -165,10 +187,28 @@ void loop() {
                 Serial.println("[Main] Failed to send telemetry.");
             }
             lastSendTime = millis();
+
+            if (DEEP_SLEEP_ENABLED) {
+                currentState = STATE_DEEP_SLEEP;
+                break;
+            }
         }
 
         delay(100);
         break;
+
+    case STATE_DEEP_SLEEP:
+        Serial.println("[Main] Entering deep sleep...");
+        nats_destroy(natsClient);
+        natsClient = nullptr;
+        free(opCertPem);   opCertPem   = nullptr;
+        free(opKeyPem);    opKeyPem    = nullptr;
+        free(caCertPem);   caCertPem   = nullptr;
+        free(accessToken); accessToken = nullptr;
+        Serial.printf("[Main] Sleeping for %d seconds. Goodnight.\n", DEEP_SLEEP_DURATION_S);
+        Serial.flush();
+        esp_deep_sleep(DEEP_SLEEP_DURATION_S * 1000000ULL);
+        break;  // never reached
 
     case STATE_ERROR:
         Serial.println("\n==========================================");

@@ -112,10 +112,10 @@ Expected output on successful run:
 [Main] Step 2/5: Synchronizing time via NTP...
 [Main] Time synced: 2026-02-24 10:30:00 UTC
 [Main] Step 3/5: Loading certificates...
-[CertMgr] LittleFS mounted.
-[CertMgr] Loaded /certs/operational.crt.pem (1234 bytes)
-[CertMgr] Loaded /certs/operational.key.pem (1704 bytes)
-[CertMgr] Loaded /certs/ca.crt.pem (1234 bytes)
+[FS] LittleFS mounted.
+[FS] Loaded /certs/operational.crt.pem (1234 bytes)
+[FS] Loaded /certs/operational.key.pem (1704 bytes)
+[FS] Loaded /certs/ca.crt.pem (1234 bytes)
 [Main] Step 4/5: Getting JWT from Keycloak...
 [Auth] Token acquired (expires in 300 s).
 [Main] Token valid for 300 s.

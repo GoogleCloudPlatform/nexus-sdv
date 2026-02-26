@@ -35,4 +35,8 @@
 #define GPS_RX_PIN             16
 #define GPS_TX_PIN             17
 
+// ---- Deep Sleep ----
+#define DEEP_SLEEP_ENABLED     false
+#define DEEP_SLEEP_DURATION_S  300    // 5 minutes
+
 #endif
