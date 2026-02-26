@@ -190,13 +190,3 @@ The PlatformIO `lib_deps` includes `nanopb/Nanopb@^0.4.9`, which provides the **
 ### Build Flag: PB_FIELD_32BIT
 
 The `platformio.ini` build flag `-DPB_FIELD_32BIT=1` allows nanopb to handle field tags above 255 and struct sizes larger than 255 bytes. Without it, nanopb uses 8-bit counters to minimize code size, which would fail for the telemetry message struct.
-
-### Selective Compilation
-
-The `build_src_filter` in `platformio.ini` excludes the registration client from compilation:
-
-```ini
-build_src_filter = +<*> -<registration_client.cpp>
-```
-
-PlatformIO compiles **all** `.cpp` files in `src/` by default. Files that reference removed config defines (like `FACTORY_CERT_PATH` or `RSA_KEY_SIZE`) would fail to compile even if no code path calls them. The filter prevents compilation entirely. The registration source file remains in the repository for future use when the on-device registration flow is needed.
