@@ -3,6 +3,7 @@ import math
 import nats
 import asyncio
 import requests
+import shutil
 import telemetry
 from pathlib import Path
 from keycloak import KeycloakOpenID, KeycloakError
@@ -19,6 +20,7 @@ DEVICE = "mcp"
 
 OPERATIONAL_CERTIFICATE_FILE = "operational.crt.pem"
 OPERATIONAL_KEY_FILE = "operational.key.pem"
+OPERATIONAL_KEYCLOAK_CA_FILE = "keycloak_ca.pem"
 
 # CA paths for remote PKI (downloaded from GCP Secret Manager)
 REMOTE_KEYCLOAK_CA_PATH = "certificates/KEYCLOAK_TLS_CRT.pem"
@@ -49,7 +51,7 @@ def register(
     operational_path: str,
 ) -> tuple[str, str]:
     """Get operational certificate and URLs from registration server."""
-    _, registration_ca_path = get_ca_paths(pki_strategy)
+    keycloak_ca_path, registration_ca_path = get_ca_paths(pki_strategy)
 
     print("Step 1: Generating operational key pair...")
     # Generate a new RSA key pair for operational use (matches Go client behavior)
@@ -112,7 +114,11 @@ def register(
     operational_certificate_path = Path(operational_path) / OPERATIONAL_CERTIFICATE_FILE
     operational_certificate_path.parent.mkdir(parents=True, exist_ok=True)
     operational_certificate_path.write_text(data["certificate"])
-    print(f"  Saved operational certificate to {operational_path + OPERATIONAL_CERTIFICATE_FILE}")
+    print(f"  Saved operational certificate to {operational_certificate_path.name}")
+
+    keycloak_ca_dest = Path(operational_path) / OPERATIONAL_KEYCLOAK_CA_FILE
+    shutil.copy(keycloak_ca_path, keycloak_ca_dest)
+    print(f"  Copied Keycloak CA to {keycloak_ca_dest}")
 
     print("Successfully registered and received operational certificate.")
     print(f"  Keycloak URL: {data['keycloak_url']}")
@@ -122,13 +128,10 @@ def register(
 
 
 def get_access_token(
-    pki_strategy: str,
     keycloak_server_url: str,
     operational_path: str,
 ) -> tuple[str, int]:
     """Get access token from Keycloak server."""
-
-    keycloak_ca_path, _ = get_ca_paths(pki_strategy)
 
     print("Step 1: Configuring mTLS with operational certificate...")
     print(f"Step 2: Requesting JWT from Keycloak at {keycloak_server_url}...")
@@ -138,7 +141,7 @@ def get_access_token(
             client_id="car",
             realm_name="sdv-telemetry",
             cert=(operational_path + OPERATIONAL_CERTIFICATE_FILE, operational_path + OPERATIONAL_KEY_FILE),
-            verify=keycloak_ca_path,
+            verify=str(Path(operational_path) / OPERATIONAL_KEYCLOAK_CA_FILE),
         )
 
         token = keycloak.token(grant_type="client_credentials")

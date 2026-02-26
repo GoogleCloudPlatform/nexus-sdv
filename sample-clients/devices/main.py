@@ -86,7 +86,6 @@ def main():
     if args.with_telemetry:
         # Authenticate with Keycloak using operational certificate + operational key
         access_token, expires_in = device.get_access_token(
-            args.pki_strategy,
             keycloak_server_url,
             args.output,
         )
