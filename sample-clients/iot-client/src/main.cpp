@@ -46,6 +46,7 @@ void setup() {
     Serial.printf("  DEVICE ID:             %s\n", DEVICE_ID);
     Serial.printf("  Keycloak URL:          %s\n", KEYCLOAK_URL);
     Serial.printf("  NATS URL:              %s\n", NATS_URL);
+    Serial.printf("  Auth:                %s\n", SKIP_KEYCLOAK_AUTH ? "SKIP" : "Keycloak");
     Serial.printf("  Telemetry interval: %d ms\n", TELEMETRY_INTERVAL_MS);
     Serial.printf("  Deep sleep:          %s\n", DEEP_SLEEP_ENABLED ? "ON" : "OFF");
     if (DEEP_SLEEP_ENABLED) {
@@ -90,7 +91,7 @@ void loop() {
                 char tbuf[32];
                 strftime(tbuf, sizeof(tbuf), "%Y-%m-%d %H:%M:%S UTC", &timeinfo);
                 Serial.printf("[Main] Time synced: %s\n", tbuf);
-                currentState = STATE_LOAD_CERTS;
+                currentState = SKIP_KEYCLOAK_AUTH ? STATE_NATS_CONNECT : STATE_LOAD_CERTS;
             } else {
                 Serial.println("[Main] NTP sync failed. Retrying...");
                 delay(2000);
@@ -161,7 +162,7 @@ void loop() {
 
     case STATE_SEND_TELEMETRY:
         // Check if token is still valid for at least TOKEN_MIN_REMAINING_S
-        if (!token_valid_for(accessToken, TOKEN_MIN_REMAINING_S)) {
+        if (accessToken && !token_valid_for(accessToken, TOKEN_MIN_REMAINING_S)) {
             Serial.println("[Main] Token expiring soon. Re-authenticating...");
             nats_destroy(natsClient);
             natsClient = nullptr;

@@ -13,6 +13,7 @@
 #define DEVICE_ID              "DEVICE001"
 
 // ---- Keycloak ----
+#define SKIP_KEYCLOAK_AUTH     false
 #define KEYCLOAK_URL           "https://keycloak.example.com"
 #define TOKEN_MIN_REMAINING_S  120
 
