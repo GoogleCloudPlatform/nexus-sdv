@@ -72,13 +72,17 @@ Or all at once:
 make all
 ```
 
-### How to start a local development NATS Server
+### Local Development with NATS
+
+Start a local NATS server with a protobuf-decoding subscriber:
 
 ```bash
-docker run -p 4222:4222 nats:latest --debug -V
+make nats
 ```
 
-See [NATS Server commandline options](https://hub.docker.com/_/nats#commandline-options) for more information.
+This runs `docker compose up` with two services: a NATS server (port 4222) and a subscriber that auto-decodes and prints telemetry messages as JSON.
+
+Set `SKIP_KEYCLOAK_AUTH` to `true` in your `config.h` to skip certificate loading and authentication when using a local NATS server.
 
 ## Lifecycle
 
@@ -162,6 +166,7 @@ PlatformIO terminals, for instance, provide this by default.
 - `make upload`: flash to ESP32
 - `make uploadfs`: flash LittleFS filesystem (certificates) to ESP32
 - `make monitor`: open serial console
+- `make nats`: start NATS server + protobuf subscriber (`docker compose up`)
 - `make clean`: remove build artifacts and generated proto files
 
 ### Code Generation

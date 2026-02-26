@@ -1,6 +1,6 @@
 PROTO_SOURCE = ../../proto/telemetry.proto
 
-.PHONY: all proto config build upload uploadfs monitor clean help
+.PHONY: all proto config build upload uploadfs monitor clean nats help
 
 help:
 	@echo "Available targets:"
@@ -11,6 +11,7 @@ help:
 	@echo "  uploadfs   - Upload LittleFS filesystem (certificates)"
 	@echo "  monitor    - Open serial monitor"
 	@echo "  clean      - Clean build artifacts"
+	@echo "  nats       - Start NATS server + protobuf subscriber (docker compose)"
 	@echo "  all        - Build and upload firmware and filesystem"
 
 config:
@@ -46,5 +47,8 @@ clean:
 	pio run -t clean
 	rm -f src/telemetry.pb.c src/telemetry.pb.h
 	rm -rf src/google
+
+nats:
+	docker compose up --build
 
 all: upload uploadfs

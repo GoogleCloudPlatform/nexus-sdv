@@ -1,0 +1,13 @@
+services:
+  nats:
+    image: nats:latest
+    ports:
+      - "4222:4222"
+    command: ["--debug", "-V"]
+
+  subscriber:
+    build:
+      context: ../../
+      dockerfile: sample-clients/iot-client/dev/nats-subscriber/Dockerfile
+    depends_on:
+      - nats
