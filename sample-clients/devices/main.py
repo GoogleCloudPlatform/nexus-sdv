@@ -1,12 +1,43 @@
 import argparse
 import asyncio
+import os
 
 import device
 import factory
 
-OPERATIONAL_PATH = "certificates/"
+DEFAULT_OPERATIONAL_PATH = "certificates/"
+DEFAULT_PKI_STRATEGY = "local"
+DEFAULT_REGISTRATION_URL = "https://localhost:8080"
+BOOTSTRAP_ENV_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..", "..", "iac", "bootstrapping", ".bootstrap_env"
+)
+
+
+def load_bootstrap_env():
+    if not os.path.isfile(BOOTSTRAP_ENV_PATH):
+        return {}
+    env = {}
+    with open(BOOTSTRAP_ENV_PATH) as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            env[key.strip()] = value.strip().strip('"').strip("'")
+    return env
+
 
 def parse_args():
+    bootstrap = load_bootstrap_env()
+
+    pki_strategy = bootstrap.get("PKI_STRATEGY", DEFAULT_PKI_STRATEGY)
+    registration_hostname = bootstrap.get("REGISTRATION_HOSTNAME")
+    registration_url = (
+        f"https://{registration_hostname}:8080"
+        if registration_hostname
+        else DEFAULT_REGISTRATION_URL
+    )
+
     parser = argparse.ArgumentParser(
         description="Device client for SDV telemetry system"
     )
@@ -17,29 +48,29 @@ def parse_args():
     )
     parser.add_argument(
         "-pki_strategy",
-        required=True,
+        default=pki_strategy,
         choices=["local", "remote"],
         help="PKI strategy: 'local' or 'remote'",
     )
     parser.add_argument(
         "-factory-cert",
-        required=True,
-        help="Path to factory certificate chain (PEM)",
+        default=None,
+        help="Path to factory certificate chain (PEM). Defaults to vehicle-<uid>-factory[-gcp]-chain.pem",
     )
     parser.add_argument(
         "-factory-key",
-        required=True,
-        help="Path to factory private key (PEM)",
+        default=None,
+        help="Path to factory private key (PEM). Defaults to vehicle-<uid>-factory[-gcp]-key.pem",
     )
     parser.add_argument(
         "-registration-url",
-        required=True,
+        default=registration_url,
         help="Registration server URL (e.g., https://registration.example.com:8080)",
     )
     parser.add_argument(
         "-output",
         type=str,
-        default=OPERATIONAL_PATH,
+        default=DEFAULT_OPERATIONAL_PATH,
         help="Output directory path for the generated operation key and certificate",
     )
     parser.add_argument(
@@ -54,7 +85,16 @@ def parse_args():
         default=5,
         help="Telemetry interval in seconds (default: 5)",
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+
+    gcp_suffix = "-gcp" if args.pki_strategy == "remote" else ""
+    if args.factory_cert is None:
+        args.factory_cert = f"vehicle-{args.uid}-factory{gcp_suffix}-chain.pem"
+    if args.factory_key is None:
+        args.factory_key = f"vehicle-{args.uid}-factory{gcp_suffix}-key.pem"
+
+    return args
+
 
 def main():
     args = parse_args()
