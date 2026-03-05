@@ -45,7 +45,6 @@ def register(
     uid: str,
     pki_strategy: str,
     client_key_path: str,
-    client_csr_path: str,
     client_certificate_path: str,
     registration_url: str,
     operational_path: str,

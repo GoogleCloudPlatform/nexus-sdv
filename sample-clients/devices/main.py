@@ -115,21 +115,15 @@ def main():
             raise SystemExit(1)
         factory_cert, factory_key = args.factory_cert, args.factory_key
 
-    # Step 1: Prepare factory certificate for use in registration
-    client_key_path, client_csr_path, client_certificate_path = factory.prepare_factory_cert(
-        args.uid,
-        factory_cert,
-        factory_key,
-        str(history_dir),
-    )
+    # Step 1: Verify factory certificate exists
+    factory_key, factory_cert = factory.prepare_factory_cert(factory_cert, factory_key)
 
     # Register and get operational certificate (generates new operational key)
     keycloak_server_url, nats_server_url = device.register(
         args.uid,
         args.pki_strategy,
-        client_key_path,
-        client_csr_path,
-        client_certificate_path,
+        factory_key,
+        factory_cert,
         args.registration_url,
         str(history_dir),
     )
