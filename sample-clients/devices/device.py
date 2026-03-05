@@ -86,9 +86,7 @@ def register(
     csr_bytes = csr.public_bytes(encoding=serialization.Encoding.PEM)
 
     # Save CSR for debugging
-    uid_dir = Path(operational_path) / uid
-    uid_dir.mkdir(parents=True, exist_ok=True)
-    operational_csr_path = uid_dir / "operational.csr.pem"
+    operational_csr_path = Path(operational_path) / "operational.csr.pem"
     operational_csr_path.write_bytes(csr_bytes)
     print(f"  Saved CSR to {operational_csr_path} (for debugging)")
 

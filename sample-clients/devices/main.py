@@ -1,8 +1,10 @@
 import argparse
 import asyncio
-import os
 import base64
+import os
+import shutil
 import uuid
+from pathlib import Path
 
 import device
 import factory
@@ -99,10 +101,13 @@ def main():
     print(f"Output directory for operational files: {args.output}")
     print()
 
+    history_dir = Path("history") / args.uid
+    history_dir.mkdir(parents=True, exist_ok=True)
+
     # Step 0: Obtain factory certificate
     if args.pki_strategy == "local":
         print("Step 0: Generating factory certificate...")
-        factory_cert, factory_key = factory.generate_factory_cert(args.uid, args.output)
+        factory_cert, factory_key = factory.generate_factory_cert(args.uid, str(history_dir))
         print()
     else:
         if args.factory_cert is None or args.factory_key is None:
@@ -115,7 +120,7 @@ def main():
         args.uid,
         factory_cert,
         factory_key,
-        args.output,
+        str(history_dir),
     )
 
     # Register and get operational certificate (generates new operational key)
@@ -126,8 +131,20 @@ def main():
         client_csr_path,
         client_certificate_path,
         args.registration_url,
-        args.output,
+        str(history_dir),
     )
+
+    urls_env = f'KEYCLOAK_URL="{keycloak_server_url}"\nNATS_URL="{nats_server_url}"\n'
+    (history_dir / "urls.env").write_text(urls_env)
+    print(f"Written urls.env to {history_dir}")
+
+    # Copy final files to output directory
+    output_dir = Path(args.output)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    for filename in ("urls.env", "operational.crt.pem", "operational.key.pem"):
+        shutil.copy(history_dir / filename, output_dir / filename)
+    shutil.copy(history_dir / "keycloak_ca.pem", output_dir / "ca.crt.pem")
+    print(f"Copied final files to {args.output}")
 
     if args.with_telemetry:
         # Authenticate with Keycloak using operational certificate + operational key

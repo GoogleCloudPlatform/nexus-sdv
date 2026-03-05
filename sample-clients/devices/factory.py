@@ -31,7 +31,7 @@ def generate_factory_cert(uid: str, output_dir: str) -> tuple[str, str]:
     Returns:
         Tuple of (chain_path, key_path)
     """
-    out = Path(output_dir) / uid
+    out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
     prefix = out / f"vehicle-{uid}-factory"
 
@@ -114,8 +114,7 @@ def prepare_factory_cert(
     if not factory_key.exists():
         raise FileNotFoundError(f"Factory key not found: {factory_key_path}")
 
-    # Create uid subdirectory for intermediate files
-    uid_dir = Path(output_dir) / uid
+    uid_dir = Path(output_dir)
     uid_dir.mkdir(parents=True, exist_ok=True)
 
     client_key_path = uid_dir / CLIENT_KEY_FILE
