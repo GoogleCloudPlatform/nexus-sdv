@@ -15,3 +15,6 @@ src/google/protobuf/*
 
 # User-specific config (copy config.example.h to config.h and edit)
 include/config.h
+
+# Auto-generated URL overrides (place urls.json in data/ and flash with `make uploadfs`)
+data/urls.json

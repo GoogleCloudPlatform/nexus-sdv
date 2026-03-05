@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <ArduinoJson.h>
 #include "config.h"
 #include "wifi_manager.h"
 #include "fs_manager.h"
@@ -20,6 +21,10 @@ enum ClientState {
 };
 
 static ClientState currentState = STATE_WIFI_CONNECT;
+
+// Runtime URL overrides (loaded from /urls.json on LittleFS, fallback to config.h defaults)
+static char keycloakUrl[256];
+static char natsUrl[256];
 
 // Certificate PEM strings (loaded once, kept for token refresh)
 static char *opCertPem = nullptr;
@@ -47,9 +52,10 @@ void setup() {
     Serial.println("==========================================");
     Serial.println("  Nexus SDV IoT Client");
     Serial.println("==========================================");
+    strlcpy(keycloakUrl, KEYCLOAK_URL, sizeof(keycloakUrl));
+    strlcpy(natsUrl, NATS_URL, sizeof(natsUrl));
+
     Serial.printf("  DEVICE ID:             %s\n", DEVICE_ID);
-    Serial.printf("  Keycloak URL:          %s\n", KEYCLOAK_URL);
-    Serial.printf("  NATS URL:              %s\n", NATS_URL);
     Serial.printf("  Keycloak auth:         %s\n", SKIP_KEYCLOAK_AUTH ? "skipped" : "enabled");
     Serial.printf("  Telemetry interval:    %d ms\n", TELEMETRY_INTERVAL_MS);
     Serial.printf("  Deep sleep:            %s\n", DEEP_SLEEP_ENABLED ? "ON" : "OFF");
@@ -95,11 +101,7 @@ void loop() {
                 char tbuf[32];
                 strftime(tbuf, sizeof(tbuf), "%Y-%m-%d %H:%M:%S UTC", &timeinfo);
                 Serial.printf("[Main] Time synced: %s\n", tbuf);
-                if (SKIP_KEYCLOAK_AUTH) {
-                    currentState = GPS_WAIT_FOR_FIX ? STATE_GPS_WAIT : STATE_NATS_CONNECT;
-                } else {
-                    currentState = STATE_LOAD_CERTS;
-                }
+                currentState = STATE_LOAD_CERTS;
             } else {
                 Serial.println("[Main] NTP sync failed. Retrying...");
                 delay(2000);
@@ -108,11 +110,37 @@ void loop() {
         break;
 
     case STATE_LOAD_CERTS:
-        Serial.println("[Main] Step 3/5: Loading certificates...");
+        Serial.println("[Main] Step 3/5: Loading filesystem...");
         if (!fs_init()) {
             currentState = STATE_ERROR;
             break;
         }
+
+        // Load URL overrides from /urls.json (optional)
+        {
+            char *json = fs_load_file("/urls.json");
+            if (json) {
+                JsonDocument doc;
+                if (deserializeJson(doc, json) == DeserializationError::Ok) {
+                    if (doc["keycloak_url"].is<const char *>())
+                        strlcpy(keycloakUrl, doc["keycloak_url"], sizeof(keycloakUrl));
+                    if (doc["nats_url"].is<const char *>())
+                        strlcpy(natsUrl, doc["nats_url"], sizeof(natsUrl));
+                    Serial.println("[Main] URL overrides loaded from /urls.json");
+                } else {
+                    Serial.println("[Main] WARN: /urls.json parse failed, using defaults.");
+                }
+                free(json);
+            }
+            Serial.printf("  Keycloak URL: %s\n", keycloakUrl);
+            Serial.printf("  NATS URL:     %s\n", natsUrl);
+        }
+
+        if (SKIP_KEYCLOAK_AUTH) {
+            currentState = GPS_WAIT_FOR_FIX ? STATE_GPS_WAIT : STATE_NATS_CONNECT;
+            break;
+        }
+
         opCertPem = fs_load_file(OP_CERT_PATH);
         opKeyPem  = fs_load_file(OP_KEY_PATH);
         caCertPem = fs_load_file(CA_CERT_PATH);
@@ -140,7 +168,7 @@ void loop() {
                 free(cached);
             }
 
-            AuthResult auth = keycloak_get_token(KEYCLOAK_URL, opCertPem, opKeyPem, caCertPem);
+            AuthResult auth = keycloak_get_token(keycloakUrl, opCertPem, opKeyPem, caCertPem);
             if (auth.success) {
                 free(accessToken);
                 accessToken = auth.access_token;
@@ -157,7 +185,7 @@ void loop() {
     case STATE_NATS_CONNECT:
         Serial.println("[Main] Step 5/5: Connecting to NATS...");
         natsClient = nats_create();
-        if (nats_connect(natsClient, NATS_URL, accessToken)) {
+        if (nats_connect(natsClient, natsUrl, accessToken)) {
             lastSendTime = 0;
             currentState = STATE_SEND_TELEMETRY;
         } else {
