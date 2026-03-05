@@ -28,7 +28,7 @@ def generate_factory_cert(uid: str, output_dir: str) -> tuple[str, str]:
     """
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
-    prefix = out / f"vehicle-{uid}-factory"
+    prefix = out / f"device-{uid}-factory"
 
     ca_cert_path = Path(LOCAL_FACTORY_CA_CERT)
     ca_key_path  = Path(LOCAL_FACTORY_CA_KEY)
