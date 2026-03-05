@@ -1,6 +1,7 @@
 import argparse
 import asyncio
 import base64
+import json
 import os
 import shutil
 import uuid
@@ -113,10 +114,11 @@ def main():
         if args.factory_cert is None or args.factory_key is None:
             print("Error: -factory-cert and -factory-key are required for remote PKI strategy.")
             raise SystemExit(1)
+        if not Path(args.factory_cert).exists():
+            raise FileNotFoundError(f"Factory certificate not found: {args.factory_cert}")
+        if not Path(args.factory_key).exists():
+            raise FileNotFoundError(f"Factory key not found: {args.factory_key}")
         factory_cert, factory_key = args.factory_cert, args.factory_key
-
-    # Step 1: Verify factory certificate exists
-    factory_key, factory_cert = factory.prepare_factory_cert(factory_cert, factory_key)
 
     # Register and get operational certificate (generates new operational key)
     keycloak_server_url, nats_server_url = device.register(
@@ -128,14 +130,14 @@ def main():
         str(history_dir),
     )
 
-    urls_env = f'KEYCLOAK_URL="{keycloak_server_url}"\nNATS_URL="{nats_server_url}"\n'
-    (history_dir / "urls.env").write_text(urls_env)
-    print(f"Written urls.env to {history_dir}")
+    urls = {"keycloak_url": keycloak_server_url, "nats_url": nats_server_url}
+    (history_dir / "urls.json").write_text(json.dumps(urls, indent=2))
+    print(f"Written urls.json to {history_dir}")
 
     # Copy final files to output directory
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
-    for filename in ("urls.env", "operational.crt.pem", "operational.key.pem"):
+    for filename in ("urls.json", "operational.crt.pem", "operational.key.pem"):
         shutil.copy(history_dir / filename, output_dir / filename)
     shutil.copy(history_dir / "keycloak_ca.pem", output_dir / "ca.crt.pem")
     print(f"Copied final files to {args.output}")

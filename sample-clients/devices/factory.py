@@ -77,23 +77,3 @@ def generate_factory_cert(uid: str, output_dir: str) -> tuple[str, str]:
     return str(chain_path), str(key_path)
 
 
-def prepare_factory_cert(
-    factory_cert_path: str,
-    factory_key_path: str,
-) -> tuple[str, str]:
-    """
-    Verify factory certificate and key exist and return their paths for use in registration.
-
-    Args:
-        factory_cert_path: Path to the factory certificate chain (PEM)
-        factory_key_path: Path to the factory private key (PEM)
-
-    Returns:
-        Tuple of (key_path, cert_path) for use in registration
-    """
-    if not Path(factory_cert_path).exists():
-        raise FileNotFoundError(f"Factory certificate not found: {factory_cert_path}")
-    if not Path(factory_key_path).exists():
-        raise FileNotFoundError(f"Factory key not found: {factory_key_path}")
-
-    return factory_key_path, factory_cert_path
