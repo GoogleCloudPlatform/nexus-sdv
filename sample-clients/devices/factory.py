@@ -1,18 +1,92 @@
+import datetime
+import os
 from pathlib import Path
 from cryptography import x509
 from cryptography.x509.oid import NameOID
 from cryptography.hazmat.primitives import serialization, hashes
+from cryptography.hazmat.primitives.asymmetric import rsa
 
-# Output paths for client certificates (copied from factory certs)
-CLIENT_KEY_PATH = "certificates/client.key.pem"
-CLIENT_CSR_PATH = "certificates/client.csr.pem"
-CLIENT_CERTIFICATE_PATH = "certificates/client.crt.pem"
+# Filenames for client certificates (copied from factory certs)
+CLIENT_KEY_FILE = "client.key.pem"
+CLIENT_CSR_FILE = "client.csr.pem"
+CLIENT_CERTIFICATE_FILE = "client.crt.pem"
+
+# Factory CA paths (local PKI)
+_HERE = os.path.dirname(os.path.abspath(__file__))
+LOCAL_FACTORY_CA_CERT = os.path.join(_HERE, "..", "..", "base-services", "registration", "pki", "factory-ca", "ca.crt.pem")
+LOCAL_FACTORY_CA_KEY  = os.path.join(_HERE, "..", "..", "base-services", "registration", "pki", "factory-ca", "ca.key.pem")
+
+
+def generate_factory_cert(uid: str, output_dir: str) -> tuple[str, str]:
+    """
+    Generate a factory certificate for a device (local PKI).
+
+    Equivalent to generate-factory-cert.sh: creates an RSA key, signs a
+    certificate with the local factory CA, and writes a chain file.
+
+    Args:
+        uid: unique device identifier
+        output_dir: directory where the generated files are written
+
+    Returns:
+        Tuple of (chain_path, key_path)
+    """
+    out = Path(output_dir) / uid
+    out.mkdir(parents=True, exist_ok=True)
+    prefix = out / f"vehicle-{uid}-factory"
+
+    ca_cert_path = Path(LOCAL_FACTORY_CA_CERT)
+    ca_key_path  = Path(LOCAL_FACTORY_CA_KEY)
+    if not ca_cert_path.exists():
+        raise FileNotFoundError(f"Factory CA certificate not found: {ca_cert_path}")
+    if not ca_key_path.exists():
+        raise FileNotFoundError(f"Factory CA key not found: {ca_key_path}")
+
+    ca_cert = x509.load_pem_x509_certificate(ca_cert_path.read_bytes())
+    ca_key  = serialization.load_pem_private_key(ca_key_path.read_bytes(), password=None)
+
+    print("  Generating RSA private key...")
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    key_path = prefix.with_name(prefix.name + "-key.pem")
+    key_path.write_bytes(private_key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.TraditionalOpenSSL,
+        encryption_algorithm=serialization.NoEncryption(),
+    ))
+
+    print("  Signing certificate with factory CA...")
+    now = datetime.datetime.now(datetime.timezone.utc)
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(x509.Name([
+            x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Vehicle Manufacturer"),
+            x509.NameAttribute(NameOID.COMMON_NAME, f"VIN:{uid} DEVICE:{uid}"),
+        ]))
+        .issuer_name(ca_cert.subject)
+        .public_key(private_key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now)
+        .not_valid_after(now + datetime.timedelta(days=365))
+        .sign(ca_key, hashes.SHA256())
+    )
+
+    cert_pem = cert.public_bytes(serialization.Encoding.PEM)
+    Path(prefix.with_name(prefix.name + ".pem")).write_bytes(cert_pem)
+
+    print("  Building certificate chain...")
+    chain_path = prefix.with_name(prefix.name + "-chain.pem")
+    chain_path.write_bytes(cert_pem + b"\n" + ca_cert_path.read_bytes())
+
+    print(f"  Key:   {key_path}")
+    print(f"  Chain: {chain_path}")
+    return str(chain_path), str(key_path)
 
 
 def prepare_factory_cert(
     uid: str,
     factory_cert_path: str,
     factory_key_path: str,
+    output_dir: str = "certificates",
 ) -> tuple[str, str, str]:
     """
     Prepare factory certificate for use by the device client.
@@ -40,18 +114,21 @@ def prepare_factory_cert(
     if not factory_key.exists():
         raise FileNotFoundError(f"Factory key not found: {factory_key_path}")
 
-    # Create certificates directory
-    Path("certificates").mkdir(parents=True, exist_ok=True)
+    # Create uid subdirectory for intermediate files
+    uid_dir = Path(output_dir) / uid
+    uid_dir.mkdir(parents=True, exist_ok=True)
+
+    client_key_path = uid_dir / CLIENT_KEY_FILE
+    client_cert_path = uid_dir / CLIENT_CERTIFICATE_FILE
+    client_csr_path = uid_dir / CLIENT_CSR_FILE
 
     # Copy factory key to client key location
-    client_key_path = Path(CLIENT_KEY_PATH)
     client_key_path.write_bytes(factory_key.read_bytes())
-    print(f"  Copied factory key to {CLIENT_KEY_PATH}")
+    print(f"  Copied factory key to {client_key_path}")
 
     # Copy factory cert to client cert location
-    client_cert_path = Path(CLIENT_CERTIFICATE_PATH)
     client_cert_path.write_bytes(factory_cert.read_bytes())
-    print(f"  Copied factory certificate to {CLIENT_CERTIFICATE_PATH}")
+    print(f"  Copied factory certificate to {client_cert_path}")
 
     # Load the factory key to generate CSR
     key_data = factory_key.read_bytes()
@@ -66,10 +143,9 @@ def prepare_factory_cert(
     csr_bytes = csr.public_bytes(encoding=serialization.Encoding.PEM)
 
     # Save CSR
-    client_csr_path = Path(CLIENT_CSR_PATH)
     client_csr_path.write_bytes(csr_bytes)
-    print(f"  Generated CSR at {CLIENT_CSR_PATH}")
+    print(f"  Generated CSR at {client_csr_path}")
 
     print("Factory certificate prepared successfully.")
 
-    return CLIENT_KEY_PATH, CLIENT_CSR_PATH, CLIENT_CERTIFICATE_PATH
+    return str(client_key_path), str(client_csr_path), str(client_cert_path)

@@ -73,8 +73,7 @@ def register(
     # Create CSR with operational key (not factory key)
     # Note: Use DirectoryString with UTF8String encoding to match Go client behavior
     # The registration server requires CN to be encoded as UTF8String
-    # DEVICE is set to VIN (matches factory cert and Go client behavior)
-    cn_value = f"VIN:{uid} DEVICE:ESP32"
+    cn_value = f"VIN:{uid} DEVICE:{uid}"
 
     # Use _UnvalidatedDirectoryString to force UTF8String encoding
     from cryptography.x509.name import _ASN1Type
@@ -87,8 +86,11 @@ def register(
     csr_bytes = csr.public_bytes(encoding=serialization.Encoding.PEM)
 
     # Save CSR for debugging
-    Path("certificates/operational.csr.pem").write_bytes(csr_bytes)
-    print(f"  Saved CSR to certificates/operational.csr.pem (for debugging)")
+    uid_dir = Path(operational_path) / uid
+    uid_dir.mkdir(parents=True, exist_ok=True)
+    operational_csr_path = uid_dir / "operational.csr.pem"
+    operational_csr_path.write_bytes(csr_bytes)
+    print(f"  Saved CSR to {operational_csr_path} (for debugging)")
 
     print(f"Step 3: Sending CSR to registration server at {registration_url}...")
     try:
