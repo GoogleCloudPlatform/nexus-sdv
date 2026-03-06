@@ -2,11 +2,11 @@
 proto:
 	mkdir -p proto/
 	touch proto/__init__.py
-	protoc \
-    --proto_path=../../proto \
-    --python_out=proto \
-    --pyi_out=proto \
-    telemetry.proto
+	uv run python -m grpc_tools.protoc \
+		--proto_path=../../proto \
+		--python_out=proto \
+		--pyi_out=proto \
+		telemetry.proto
 
 downloadcerts: proto
 	mkdir -p certificates

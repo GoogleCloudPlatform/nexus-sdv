@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "cryptography>=46.0.5",
+    "grpcio-tools>=1.78.0",
     "nats-py>=2.13.1",
     "protobuf>=6.33.5",
     "python-keycloak>=7.1.1",
