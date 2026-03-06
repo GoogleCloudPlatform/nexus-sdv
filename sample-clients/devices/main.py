@@ -4,8 +4,45 @@ import base64
 import json
 import os
 import shutil
+import sys
 import uuid
 from pathlib import Path
+
+
+def _ensure_proto_generated():
+    script_dir = Path(__file__).parent
+    proto_out = script_dir / "proto"
+    if (proto_out / "telemetry_pb2.py").exists():
+        return
+
+    print("Generating protobuf files...")
+    from grpc_tools import protoc
+
+    if sys.version_info >= (3, 9):
+        from importlib import resources
+        proto_include = str((resources.files("grpc_tools") / "_proto").resolve())
+    else:
+        import pkg_resources
+        proto_include = pkg_resources.resource_filename("grpc_tools", "_proto")
+
+    proto_source = str((script_dir / ".." / ".." / "proto").resolve())
+    proto_out.mkdir(exist_ok=True)
+    (proto_out / "__init__.py").touch()
+
+    ret = protoc.main([
+        "grpc_tools.protoc",
+        f"--proto_path={proto_source}",
+        f"--proto_path={proto_include}",
+        f"--python_out={proto_out}",
+        f"--pyi_out={proto_out}",
+        "telemetry.proto",
+    ])
+    if ret != 0:
+        sys.exit(f"Failed to generate protobuf files (protoc exit code {ret})")
+    print("Protobuf files generated.")
+
+
+_ensure_proto_generated()
 
 import device
 import factory
