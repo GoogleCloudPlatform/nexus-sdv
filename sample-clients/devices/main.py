@@ -172,7 +172,7 @@ def main():
     print(f"Written urls.json to {history_dir}")
 
     # Copy final files to output directory
-    output_dir = Path(args.output)
+    output_dir = Path(args.output).expanduser()
     output_dir.mkdir(parents=True, exist_ok=True)
     for filename in ("urls.json", "operational.crt.pem", "operational.key.pem"):
         shutil.copy(history_dir / filename, output_dir / filename)
