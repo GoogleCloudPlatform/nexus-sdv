@@ -1,0 +1,5 @@
+# Exclude generated data
+proto/
+
+# Exclude client history data
+history/
