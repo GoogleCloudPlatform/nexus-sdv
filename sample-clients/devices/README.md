@@ -1,113 +1,113 @@
-# Devices Client
+# Device Client
 
-Python client that registers devices with the Nexus SDV platform and optionally sends telemetry data.
-It walks through the full device lifecycle: factory certificate generation, registration (CSR exchange), Keycloak authentication, and NATS telemetry publishing.
+A Python sample client that simulates devices registering with the Nexus platform and optionally sending telemetry data.
+
+## Overview
+
+This client demonstrates the full device onboarding flow:
+
+1. **Factory certificate** — obtains or generates a certificate signed by the factory CA to authenticate the device
+2. **Registration** — presents the factory certificate via mTLS to the registration server and receives an operational certificate
+3. **Authentication** — uses the operational certificate to obtain a JWT from Keycloak via client credentials
+4. **Telemetry** — publishes protobuf-encoded sensor data to NATS using the JWT
 
 ## Prerequisites
 
 - Python 3.13+
-- [uv](https://docs.astral.sh/uv/) package manager
-- For **local** PKI: a running registration server with factory CA at `base-services/registration/pki/`
-- For **remote** PKI: GCP access to download TLS certificates from Secret Manager
+- [`uv`](https://docs.astral.sh/uv/) package manager
 
 ## Setup
 
-1. Create a virtual environment and install dependencies:
-    ```bash
-    uv venv
-    uv sync
-    ```
-
-2. Generate protobuf files (auto-generated on first run, but can be done explicitly):
-
-    ```bash
-    make proto
-    ```
-
-## Running
-
-### Local PKI (default)
-
-This generates a random device UID and registers a device with a locally generated factory certificate:
+Install dependencies:
 
 ```bash
-uv run main.py
+uv sync
 ```
 
-### Custom Device UID
+### PKI strategy
 
-Specify a device identifier instead of using a random one:
+The client supports two PKI strategies:
 
-```bash
-uv run main.py -uid MY_DEVICE_001
-```
+| Strategy | Description |
+|----------|-------------|
+| `local`  | Factory CA key and cert are read from `../../base-services/registration/pki/factory-ca/`. Use this for local development. |
+| `remote` | Factory cert and key are provided explicitly via `-factory-cert` / `-factory-key`. CA certs for the registration server and Keycloak are downloaded from GCP Secret Manager (see `make downloadcerts`). |
 
-### Using make
-
-Protobuf files are automatically generated when missing or when the source `telemetry.proto` changes.
-There is no need to run `make proto` manually before other targets.
-
-Use `make run` to run the client, passing CLI arguments via the `ARGS` variable:
-
-```bash
-make run ARGS="-uid MY_DEVICE_001"
-```
-
-### Remote PKI (GCP)
-
-First download the TLS certificates from GCP Secret Manager:
+For remote mode, download the required CA certificates first:
 
 ```bash
 make downloadcerts
 ```
 
-Then register with a remote registration server, providing pre-existing factory certificates:
+## Usage
 
 ```bash
-uv run main.py \
+uv run python main.py [OPTIONS]
+```
+
+### Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `-uid <id>` | random base64url | Device identifier |
+| `-pki_strategy local\|remote` | `local` | PKI strategy to use (read from an existing env file) |
+| `-factory-cert <path>` | — | Factory certificate chain (PEM) — required for `remote` |
+| `-factory-key <path>` | — | Factory private key (PEM) — required for `remote` |
+| `-registration-url <url>` | `https://localhost:8080` | Registration server URL (read from an existing env file)  |
+| `-output <dir>` | `certificates/` | Output directory for operational certificate and key |
+| `-with-telemetry` | off | Also send fake telemetry after registration |
+| `-interval <seconds>` | `5` | Telemetry send interval (used with `-with-telemetry`) |
+
+### Examples
+
+**Local PKI, registration only:**
+```bash
+uv run python main.py
+```
+
+**Local PKI, with telemetry:**
+```bash
+uv run python main.py -with-telemetry -interval 3
+```
+
+**Remote PKI (GCP):**
+```bash
+make downloadcerts
+uv run python main.py \
   -pki_strategy remote \
-  -factory-cert path/to/factory-chain.pem \
-  -factory-key path/to/factory-key.pem \
+  -factory-cert path/to/device-chain.pem \
+  -factory-key path/to/device-key.pem \
   -registration-url https://registration.example.com:8080
 ```
 
-### With Telemetry
-
-Append `-with-telemetry` to also authenticate with Keycloak and publish test telemetry to NATS:
-
+**Remote PKI (GCP) - installed from the local workstation:**
 ```bash
-uv run main.py -with-telemetry
+make downloadcerts
+uv run python main.py \
+  -factory-cert path/to/device-chain.pem \
+  -factory-key path/to/device-key.pem \
 ```
 
-## CLI Reference
 
-| Flag                | Default                  | Description                                                                                 |
-|---------------------|--------------------------|---------------------------------------------------------------------------------------------|
-| `-uid`              | random base64url UUID    | Device identifier                                                                           |
-| `-pki_strategy`     | `local`                  | PKI strategy: `local` or `remote`                                                           |
-| `-factory-cert`     | —                        | Path to factory certificate chain (PEM). Ignored for local PKI; **required** for remote PKI |
-| `-factory-key`      | —                        | Path to factory private key (PEM). Ignored for local PKI; **required** for remote PKI       |
-| `-registration-url` | `https://localhost:8080` | Registration server URL                                                                     |
-| `-output`           | `certificates/`          | Output directory for operational key and certificate                                        |
-| `-with-telemetry`   | `false`                  | Send test telemetry data after registration                                                 |
-| `-interval`         | `5`                      | Telemetry sending interval in seconds                                                       |
+## Output files
 
-## Output
+After a successful run, the following files are written to the output directory (default: `certificates/`):
 
-After a successful run, the following files are written to the output directory (default `certificates/`):
+| File | Description |
+|------|-------------|
+| `certs/operational.crt.pem` | Device operational certificate (signed by the platform CA) |
+| `certs/operational.key.pem` | Corresponding private key |
+| `certs/ca.crt.pem` | Keycloak CA certificate (for TLS verification) |
+| `urls.json` | Keycloak and NATS server URLs returned by the registration server |
 
-- `operational.crt.pem` — operational certificate issued by the registration server
-- `operational.key.pem` — operational private key
-- `ca.crt.pem` — Keycloak CA certificate (for mTLS authentication)
-- `urls.json` — Keycloak and NATS server URLs
+Intermediate files (CSR, factory cert, etc.) are kept under `history/<uid>/` for debugging.
 
-A full history of all generated artifacts is also kept in `history/<uid>/`.
+## Telemetry format
 
-## Make Targets
+Telemetry messages are encoded using Protocol Buffers (`telemetry.proto` in `../../proto/`). Protobuf Python files are auto-generated on first run into the `proto/` directory. To regenerate manually:
 
-| Target               | Description                                                                           |
-|----------------------|---------------------------------------------------------------------------------------|
-| `make proto`         | Generate Python protobuf files from `proto/telemetry.proto`                           |
-| `make downloadcerts` | Download TLS certificates from GCP Secret Manager (required when pki_strategy=remote) |
-| `make run`           | Run the client (generates proto files if needed)                                      |
-| `make clean`         | Remove all generated files (proto, certs, keys)                                       |
+```bash
+make proto
+```
+
+Messages are published to the NATS subject `telemetry.prod.bigtable.<uid>`.
