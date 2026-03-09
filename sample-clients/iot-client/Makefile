@@ -24,8 +24,8 @@ config:
 	@if [ -f data/urls.json ]; then \
 		echo "data/urls.json already exists — not overwriting."; \
 	else \
-		cp data/urls.example.json data/urls.json; \
-		echo "Created data/urls.json from urls.example.json — edit it with your URLs."; \
+		printf '{\n  "keycloak_url": "https://keycloak.example.com:8443",\n  "nats_url": "nats://nats.example.com:4222"\n}\n' > data/urls.json; \
+		echo "Created data/urls.json with example URLs — edit it with your URLs."; \
 	fi
 
 proto:
