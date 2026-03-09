@@ -7,29 +7,28 @@ It walks through the full device lifecycle: factory certificate generation, regi
 
 - Python 3.13+
 - [uv](https://docs.astral.sh/uv/) package manager
-- For **local** PKI: a running local registration server with factory CA at `base-services/registration/pki/`
+- For **local** PKI: a running registration server with factory CA at `base-services/registration/pki/`
 - For **remote** PKI: GCP access to download TLS certificates from Secret Manager
 
 ## Setup
 
 1. Create a virtual environment and install dependencies:
-
-```bash
-uv venv
-uv sync
-```
+    ```bash
+    uv venv
+    uv sync
+    ```
 
 2. Generate protobuf files (auto-generated on first run, but can be done explicitly):
 
-```bash
-make proto
-```
+    ```bash
+    make proto
+    ```
 
 ## Running
 
 ### Local PKI (default)
 
-Registers a device with a locally generated factory certificate:
+This generates a random device UID and registers a device with a locally generated factory certificate:
 
 ```bash
 uv run main.py
@@ -43,7 +42,16 @@ Specify a device identifier instead of using a random one:
 uv run main.py -uid MY_DEVICE_001
 ```
 
-This generates a random device UID, creates a factory certificate signed by the local CA, and registers it with the local registration server at `https://localhost:8080`.
+### Using make
+
+Protobuf files are automatically generated when missing or when the source `telemetry.proto` changes.
+There is no need to run `make proto` manually before other targets.
+
+Use `make run` to run the client, passing CLI arguments via the `ARGS` variable:
+
+```bash
+make run ARGS="-uid MY_DEVICE_001"
+```
 
 ### Remote PKI (GCP)
 
@@ -73,16 +81,16 @@ uv run main.py -with-telemetry
 
 ## CLI Reference
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `-uid` | random base64url UUID | Device identifier |
-| `-pki_strategy` | `local` | PKI strategy: `local` or `remote` |
-| `-factory-cert` | — | Path to factory certificate chain (PEM). Ignored for local PKI; **required** for remote PKI |
-| `-factory-key` | — | Path to factory private key (PEM). Ignored for local PKI; **required** for remote PKI |
-| `-registration-url` | `https://localhost:8080` | Registration server URL |
-| `-output` | `certificates/` | Output directory for operational key and certificate |
-| `-with-telemetry` | `false` | Send test telemetry data after registration |
-| `-interval` | `5` | Telemetry sending interval in seconds |
+| Flag                | Default                  | Description                                                                                 |
+|---------------------|--------------------------|---------------------------------------------------------------------------------------------|
+| `-uid`              | random base64url UUID    | Device identifier                                                                           |
+| `-pki_strategy`     | `local`                  | PKI strategy: `local` or `remote`                                                           |
+| `-factory-cert`     | —                        | Path to factory certificate chain (PEM). Ignored for local PKI; **required** for remote PKI |
+| `-factory-key`      | —                        | Path to factory private key (PEM). Ignored for local PKI; **required** for remote PKI       |
+| `-registration-url` | `https://localhost:8080` | Registration server URL                                                                     |
+| `-output`           | `certificates/`          | Output directory for operational key and certificate                                        |
+| `-with-telemetry`   | `false`                  | Send test telemetry data after registration                                                 |
+| `-interval`         | `5`                      | Telemetry sending interval in seconds                                                       |
 
 ## Output
 
@@ -97,9 +105,9 @@ A full history of all generated artifacts is also kept in `history/<uid>/`.
 
 ## Make Targets
 
-| Target | Description |
-|--------|-------------|
-| `make proto` | Generate Python protobuf files from `proto/telemetry.proto` |
-| `make downloadcerts` | Download TLS certificates from GCP Secret Manager |
-| `make run` | Download certs and run the client |
-| `make clean` | Remove all generated files (proto, certs, keys) |
+| Target               | Description                                                                           |
+|----------------------|---------------------------------------------------------------------------------------|
+| `make proto`         | Generate Python protobuf files from `proto/telemetry.proto`                           |
+| `make downloadcerts` | Download TLS certificates from GCP Secret Manager (required when pki_strategy=remote) |
+| `make run`           | Run the client (generates proto files if needed)                                      |
+| `make clean`         | Remove all generated files (proto, certs, keys)                                       |
