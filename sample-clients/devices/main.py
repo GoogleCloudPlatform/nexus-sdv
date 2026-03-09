@@ -173,10 +173,12 @@ def main():
 
     # Copy final files to output directory
     output_dir = Path(args.output).expanduser()
-    output_dir.mkdir(parents=True, exist_ok=True)
-    for filename in ("urls.json", "operational.crt.pem", "operational.key.pem"):
-        shutil.copy(history_dir / filename, output_dir / filename)
-    shutil.copy(history_dir / "keycloak_ca.pem", output_dir / "ca.crt.pem")
+    cert_output_dir = output_dir / "certs"
+    cert_output_dir.mkdir(parents=True, exist_ok=True)
+    for filename in ("operational.crt.pem", "operational.key.pem"):
+        shutil.copy(history_dir / filename, cert_output_dir / filename)
+    shutil.copy(history_dir / "keycloak_ca.pem", cert_output_dir / "ca.crt.pem")
+    shutil.copy(history_dir / "urls.json", output_dir / "urls.json")
     print(f"Copied final files to {args.output}")
 
     if args.with_telemetry:
