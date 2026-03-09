@@ -1,0 +1,4 @@
+{
+  "keycloak_url": "https://keycloak.example.com:8443",
+  "nats_url": "nats://nats.example.com:4222"
+}
