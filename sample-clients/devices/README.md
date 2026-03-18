@@ -1,6 +1,7 @@
-# Device Client
+# Devices Client
 
-A Python sample client that simulates devices registering with the Nexus platform and optionally sending telemetry data.
+A Python client that registers devices with the Nexus SDV platform and optionally sends telemetry data.
+It walks through the full device lifecycle: factory certificate generation, registration (CSR exchange), Keycloak authentication, and NATS telemetry publishing.
 
 ## Overview
 
@@ -18,7 +19,7 @@ This client demonstrates the full device onboarding flow:
 
 ## Setup
 
-Install dependencies:
+Install dependencies. This also creates a venv and installs dependencies in it.
 
 ```bash
 uv sync
@@ -28,9 +29,9 @@ uv sync
 
 The client supports two PKI strategies:
 
-| Strategy | Description |
-|----------|-------------|
-| `local`  | Factory CA key and cert are read from `../../base-services/registration/pki/factory-ca/`. Use this for local development. |
+| Strategy | Description                                                                                                                                                                                             |
+|----------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `local`  | Factory CA key and cert are read from `../../base-services/registration/pki/factory-ca/`. Use this for local development.                                                                               |
 | `remote` | Factory cert and key are provided explicitly via `-factory-cert` / `-factory-key`. CA certs for the registration server and Keycloak are downloaded from GCP Secret Manager (see `make downloadcerts`). |
 
 For remote mode, download the required CA certificates first:
@@ -42,38 +43,43 @@ make downloadcerts
 ## Usage
 
 ```bash
-uv run python main.py [OPTIONS]
+uv run main.py [OPTIONS]
 ```
 
 ### Options
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `-uid <id>` | random base64url | Device identifier |
-| `-pki_strategy local\|remote` | `local` | PKI strategy to use (read from an existing env file) |
-| `-factory-cert <path>` | — | Factory certificate chain (PEM) — required for `remote` |
-| `-factory-key <path>` | — | Factory private key (PEM) — required for `remote` |
-| `-registration-url <url>` | `https://localhost:8080` | Registration server URL (read from an existing env file)  |
-| `-output <dir>` | `certificates/` | Output directory for operational certificate and key |
-| `-with-telemetry` | off | Also send fake telemetry after registration |
-| `-interval <seconds>` | `5` | Telemetry send interval (used with `-with-telemetry`) |
+| Option                        | Default                  | Description                                              |
+|-------------------------------|--------------------------|----------------------------------------------------------|
+| `-uid <id>`                   | random base64url         | Device identifier                                        |
+| `-pki_strategy local\|remote` | `local`                  | PKI strategy to use (read from an existing env file)     |
+| `-factory-cert <path>`        | —                        | Factory certificate chain (PEM) — required for `remote`  |
+| `-factory-key <path>`         | —                        | Factory private key (PEM) — required for `remote`        |
+| `-registration-url <url>`     | `https://localhost:8080` | Registration server URL (read from an existing env file) |
+| `-output <dir>`               | `certificates/`          | Output directory for operational certificate and key     |
+| `-with-telemetry`             | off                      | Also send fake telemetry after registration              |
+| `-interval <seconds>`         | `5`                      | Telemetry send interval (used with `-with-telemetry`)    |
 
 ### Examples
 
 **Local PKI, registration only:**
 ```bash
-uv run python main.py
+uv run main.py -uid MY_DEVICE_001
+```
+
+**Local PKI, registration only (auto-generated device ID):**
+```bash
+uv run main.py
 ```
 
 **Local PKI, with telemetry:**
 ```bash
-uv run python main.py -with-telemetry -interval 3
+uv run main.py -with-telemetry -interval 3
 ```
 
 **Remote PKI (GCP):**
 ```bash
 make downloadcerts
-uv run python main.py \
+uv run main.py \
   -pki_strategy remote \
   -factory-cert path/to/device-chain.pem \
   -factory-key path/to/device-key.pem \
@@ -83,7 +89,7 @@ uv run python main.py \
 **Remote PKI (GCP) - installed from the local workstation:**
 ```bash
 make downloadcerts
-uv run python main.py \
+uv run main.py \
   -factory-cert path/to/device-chain.pem \
   -factory-key path/to/device-key.pem \
 ```
@@ -93,12 +99,12 @@ uv run python main.py \
 
 After a successful run, the following files are written to the output directory (default: `certificates/`):
 
-| File | Description |
-|------|-------------|
-| `certs/operational.crt.pem` | Device operational certificate (signed by the platform CA) |
-| `certs/operational.key.pem` | Corresponding private key |
-| `certs/ca.crt.pem` | Keycloak CA certificate (for TLS verification) |
-| `urls.json` | Keycloak and NATS server URLs returned by the registration server |
+| File                        | Description                                                       |
+|-----------------------------|-------------------------------------------------------------------|
+| `certs/operational.crt.pem` | Device operational certificate (signed by the platform CA)        |
+| `certs/operational.key.pem` | Corresponding private key                                         |
+| `certs/ca.crt.pem`          | Keycloak CA certificate (for TLS verification)                    |
+| `urls.json`                 | Keycloak and NATS server URLs returned by the registration server |
 
 Intermediate files (CSR, factory cert, etc.) are kept under `history/<uid>/` for debugging.
 
