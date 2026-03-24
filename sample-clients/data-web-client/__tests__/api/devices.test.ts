@@ -10,8 +10,19 @@ describe('GET /api/devices', () => {
     (getServerSession as jest.Mock).mockResolvedValue(null);
 
     const res = await GET();
+    const body = await res.json();
 
     expect(res.status).toBe(401);
+    expect(body.error).toBe('Unauthorized');
+  });
+
+  it('returns 500 when getDevices throws', async () => {
+    (getServerSession as jest.Mock).mockResolvedValue({ user: { email: 'a@test.com' } });
+    (getDevices as jest.Mock).mockRejectedValue(new Error('bigtable down'));
+
+    const res = await GET();
+
+    expect(res.status).toBe(500);
   });
 
   it('returns device list when authenticated', async () => {

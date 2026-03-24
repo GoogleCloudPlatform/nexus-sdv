@@ -9,6 +9,10 @@ export async function GET() {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const devices = await getDevices();
-  return NextResponse.json({ devices });
+  try {
+    const devices = await getDevices();
+    return NextResponse.json({ devices });
+  } catch {
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
 }

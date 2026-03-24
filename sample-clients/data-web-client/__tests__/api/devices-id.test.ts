@@ -7,7 +7,7 @@ jest.mock('@/lib/device-detail');
 
 function makeRequest(id: string, range?: string) {
   const url = `http://localhost/api/devices/${id}${range ? `?range=${range}` : ''}`;
-  return { url } as Request;
+  return new Request(url);
 }
 
 describe('GET /api/devices/[id]', () => {
@@ -53,5 +53,22 @@ describe('GET /api/devices/[id]', () => {
     await GET(makeRequest('dev-001', 'invalid'), { params: { id: 'dev-001' } });
 
     expect(getDeviceTimeSeries).toHaveBeenCalledWith('dev-001', '1h');
+  });
+
+  it('returns 400 for invalid device ID containing #', async () => {
+    (getServerSession as jest.Mock).mockResolvedValue({ user: { email: 'a@test.com' } });
+
+    const res = await GET(makeRequest('dev#001'), { params: { id: 'dev#001' } });
+
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 500 when getDeviceTimeSeries throws', async () => {
+    (getServerSession as jest.Mock).mockResolvedValue({ user: { email: 'a@test.com' } });
+    (getDeviceTimeSeries as jest.Mock).mockRejectedValue(new Error('bigtable down'));
+
+    const res = await GET(makeRequest('dev-001'), { params: { id: 'dev-001' } });
+
+    expect(res.status).toBe(500);
   });
 });

@@ -20,9 +20,17 @@ export async function GET(
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  if (!params.id || params.id.includes('#')) {
+    return NextResponse.json({ error: 'Invalid device ID' }, { status: 400 });
+  }
+
   const { searchParams } = new URL(request.url);
   const range = parseRange(searchParams.get('range'));
 
-  const data = await getDeviceTimeSeries(params.id, range);
-  return NextResponse.json(data);
+  try {
+    const data = await getDeviceTimeSeries(params.id, range);
+    return NextResponse.json(data);
+  } catch {
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
 }
