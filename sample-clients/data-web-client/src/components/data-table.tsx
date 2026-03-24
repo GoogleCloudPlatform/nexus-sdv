@@ -1,4 +1,5 @@
 'use client';
+import { useMemo } from 'react';
 import {
   useReactTable,
   getCoreRowModel,
@@ -20,11 +21,15 @@ function stripFamily(key: string): string {
 const columnHelper = createColumnHelper<Record<string, string>>();
 
 export default function DataTable({ columnKeys, data, onRowClick }: DataTableProps) {
-  const columns = columnKeys.map((key) =>
-    columnHelper.accessor((row) => row[key] ?? '—', {
-      id: key,
-      header: stripFamily(key),
-    })
+  const columns = useMemo(
+    () =>
+      columnKeys.map((key) =>
+        columnHelper.accessor((row) => row[key] ?? '—', {
+          id: key,
+          header: stripFamily(key),
+        })
+      ),
+    [columnKeys]
   );
 
   const table = useReactTable({
@@ -55,6 +60,13 @@ export default function DataTable({ columnKeys, data, onRowClick }: DataTablePro
             <tr
               key={row.id}
               onClick={() => onRowClick?.(row.original)}
+              onKeyDown={(e) => {
+                if (onRowClick && (e.key === 'Enter' || e.key === ' ')) {
+                  e.preventDefault();
+                  onRowClick(row.original);
+                }
+              }}
+              tabIndex={onRowClick ? 0 : undefined}
               className={onRowClick ? 'cursor-pointer hover:bg-gray-50' : ''}
             >
               {row.getVisibleCells().map((cell) => (
