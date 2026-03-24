@@ -1,6 +1,7 @@
 export interface DeviceRow {
   deviceId: string;
   lastSeen: string;
+  /** Keys are BigTable column qualifiers in `family:qualifier` format, e.g. `dynamic:battery.temp` */
   columns: Record<string, string>;
 }
 
@@ -10,6 +11,7 @@ export interface DevicesResponse {
 
 export interface TimeSeriesRow {
   timestamp: string;
+  /** Keys are BigTable column qualifiers in `family:qualifier` format, e.g. `dynamic:battery.temp` */
   values: Record<string, string>;
 }
 
