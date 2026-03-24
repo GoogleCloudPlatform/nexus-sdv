@@ -40,6 +40,7 @@ export async function getDevices(): Promise<DeviceRow[]> {
       (row.data ?? {}) as Record<string, Record<string, Array<{ value: Buffer }>>>
     )) {
       for (const [qualifier, cells] of Object.entries(qualifiers)) {
+        if (!cells.length) continue;
         columns[`${family}:${qualifier}`] = cells[0].value.toString();
       }
     }
