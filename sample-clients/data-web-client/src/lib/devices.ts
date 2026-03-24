@@ -23,11 +23,13 @@ export async function getDevices(): Promise<DeviceRow[]> {
   const devices: DeviceRow[] = [];
 
   for (const deviceId of deviceIds) {
-    const [rows] = await table.getRows({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const getRowsResult = await (table.getRows as any)({
       ranges: [{ start: `${deviceId}#`, end: `${deviceId}$` }],
       limit: 1,
       reversed: true,
-    });
+    }) as [import('@google-cloud/bigtable').Row[], object, object];
+    const rows = getRowsResult[0];
 
     if (!rows?.length) continue;
 
