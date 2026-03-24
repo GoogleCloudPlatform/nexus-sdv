@@ -8,6 +8,7 @@ import type { DevicesResponse, DeviceRow } from '@/types/telemetry';
 function formatLastSeen(iso: string): string {
   if (!iso) return '—';
   const diff = Date.now() - new Date(iso).getTime();
+  if (isNaN(diff) || diff < 0) return new Date(iso).toLocaleString();
   if (diff < 60_000) return `${Math.floor(diff / 1000)}s ago`;
   if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
   return new Date(iso).toLocaleString();
@@ -29,8 +30,8 @@ export default function FleetPage() {
         setDevices(data.devices);
         setLoading(false);
       })
-      .catch((e: Error) => {
-        setError(e.message);
+      .catch((e: unknown) => {
+        setError(e instanceof Error ? e.message : String(e));
         setLoading(false);
       });
   }, []);
