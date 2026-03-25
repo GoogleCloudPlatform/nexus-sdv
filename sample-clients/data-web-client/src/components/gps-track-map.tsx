@@ -67,8 +67,8 @@ export default function GpsTrackMap({ points }: Props) {
           defaultCenter={firstPos}
           defaultZoom={singlePoint ? 15 : 10}
           // DEMO_MAP_ID enables AdvancedMarker in development.
-          // Replace with a real Map ID from Google Cloud Console for production.
-          mapId="DEMO_MAP_ID"
+          // Set NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID in .env.local for a real Map ID.
+          mapId={process.env.NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID ?? 'DEMO_MAP_ID'}
         >
           {!singlePoint && <TrackOverlay points={points} />}
           <AdvancedMarker position={firstPos}>
