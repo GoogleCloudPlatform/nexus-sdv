@@ -12,6 +12,7 @@
   "dependencies": {
     "@google-cloud/bigtable": "^6.5.0",
     "@tanstack/react-table": "^8.21.3",
+    "@vis.gl/react-google-maps": "^1.7.1",
     "next": "16.2.1",
     "next-auth": "^4.24.13",
     "react": "19.2.4",
