@@ -17,6 +17,7 @@ Devices transmitting GPS data benefit from a spatial view of their route. The ex
 - Google Maps JavaScript API requires a browser-side API key (`NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`).
 - Map must not appear when GPS columns are absent — the feature is purely additive.
 - Library: `@vis.gl/react-google-maps` (TypeScript-first, hooks-based).
+- `GpsTrackMap` is a client component and must include `"use client"` at the top of the file.
 
 ## Architecture
 
@@ -24,7 +25,7 @@ Devices transmitting GPS data benefit from a spatial view of their route. The ex
 
 | File | Change |
 |---|---|
-| `src/components/gps-track-map.tsx` | New component |
+| `src/components/gps-track-map.tsx` | New component (`"use client"`) |
 | `src/app/device/[id]/page.tsx` | GPS detection, data extraction, render map below table |
 | `.env.local` / `.env.local.example` | Add `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` |
 | `package.json` | Add `@vis.gl/react-google-maps` |
@@ -33,19 +34,23 @@ Devices transmitting GPS data benefit from a spatial view of their route. The ex
 
 ```ts
 interface GpsPoint {
-  timestamp: string;
+  timestamp: string; // ISO 8601, validated non-empty and parseable before inclusion
   lat: number;
   lng: number;
-  alt: number;
+  alt: number;       // Stored for future elevation profile use; not rendered in this iteration
 }
 ```
 
 ## Data Flow
 
 1. After the `/api/devices/[id]` response resolves, inspect `detail.columns`.
-2. Detect GPS presence: all three of `gps.latitude`, `gps.longitude`, `gps.altitude` must appear as the qualifier portion (after `:`) of a column key — matched case-insensitively.
-3. If detected, extract `GpsPoint[]` from `detail.rows`: parse lat/lng/alt to `Number`, skip rows where any value is missing or non-finite.
-4. Pass the array as a prop to `<GpsTrackMap points={gpsPoints} />`, rendered below `<DataTable>`.
+2. **Detect GPS presence:** search all column keys for entries whose qualifier portion (the substring after the first `:`) matches each of `gps.latitude`, `gps.longitude`, and `gps.altitude` — compared case-insensitively. Detection is family-agnostic: any family (`dynamic:`, `telemetry:`, etc.) is accepted as long as all three qualifiers are found. Store the exact matching keys (original casing from `detail.columns`) for use in step 3.
+3. **Extract `GpsPoint[]`:** iterate `detail.rows`; for each row look up values using the exact column keys found in step 2. Skip rows where:
+   - any of the three values is missing or an empty string
+   - `lat`, `lng`, or `alt` does not parse to a finite number
+   - `timestamp` is missing, empty, or does not parse to a valid `Date` (`isNaN(new Date(timestamp).getTime())`)
+4. Sort the resulting array by `timestamp` ascending using epoch comparison: `new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()`. String sort is not used because mixed timezone offsets sort incorrectly.
+5. Pass the sorted array as a prop to `<GpsTrackMap points={gpsPoints} />`, rendered below `<DataTable>`.
 
 ## Component: `GpsTrackMap`
 
@@ -53,18 +58,26 @@ interface GpsPoint {
 Props: { points: GpsPoint[] }
 ```
 
+### Guard conditions (evaluated top-to-bottom, return `null` if triggered)
+
+1. `!process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` → return `null`. In `NODE_ENV !== 'production'`, emit `console.warn('GpsTrackMap: NEXT_PUBLIC_GOOGLE_MAPS_API_KEY is not set')` before returning. Note: `NEXT_PUBLIC_` variables are inlined at build time — this is a build-time constant check, not a live runtime lookup.
+2. `points.length === 0` → return `null`.
+
 ### Rendering
 
-- Wraps `<Map>` in `<APIProvider apiKey={process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY}>`.
-- Renders a `<Polyline>` connecting all points in chronological order.
-- Renders a green `<AdvancedMarker>` at `points[0]` (journey start) and a red one at `points[points.length - 1]` (most recent position).
-- Map bounds auto-fit to the bounding box of all points using `useMapsLibrary('core')` `LatLngBounds`.
-- If `points.length < 2`, renders a single pin at `points[0]` with no polyline.
-
-### Guard conditions
-
-- If `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` is empty/undefined, return `null` (silent skip, no console noise in production).
-- If `points.length === 0`, return `null`.
+- `"use client"` directive at top of file.
+- Wraps content in `<APIProvider apiKey={process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY}>`.
+- Renders a `<Map>` at fixed height `400px`.
+- **Multiple points (`points.length >= 2`):**
+  - Renders a `<Polyline>` connecting all points in the sorted order.
+  - Auto-fits map bounds to the bounding box of all points using `useMapsLibrary('core')` `LatLngBounds`. While the library is loading (async), the map renders at a default world view.
+  - Renders a green `<AdvancedMarker>` at `points[0]` (earliest timestamp = journey start). Color applied via a `<Pin>` child: `<AdvancedMarker><Pin background="#22c55e" /></AdvancedMarker>`.
+  - Renders a red `<AdvancedMarker>` at `points[points.length - 1]` (latest timestamp = most recent position). Color: `<Pin background="#ef4444" />`.
+  - `center` and `zoom` props on `<Map>` are left uncontrolled; bounds-fitting via `LatLngBounds` is the sole positioning mechanism.
+- **Single point (`points.length === 1`):**
+  - No polyline rendered.
+  - Map centers on the single point with zoom level 15.
+  - Renders a single `<AdvancedMarker>` at that point.
 
 ### Height
 
@@ -74,14 +87,16 @@ Fixed at `400px`. No user-resizable behaviour in this iteration.
 
 | Scenario | Behaviour |
 |---|---|
-| API key missing | Component returns `null` — map section not rendered |
+| API key missing (production) | Component returns `null` — map section not rendered |
+| API key missing (development) | `console.warn` emitted, component returns `null` |
 | No GPS columns in data | Map section not rendered |
-| GPS columns present but all rows lack coordinates | `points` is empty → component returns `null` |
-| Single GPS point | Single pin, no polyline |
+| GPS columns present, no valid rows | `points` is empty → component returns `null` |
+| Single valid GPS point | Single pin at zoom 15, no polyline |
+| Maps library not yet loaded | Map renders at default world view until bounds are fitted |
 
 ## Out of Scope
 
 - Clicking a map point to highlight the corresponding table row (future).
-- Altitude chart / elevation profile (future).
+- Altitude chart / elevation profile (future — `alt` is extracted in anticipation of this).
 - Clustering for dense tracks (future).
 - Map style theming (Catppuccin / dark mode) — left for a follow-up.
