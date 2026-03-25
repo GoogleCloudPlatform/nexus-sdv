@@ -5,6 +5,8 @@ import AppLayout from '@/components/app-layout';
 import DataTable from '@/components/data-table';
 import TimeRangeSelector from '@/components/time-range-selector';
 import type { DeviceDetailResponse, TimeRange } from '@/types/telemetry';
+import { extractGpsPoints } from '@/lib/gps';
+import GpsTrackMap from '@/components/gps-track-map';
 
 export default function DevicePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -39,6 +41,8 @@ export default function DevicePage({ params }: { params: Promise<{ id: string }>
     ...row.values,
   }));
 
+  const gpsPoints = detail ? extractGpsPoints(detail) : [];
+
   return (
     <AppLayout>
       <div className="space-y-4">
@@ -60,7 +64,10 @@ export default function DevicePage({ params }: { params: Promise<{ id: string }>
         {loading && <p className="text-gray-500">Loading...</p>}
         {error && <p className="text-red-500">Error: {error}</p>}
         {!loading && !error && detail && (
-          <DataTable columnKeys={tableColumnKeys} data={tableData} />
+          <div className="space-y-4">
+            <DataTable columnKeys={tableColumnKeys} data={tableData} />
+            {gpsPoints.length > 0 && <GpsTrackMap points={gpsPoints} />}
+          </div>
         )}
       </div>
     </AppLayout>
