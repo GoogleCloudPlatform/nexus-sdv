@@ -94,6 +94,14 @@ This runs `docker compose up` with two services: a NATS server (port 4222) and a
 
 Set `SKIP_KEYCLOAK_AUTH` to `true` in your `config.h` to skip certificate loading and authentication when using a local NATS server.
 
+#### NATS monitoring
+
+The NATS server exposes an HTTP monitoring endpoint:
+
+- [http://localhost:8222/connz](http://localhost:8222/connz) — active connections
+- [http://localhost:8222/subsz](http://localhost:8222/subsz) — subscriptions
+- [http://localhost:8222/varz](http://localhost:8222/varz) — server statistics
+
 ## Lifecycle
 
 The firmware executes a 5-step flow:

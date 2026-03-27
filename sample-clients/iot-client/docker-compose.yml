@@ -3,11 +3,14 @@ services:
     image: nats:latest
     ports:
       - "4222:4222"
-    command: ["--debug", "-V"]
+      - "8222:8222"
+    # add --debug for Debug-Level Logging
+    # add --V for Trace-Level Logging
+    command: ["-m", "8222", "--debug", "-V"]
 
   subscriber:
     build:
       context: ../../
-      dockerfile: sample-clients/iot-client/dev/nats-subscriber/Dockerfile
+      dockerfile: tools/nats-subscriber/Dockerfile
     depends_on:
       - nats

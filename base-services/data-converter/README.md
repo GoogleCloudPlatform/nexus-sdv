@@ -35,12 +35,13 @@ This starts:
 - **Mosquitto** (MQTT broker) on `localhost:1883` — anonymous access enabled
 - **NATS** on `localhost:4222` — with JetStream, monitoring on `localhost:8222`
 - **Data Converter** — connected to both, using `config/config.example.yaml`
+- **NATS Subscriber** — decodes and pretty-prints TelemetryMessages from NATS
 
 ### End-to-end test
 
-Terminal 1 — subscribe to NATS output:
+Terminal 1 — watch decoded NATS output:
 ```bash
-nats sub "telemetry.>"
+docker compose logs -f nats-subscriber
 ```
 
 Terminal 2 — publish a test message via MQTT:
@@ -48,7 +49,7 @@ Terminal 2 — publish a test message via MQTT:
 mosquitto_pub -t "factory/line1/sensors/temp" -m '{"name":"temperature","value":"42.3"}'
 ```
 
-Expected output on NATS subject `telemetry.line1.temperature`.
+Expected output: decoded TelemetryMessage with `device_id: "line1"` on subject `telemetry.line1.temperature`.
 
 ### Inspect MQTT messages
 
@@ -57,6 +58,14 @@ Subscribe to all messages on the Mosquitto broker (runs inside the container, no
 ```bash
 docker compose exec mosquitto mosquitto_sub -t "factory/#" -v
 ```
+
+### NATS monitoring
+
+The NATS server exposes an HTTP monitoring endpoint:
+
+- [http://localhost:8222/connz](http://localhost:8222/connz) — active connections
+- [http://localhost:8222/subsz](http://localhost:8222/subsz) — subscriptions
+- [http://localhost:8222/varz](http://localhost:8222/varz) — server statistics
 
 ### View logs
 

@@ -11,7 +11,9 @@ services:
     ports:
       - "4222:4222"
       - "8222:8222"
-    command: ["--js", "-m", "8222"]
+    # add --debug for Debug-Level Logging
+    # add --V for Trace-Level Logging
+    command: ["-m", "8222"]
 
   data-converter:
     build: .
@@ -30,3 +32,13 @@ services:
       - NATS_TOKEN=${NATS_TOKEN:-}
     volumes:
       - ./config/config.example.yaml:/config/config.yaml:ro
+
+  nats-subscriber:
+    build:
+      context: ../../
+      dockerfile: tools/nats-subscriber/Dockerfile
+    depends_on:
+      - nats
+    environment:
+      - NATS_URL=nats://nats:4222
+      - SUBJECT=telemetry.>
