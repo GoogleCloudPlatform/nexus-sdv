@@ -1,5 +1,6 @@
 import sys
 import math
+import random
 import nats
 import asyncio
 import requests
@@ -139,8 +140,8 @@ def get_access_token(
             keycloak_server_url,
             client_id="car",
             realm_name="sdv-telemetry",
-            cert=(operational_path + OPERATIONAL_CERTIFICATE_FILE, operational_path + OPERATIONAL_KEY_FILE),
-            verify=str(Path(operational_path) / OPERATIONAL_KEYCLOAK_CA_FILE),
+            cert=(str(operational_path / OPERATIONAL_CERTIFICATE_FILE), str(operational_path / OPERATIONAL_KEY_FILE)),
+            verify=str(operational_path / "ca.crt.pem"),
         )
 
         token = keycloak.token(grant_type="client_credentials")
@@ -154,8 +155,18 @@ def get_access_token(
     return token["access_token"], token["expires_in"]
 
 
+# Base GPS position (Oxford, UK) — drifts slightly each reading to simulate movement
+_BASE_LAT = 51.752022
+_BASE_LON = -1.257677
+_BASE_ALT = 72.0
+
+
 async def send_telemetry(nc: NatsClient, uid: str, interval: int, index: int, count: int) -> None:
-    """Send a single telemetry message."""
+    """Send a single telemetry message matching the IoT device payload."""
+    lat = _BASE_LAT + random.uniform(-0.001, 0.001) * index
+    lon = _BASE_LON + random.uniform(-0.001, 0.001) * index
+    alt = _BASE_ALT + random.uniform(-2.0, 2.0)
+
     message = telemetry.telemetry_message(
         uid,
         [
@@ -174,12 +185,27 @@ async def send_telemetry(nc: NatsClient, uid: str, interval: int, index: int, co
                 value="test_value",
                 data_type=telemetry.DataType.STATIC,
             ),
+            telemetry.SensorReading(
+                sensor="gps.latitude",
+                value=f"{lat:.6f}",
+                data_type=telemetry.DataType.DYNAMIC,
+            ),
+            telemetry.SensorReading(
+                sensor="gps.longitude",
+                value=f"{lon:.6f}",
+                data_type=telemetry.DataType.DYNAMIC,
+            ),
+            telemetry.SensorReading(
+                sensor="gps.altitude",
+                value=f"{alt:.2f}",
+                data_type=telemetry.DataType.DYNAMIC,
+            ),
         ],
     )
 
     await nc.publish(f"telemetry.prod.bigtable.{uid}", message.SerializeToString())
 
-    print(f"Telemetry published ({index + 1}/{count}).")
+    print(f"Telemetry published ({index + 1}/{count}): lat={lat:.6f} lon={lon:.6f} alt={alt:.2f}")
 
 
 async def send_data(uid: str, interval: int, nats_server_url: str, access_token: str) -> None:

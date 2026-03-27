@@ -185,7 +185,7 @@ def main():
         # Authenticate with Keycloak using operational certificate + operational key
         access_token, expires_in = device.get_access_token(
             keycloak_server_url,
-            args.output,
+            cert_output_dir,
         )
 
         asyncio.run(device.send_data(args.uid, args.interval, nats_server_url, access_token))

@@ -1,5 +1,6 @@
 from uuid import uuid4
 from proto import telemetry_pb2
+from proto.telemetry_pb2 import DataType
 from datetime import datetime, timezone
 from dataclasses import dataclass
 
