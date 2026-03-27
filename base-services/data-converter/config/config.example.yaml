@@ -1,0 +1,32 @@
+service:
+  name: data-converter
+  log_level: debug
+
+nats:
+  url: nats://${NATS_HOST}:4222
+  token: "${NATS_TOKEN}"
+
+adapters:
+  mqtt:
+    enabled: true
+    broker: tcp://${MQTT_HOST}:1883
+    client_id: nexus-converter
+    buffer_size: 1000
+    auth:
+      username: "${MQTT_USER}"
+      password: "${MQTT_PASS}"
+
+converters:
+  - name: factory-sensors
+    source:
+      adapter: mqtt
+      topic: "factory/+/sensors/#"
+      qos: 1
+    mapping:
+      device_id: "{{ seg .topic 1 }}"
+      sensors:
+        - sensor: "{{ jsonpath .payload \"name\" }}"
+          value: "{{ jsonpath .payload \"value\" }}"
+          data_type: DYNAMIC
+    target:
+      subject_pattern: "telemetry.{{ .device_id }}.{{ .sensor }}"

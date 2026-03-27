@@ -10,6 +10,7 @@ require (
 	github.com/nats-io/nats.go v1.49.0
 	go.uber.org/zap v1.27.1
 	google.golang.org/protobuf v1.36.8
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (

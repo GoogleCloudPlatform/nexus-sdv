@@ -23,7 +23,7 @@ type NATSPublisher struct {
 // NATSConfig holds NATS connection configuration.
 type NATSConfig struct {
 	URL   string
-	Token string // Static token for Phase 1; Keycloak JWT in Phase 3
+	Token string
 }
 
 // NewNATSPublisher connects to NATS and returns a publisher.

@@ -12,3 +12,21 @@ services:
       - "4222:4222"
       - "8222:8222"
     command: ["--js", "-m", "8222"]
+
+  data-converter:
+    build: .
+    restart: on-failure
+    depends_on:
+      nats:
+        condition: service_started
+      mosquitto:
+        condition: service_started
+    environment:
+      - CONFIG_PATH=/config/config.yaml
+      - MQTT_HOST=mosquitto
+      - NATS_HOST=nats
+      - MQTT_USER=${MQTT_USER:-}
+      - MQTT_PASS=${MQTT_PASS:-}
+      - NATS_TOKEN=${NATS_TOKEN:-}
+    volumes:
+      - ./config/config.example.yaml:/config/config.yaml:ro

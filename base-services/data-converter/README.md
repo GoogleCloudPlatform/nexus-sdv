@@ -1,0 +1,136 @@
+# Data Converter Service
+
+Converts telemetry data from IoT protocols (MQTT) into the Nexus Protobuf format (`TelemetryMessage`) and publishes it to NATS.
+
+## Prerequisites
+
+- Go 1.24+
+- Docker & Docker Compose
+- `protoc` with `protoc-gen-go` (for proto regeneration only)
+- NATS CLI (`nats`) for subscribing to output
+- Mosquitto clients (`mosquitto_pub`) for publishing test data
+
+### Install optional tools
+
+```bash
+# NATS CLI
+brew install nats-io/nats-tools/nats
+
+# Mosquitto clients
+brew install mosquitto
+
+# protoc-gen-go (only needed if regenerating proto)
+go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+```
+
+## Local Test Environment
+
+### Start the full stack
+
+```bash
+docker compose up -d
+```
+
+This starts:
+- **Mosquitto** (MQTT broker) on `localhost:1883` — anonymous access enabled
+- **NATS** on `localhost:4222` — with JetStream, monitoring on `localhost:8222`
+- **Data Converter** — connected to both, using `config/config.example.yaml`
+
+### End-to-end test
+
+Terminal 1 — subscribe to NATS output:
+```bash
+nats sub "telemetry.>"
+```
+
+Terminal 2 — publish a test message via MQTT:
+```bash
+mosquitto_pub -t "factory/line1/sensors/temp" -m '{"name":"temperature","value":"42.3"}'
+```
+
+Expected output on NATS subject `telemetry.line1.temperature`.
+
+### Inspect MQTT messages
+
+Subscribe to all messages on the Mosquitto broker (runs inside the container, no local install needed):
+
+```bash
+docker compose exec mosquitto mosquitto_sub -t "factory/#" -v
+```
+
+### View logs
+
+```bash
+docker compose logs -f data-converter
+```
+
+### Stop
+
+```bash
+docker compose down
+```
+
+### Running outside Docker
+
+For local development without rebuilding the container:
+
+```bash
+docker compose up -d mosquitto nats
+MQTT_HOST=localhost NATS_HOST=localhost CONFIG_PATH=./config/config.example.yaml go run ./src/
+```
+
+### Configuration
+
+See [`config/config.example.yaml`](config/config.example.yaml) for the full reference.
+
+| Environment Variable | Description |
+|---|---|
+| `CONFIG_PATH` | Path to the YAML config file (required) |
+| `MQTT_HOST` | MQTT broker hostname (set automatically in Docker) |
+| `NATS_HOST` | NATS server hostname (set automatically in Docker) |
+| `MQTT_USER` | Injected into config via `${MQTT_USER}` |
+| `MQTT_PASS` | Injected into config via `${MQTT_PASS}` |
+| `NATS_TOKEN` | Injected into config via `${NATS_TOKEN}` |
+
+Secrets are injected via `${VAR_NAME}` syntax in the YAML file — they are resolved from environment variables at startup.
+
+### Mapping template functions
+
+The field mapping uses Go `text/template` with two custom functions:
+
+| Function | Description | Example |
+|---|---|---|
+| `seg <topic> <index>` | Extract segment from `/`-delimited topic | `{{ seg .topic 1 }}` on `factory/line1/data` → `line1` |
+| `jsonpath <payload> <path>` | Extract value from JSON by dot-path | `{{ jsonpath .payload "sensor.type" }}` |
+
+## Unit Tests
+
+```bash
+make test
+```
+
+Or directly:
+```bash
+go test -v -count=1 ./tests/unit/...
+```
+
+## Build
+
+```bash
+# Binary
+make build
+
+# Docker image
+docker build -t data-converter .
+```
+
+## Makefile Targets
+
+| Target | Description |
+|---|---|
+| `make proto` | Regenerate Go code from `telemetry.proto` |
+| `make build` | Compile binary to `bin/data-converter` |
+| `make run` | Run the service with `go run` |
+| `make test` | Run unit tests |
+| `make deps` | Tidy and download Go modules |
+| `make clean` | Remove generated `api/` directory |
