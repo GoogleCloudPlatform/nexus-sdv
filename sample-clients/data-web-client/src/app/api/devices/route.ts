@@ -12,7 +12,8 @@ export async function GET() {
   try {
     const devices = await getDevices();
     return NextResponse.json({ devices });
-  } catch {
+  } catch (err) {
+    console.error('[/api/devices]', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

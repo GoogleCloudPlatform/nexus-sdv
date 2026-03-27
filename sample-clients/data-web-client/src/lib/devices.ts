@@ -8,7 +8,7 @@ export async function getDevices(): Promise<DeviceRow[]> {
   // StripValueTransformer filter reads keys and discards all cell values.
   const deviceIds = await new Promise<Set<string>>((resolve, reject) => {
     const ids = new Set<string>();
-    const stream = table.createReadStream({ filter: [{ strip: true }] });
+    const stream = table.createReadStream({ filter: [{ value: { strip: true } }] });
     stream.on('data', (row: { id: string }) => {
       const sep = row.id.indexOf('#');
       if (sep > 0) ids.add(row.id.slice(0, sep));

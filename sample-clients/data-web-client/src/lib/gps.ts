@@ -45,9 +45,10 @@ export function extractGpsPoints(detail: DeviceDetailResponse): GpsPoint[] {
 
     if (!latStr || !lngStr || !altStr) continue;
 
-    const lat = Number(latStr);
-    const lng = Number(lngStr);
-    const alt = Number(altStr);
+    const strip = (s: string) => s.replace(/^"|"$/g, '');
+    const lat = Number(strip(latStr));
+    const lng = Number(strip(lngStr));
+    const alt = Number(strip(altStr));
 
     if (!isFinite(lat) || !isFinite(lng) || !isFinite(alt)) continue;
 

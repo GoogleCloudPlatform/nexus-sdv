@@ -13,14 +13,16 @@ function parseRange(value: string | null): TimeRange {
 
 export async function GET(
   request: Request,
-  { params }: { params: { id: string } },
+  { params }: { params: Promise<{ id: string }> },
 ) {
   const session = await getServerSession(authOptions);
   if (!session) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  if (!params.id || params.id.includes('#')) {
+  const { id } = await params;
+
+  if (!id || id.includes('#')) {
     return NextResponse.json({ error: 'Invalid device ID' }, { status: 400 });
   }
 
@@ -28,7 +30,7 @@ export async function GET(
   const range = parseRange(searchParams.get('range'));
 
   try {
-    const data = await getDeviceTimeSeries(params.id, range);
+    const data = await getDeviceTimeSeries(id, range);
     return NextResponse.json(data);
   } catch {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

@@ -36,9 +36,14 @@ export default function FleetPage() {
       });
   }, []);
 
-  // Build flat rows and column key list for the table
+  const isGpsColumn = (key: string) => {
+    const qualifier = key.includes(':') ? key.slice(key.indexOf(':') + 1) : key;
+    return qualifier.toLowerCase().startsWith('gps.');
+  };
+
+  // Build flat rows and column key list for the table, excluding GPS columns
   const allColumnKeys = Array.from(
-    new Set(devices.flatMap((d) => Object.keys(d.columns)))
+    new Set(devices.flatMap((d) => Object.keys(d.columns).filter((k) => !isGpsColumn(k))))
   ).sort();
 
   const tableColumnKeys = ['deviceId', 'lastSeen', ...allColumnKeys];
