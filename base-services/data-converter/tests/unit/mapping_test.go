@@ -3,7 +3,7 @@ package unit
 import (
 	"testing"
 
-	"data-converter/src/transform"
+	"data-converter/src/convert"
 )
 
 func TestSeg_ValidIndex(t *testing.T) {
@@ -18,7 +18,7 @@ func TestSeg_ValidIndex(t *testing.T) {
 		{"single", 0, "single"},
 	}
 
-	funcs := transform.TemplateFuncs()
+	funcs := convert.TemplateFuncs()
 	segFn := funcs["seg"].(func(string, int) (string, error))
 
 	for _, tt := range tests {
@@ -34,7 +34,7 @@ func TestSeg_ValidIndex(t *testing.T) {
 }
 
 func TestSeg_InvalidIndex(t *testing.T) {
-	funcs := transform.TemplateFuncs()
+	funcs := convert.TemplateFuncs()
 	segFn := funcs["seg"].(func(string, int) (string, error))
 
 	_, err := segFn("a/b", 5)
@@ -49,7 +49,7 @@ func TestSeg_InvalidIndex(t *testing.T) {
 }
 
 func TestJsonpath_FlatObject(t *testing.T) {
-	funcs := transform.TemplateFuncs()
+	funcs := convert.TemplateFuncs()
 	jpFn := funcs["jsonpath"].(func(interface{}, string) (interface{}, error))
 
 	data := map[string]interface{}{
@@ -67,7 +67,7 @@ func TestJsonpath_FlatObject(t *testing.T) {
 }
 
 func TestJsonpath_NestedObject(t *testing.T) {
-	funcs := transform.TemplateFuncs()
+	funcs := convert.TemplateFuncs()
 	jpFn := funcs["jsonpath"].(func(interface{}, string) (interface{}, error))
 
 	data := map[string]interface{}{
@@ -87,7 +87,7 @@ func TestJsonpath_NestedObject(t *testing.T) {
 }
 
 func TestJsonpath_MissingKey(t *testing.T) {
-	funcs := transform.TemplateFuncs()
+	funcs := convert.TemplateFuncs()
 	jpFn := funcs["jsonpath"].(func(interface{}, string) (interface{}, error))
 
 	data := map[string]interface{}{"name": "test"}
@@ -99,7 +99,7 @@ func TestJsonpath_MissingKey(t *testing.T) {
 }
 
 func TestJsonpath_NonObjectTraversal(t *testing.T) {
-	funcs := transform.TemplateFuncs()
+	funcs := convert.TemplateFuncs()
 	jpFn := funcs["jsonpath"].(func(interface{}, string) (interface{}, error))
 
 	data := map[string]interface{}{"name": "test"}
@@ -111,7 +111,7 @@ func TestJsonpath_NonObjectTraversal(t *testing.T) {
 }
 
 func TestJsonpath_NumericValue(t *testing.T) {
-	funcs := transform.TemplateFuncs()
+	funcs := convert.TemplateFuncs()
 	jpFn := funcs["jsonpath"].(func(interface{}, string) (interface{}, error))
 
 	data := map[string]interface{}{

@@ -9,19 +9,19 @@ import (
 	"syscall"
 
 	telemetry "data-converter/api/gen/telemetry"
+	"data-converter/src/convert"
 	"data-converter/src/egress"
 	"data-converter/src/ingress"
 	_ "data-converter/src/ingress/mqtt" // register MQTT adapter
-	"data-converter/src/transform"
 
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 )
 
-// converterEntry pairs a transformer with the topic matcher of its adapter.
+// converterEntry pairs a converter with the pattern matcher of its adapter.
 type converterEntry struct {
-	transformer *transform.Transformer
-	matcher     ingress.TopicMatcher
+	converter *convert.Converter
+	matcher   ingress.TopicMatcher
 }
 
 func main() {
@@ -62,8 +62,7 @@ func main() {
 	}
 	defer pub.Close()
 
-	// --- Build adapters and transformers from converters ---
-	// Group converter sources by adapter type
+	// --- Build adapters and converters ---
 	adapterSources := make(map[string][]ingress.ConverterSource)
 	converters := make(map[string]converterEntry)
 
@@ -73,14 +72,14 @@ func main() {
 			QoS:   conv.Source.QoS,
 		})
 
-		def := transform.ConverterDef{
+		def := convert.ConverterDef{
 			Name:    conv.Name,
 			Mapping: conv.Mapping,
 			Target:  conv.Target,
 		}
 		converters[conv.Source.Topic] = converterEntry{
-			transformer: transform.NewTransformer(def, logger),
-			matcher:     ingress.GetTopicMatcher(conv.Source.Adapter),
+			converter: convert.NewConverter(def, logger),
+			matcher:   ingress.GetTopicMatcher(conv.Source.Adapter),
 		}
 	}
 
@@ -121,13 +120,12 @@ func main() {
 	)
 
 	// --- Core Loop ---
-	// Merge all adapter channels into the same loop
-	transformFn := func(msg ingress.RawMessage) (*telemetry.TelemetryMessage, string, error) {
-		t := findTransformer(converters, msg.Topic)
-		if t == nil {
-			return nil, "", fmt.Errorf("no transformer matched topic %q", msg.Topic)
+	convertFn := func(msg ingress.RawMessage) (*telemetry.TelemetryMessage, string, error) {
+		c := findConverter(converters, msg.Topic)
+		if c == nil {
+			return nil, "", fmt.Errorf("no converter matched topic %q", msg.Topic)
 		}
-		result, err := t.Transform(msg.Topic, msg.Payload)
+		result, err := c.Convert(msg.Topic, msg.Payload)
 		if err != nil {
 			return nil, "", err
 		}
@@ -135,11 +133,10 @@ func main() {
 	}
 
 	if len(adapters) == 1 {
-		coreLoop(ctx, adapters[0], pub, logger, transformFn)
+		coreLoop(ctx, adapters[0], pub, logger, convertFn)
 	} else {
-		// Fan-in: merge multiple adapter channels
 		merged := fanIn(ctx, adapters)
-		coreLoopChan(ctx, merged, pub, logger, transformFn)
+		coreLoopChan(ctx, merged, pub, logger, convertFn)
 	}
 }
 
@@ -164,30 +161,30 @@ func fanIn(ctx context.Context, adapters []ingress.Adapter) <-chan ingress.RawMe
 	return merged
 }
 
-// findTransformer finds the matching transformer for a given topic.
+// findConverter finds the matching converter for a given topic.
 // It checks for exact match first, then uses each converter's protocol-specific matcher.
-func findTransformer(converters map[string]converterEntry, topic string) *transform.Transformer {
+func findConverter(converters map[string]converterEntry, topic string) *convert.Converter {
 	if entry, ok := converters[topic]; ok {
-		return entry.transformer
+		return entry.converter
 	}
 	for pattern, entry := range converters {
 		if entry.matcher(pattern, topic) {
-			return entry.transformer
+			return entry.converter
 		}
 	}
 	return nil
 }
 
-// transformFunc is the signature for a message transformation function.
-type transformFunc func(msg ingress.RawMessage) (*telemetry.TelemetryMessage, string, error)
+// convertFunc is the signature for a message conversion function.
+type convertFunc func(msg ingress.RawMessage) (*telemetry.TelemetryMessage, string, error)
 
 // coreLoop reads messages from a single adapter and publishes to NATS.
-func coreLoop(ctx context.Context, a ingress.Adapter, pub egress.Publisher, logger *zap.Logger, transform transformFunc) {
-	coreLoopChan(ctx, a.Messages(), pub, logger, transform)
+func coreLoop(ctx context.Context, a ingress.Adapter, pub egress.Publisher, logger *zap.Logger, convert convertFunc) {
+	coreLoopChan(ctx, a.Messages(), pub, logger, convert)
 }
 
 // coreLoopChan reads messages from a channel and publishes to NATS.
-func coreLoopChan(ctx context.Context, msgs <-chan ingress.RawMessage, pub egress.Publisher, logger *zap.Logger, transform transformFunc) {
+func coreLoopChan(ctx context.Context, msgs <-chan ingress.RawMessage, pub egress.Publisher, logger *zap.Logger, convert convertFunc) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -199,9 +196,9 @@ func coreLoopChan(ctx context.Context, msgs <-chan ingress.RawMessage, pub egres
 				return
 			}
 
-			tm, subject, err := transform(msg)
+			telemetryMessage, subject, err := convert(msg)
 			if err != nil {
-				logger.Warn("transform failed",
+				logger.Warn("conversion failed",
 					zap.String("topic", msg.Topic),
 					zap.Error(err),
 				)
@@ -211,11 +208,11 @@ func coreLoopChan(ctx context.Context, msgs <-chan ingress.RawMessage, pub egres
 			logger.Info("message converted",
 				zap.String("topic", msg.Topic),
 				zap.String("subject", subject),
-				zap.String("device_id", tm.DeviceId),
-				zap.Int("sensors", len(tm.SensorData)),
+				zap.String("device_id", telemetryMessage.DeviceId),
+				zap.Int("sensors", len(telemetryMessage.SensorData)),
 			)
 
-			data, err := proto.Marshal(tm)
+			data, err := proto.Marshal(telemetryMessage)
 			if err != nil {
 				logger.Error("protobuf marshal failed", zap.Error(err))
 				continue

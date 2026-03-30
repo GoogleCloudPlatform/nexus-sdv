@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"data-converter/src/transform"
+	"data-converter/src/convert"
 
 	"gopkg.in/yaml.v3"
 )
@@ -33,8 +33,8 @@ type NATSConfig struct {
 type ConverterConfig struct {
 	Name    string                  `yaml:"name"`
 	Source  SourceConfig            `yaml:"source"`
-	Mapping transform.MappingConfig `yaml:"mapping"`
-	Target  transform.TargetConfig  `yaml:"target"`
+	Mapping convert.MappingConfig `yaml:"mapping"`
+	Target  convert.TargetConfig  `yaml:"target"`
 }
 
 // SourceConfig defines where a converter reads from.

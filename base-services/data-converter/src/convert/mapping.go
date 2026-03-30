@@ -1,4 +1,4 @@
-package transform
+package convert
 
 // MappingConfig defines how to map raw messages to TelemetryMessage fields.
 // These types mirror the YAML config structure for converters.

@@ -1,4 +1,4 @@
-package transform
+package convert
 
 import (
 	"bytes"
@@ -15,30 +15,30 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// Transformer converts RawMessages into TelemetryMessages using a ConverterDef.
-type Transformer struct {
+// Converter converts RawMessages into TelemetryMessages using a ConverterDef.
+type Converter struct {
 	def    ConverterDef
 	logger *zap.Logger
 	funcs  template.FuncMap
 }
 
-// NewTransformer creates a new Transformer for the given converter definition.
-func NewTransformer(def ConverterDef, logger *zap.Logger) *Transformer {
-	return &Transformer{
+// NewConverter creates a new Converter for the given converter definition.
+func NewConverter(def ConverterDef, logger *zap.Logger) *Converter {
+	return &Converter{
 		def:    def,
-		logger: logger.Named("transform").Named(def.Name),
+		logger: logger.Named("converter").Named(def.Name),
 		funcs:  TemplateFuncs(),
 	}
 }
 
-// TransformResult holds the output of a successful transformation.
-type TransformResult struct {
+// ConvertResult holds the output of a successful conversion.
+type ConvertResult struct {
 	Message *telemetry.TelemetryMessage
 	Subject string
 }
 
-// Transform converts a raw message topic + payload into a TelemetryMessage and NATS subject.
-func (t *Transformer) Transform(topic string, payload []byte) (*TransformResult, error) {
+// Convert converts a raw message topic + payload into a TelemetryMessage and NATS subject.
+func (c *Converter) Convert(topic string, payload []byte) (*ConvertResult, error) {
 	// Parse JSON payload
 	var payloadMap map[string]interface{}
 	if err := json.Unmarshal(payload, &payloadMap); err != nil {
@@ -55,29 +55,29 @@ func (t *Transformer) Transform(topic string, payload []byte) (*TransformResult,
 	}
 
 	// Resolve device_id
-	deviceID, err := t.execTemplate("device_id", t.def.Mapping.DeviceID, ctx)
+	deviceID, err := c.execTemplate("device_id", c.def.Mapping.DeviceID, ctx)
 	if err != nil {
 		return nil, fmt.Errorf("resolve device_id: %w", err)
 	}
 	if deviceID == "" {
-		t.logger.Warn("device_id resolved to empty string", zap.String("topic", topic))
+		c.logger.Warn("device_id resolved to empty string", zap.String("topic", topic))
 	}
 
 	// Resolve sensors
 	var sensorReadings []*telemetry.SensorReading
 	var lastSensorName string
 
-	for i, sm := range t.def.Mapping.Sensors {
-		sensorName, err := t.execTemplate(fmt.Sprintf("sensor[%d].sensor", i), sm.Sensor, ctx)
+	for i, sm := range c.def.Mapping.Sensors {
+		sensorName, err := c.execTemplate(fmt.Sprintf("sensor[%d].sensor", i), sm.Sensor, ctx)
 		if err != nil {
-			t.logger.Warn("failed to resolve sensor name, skipping",
+			c.logger.Warn("failed to resolve sensor name, skipping",
 				zap.Int("index", i), zap.Error(err))
 			continue
 		}
 
-		sensorValue, err := t.execTemplate(fmt.Sprintf("sensor[%d].value", i), sm.Value, ctx)
+		sensorValue, err := c.execTemplate(fmt.Sprintf("sensor[%d].value", i), sm.Value, ctx)
 		if err != nil {
-			t.logger.Warn("failed to resolve sensor value, skipping",
+			c.logger.Warn("failed to resolve sensor value, skipping",
 				zap.Int("index", i), zap.Error(err))
 			continue
 		}
@@ -110,17 +110,17 @@ func (t *Transformer) Transform(topic string, payload []byte) (*TransformResult,
 		"sensor":    lastSensorName,
 		"topic":     topic,
 	}
-	subject, err := t.execTemplate("subject", t.def.Target.SubjectPattern, subjectCtx)
+	subject, err := c.execTemplate("subject", c.def.Target.SubjectPattern, subjectCtx)
 	if err != nil {
 		return nil, fmt.Errorf("resolve subject: %w", err)
 	}
 
-	return &TransformResult{Message: msg, Subject: subject}, nil
+	return &ConvertResult{Message: msg, Subject: subject}, nil
 }
 
 // execTemplate parses and executes a Go template string against the given data.
-func (t *Transformer) execTemplate(name, tmplStr string, data interface{}) (string, error) {
-	tmpl, err := template.New(name).Funcs(t.funcs).Parse(tmplStr)
+func (c *Converter) execTemplate(name, tmplStr string, data interface{}) (string, error) {
+	tmpl, err := template.New(name).Funcs(c.funcs).Parse(tmplStr)
 	if err != nil {
 		return "", fmt.Errorf("parse template %q: %w", name, err)
 	}

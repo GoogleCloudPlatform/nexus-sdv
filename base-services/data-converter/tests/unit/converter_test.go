@@ -3,24 +3,24 @@ package unit
 import (
 	"testing"
 
-	"data-converter/src/transform"
+	"data-converter/src/convert"
 
 	"go.uber.org/zap"
 )
 
-func newTestTransformer(mapping transform.MappingConfig, target transform.TargetConfig) *transform.Transformer {
-	return transform.NewTransformer(transform.ConverterDef{
+func newTestConverter(mapping convert.MappingConfig, target convert.TargetConfig) *convert.Converter {
+	return convert.NewConverter(convert.ConverterDef{
 		Name:    "test",
 		Mapping: mapping,
 		Target:  target,
 	}, zap.NewNop())
 }
 
-func TestTransform_BasicJSON(t *testing.T) {
-	tr := newTestTransformer(
-		transform.MappingConfig{
+func TestConvert_BasicJSON(t *testing.T) {
+	c := newTestConverter(
+		convert.MappingConfig{
 			DeviceID: `{{ seg .topic 1 }}`,
-			Sensors: []transform.SensorMapping{
+			Sensors: []convert.SensorMapping{
 				{
 					Sensor:   `{{ jsonpath .payload "name" }}`,
 					Value:    `{{ jsonpath .payload "value" }}`,
@@ -28,12 +28,12 @@ func TestTransform_BasicJSON(t *testing.T) {
 				},
 			},
 		},
-		transform.TargetConfig{
+		convert.TargetConfig{
 			SubjectPattern: "telemetry.{{ .device_id }}.{{ .sensor }}",
 		},
 	)
 
-	result, err := tr.Transform("factory/line1/sensors/temp", []byte(`{"name":"temperature","value":"42.3"}`))
+	result, err := c.Convert("factory/line1/sensors/temp", []byte(`{"name":"temperature","value":"42.3"}`))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -61,11 +61,11 @@ func TestTransform_BasicJSON(t *testing.T) {
 	}
 }
 
-func TestTransform_MultipleSensors(t *testing.T) {
-	tr := newTestTransformer(
-		transform.MappingConfig{
+func TestConvert_MultipleSensors(t *testing.T) {
+	c := newTestConverter(
+		convert.MappingConfig{
 			DeviceID: `{{ seg .topic 1 }}`,
-			Sensors: []transform.SensorMapping{
+			Sensors: []convert.SensorMapping{
 				{
 					Sensor:   `{{ jsonpath .payload "temp_name" }}`,
 					Value:    `{{ jsonpath .payload "temp_value" }}`,
@@ -78,13 +78,13 @@ func TestTransform_MultipleSensors(t *testing.T) {
 				},
 			},
 		},
-		transform.TargetConfig{
+		convert.TargetConfig{
 			SubjectPattern: "telemetry.{{ .device_id }}.{{ .sensor }}",
 		},
 	)
 
 	payload := `{"temp_name":"temperature","temp_value":"42.3","speed_name":"speed","speed_value":"120.5"}`
-	result, err := tr.Transform("vehicles/VIN123/data", []byte(payload))
+	result, err := c.Convert("vehicles/VIN123/data", []byte(payload))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -104,11 +104,11 @@ func TestTransform_MultipleSensors(t *testing.T) {
 	}
 }
 
-func TestTransform_NestedJSON(t *testing.T) {
-	tr := newTestTransformer(
-		transform.MappingConfig{
+func TestConvert_NestedJSON(t *testing.T) {
+	c := newTestConverter(
+		convert.MappingConfig{
 			DeviceID: `{{ seg .topic 1 }}`,
-			Sensors: []transform.SensorMapping{
+			Sensors: []convert.SensorMapping{
 				{
 					Sensor:   `{{ jsonpath .payload "sensor.type" }}`,
 					Value:    `{{ jsonpath .payload "sensor.reading" }}`,
@@ -116,13 +116,13 @@ func TestTransform_NestedJSON(t *testing.T) {
 				},
 			},
 		},
-		transform.TargetConfig{
+		convert.TargetConfig{
 			SubjectPattern: "telemetry.{{ .device_id }}.{{ .sensor }}",
 		},
 	)
 
 	payload := `{"sensor":{"type":"humidity","reading":"65.2"}}`
-	result, err := tr.Transform("iot/gateway1/data", []byte(payload))
+	result, err := c.Convert("iot/gateway1/data", []byte(payload))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -135,62 +135,62 @@ func TestTransform_NestedJSON(t *testing.T) {
 	}
 }
 
-func TestTransform_InvalidJSON(t *testing.T) {
-	tr := newTestTransformer(
-		transform.MappingConfig{
+func TestConvert_InvalidJSON(t *testing.T) {
+	c := newTestConverter(
+		convert.MappingConfig{
 			DeviceID: `{{ seg .topic 1 }}`,
-			Sensors: []transform.SensorMapping{
+			Sensors: []convert.SensorMapping{
 				{Sensor: `{{ jsonpath .payload "name" }}`, Value: `{{ jsonpath .payload "value" }}`},
 			},
 		},
-		transform.TargetConfig{SubjectPattern: "telemetry.{{ .device_id }}"},
+		convert.TargetConfig{SubjectPattern: "telemetry.{{ .device_id }}"},
 	)
 
-	_, err := tr.Transform("test/dev1/data", []byte(`not json`))
+	_, err := c.Convert("test/dev1/data", []byte(`not json`))
 	if err == nil {
 		t.Error("expected error for invalid JSON")
 	}
 }
 
-func TestTransform_EmptyPayload(t *testing.T) {
-	tr := newTestTransformer(
-		transform.MappingConfig{
+func TestConvert_EmptyPayload(t *testing.T) {
+	c := newTestConverter(
+		convert.MappingConfig{
 			DeviceID: `{{ seg .topic 1 }}`,
-			Sensors: []transform.SensorMapping{
+			Sensors: []convert.SensorMapping{
 				{Sensor: `{{ jsonpath .payload "name" }}`, Value: `{{ jsonpath .payload "value" }}`},
 			},
 		},
-		transform.TargetConfig{SubjectPattern: "telemetry.{{ .device_id }}"},
+		convert.TargetConfig{SubjectPattern: "telemetry.{{ .device_id }}"},
 	)
 
-	_, err := tr.Transform("test/dev1/data", []byte(`{}`))
+	_, err := c.Convert("test/dev1/data", []byte(`{}`))
 	if err == nil {
 		t.Error("expected error for empty payload with missing fields")
 	}
 }
 
-func TestTransform_TopicSegmentOutOfRange(t *testing.T) {
-	tr := newTestTransformer(
-		transform.MappingConfig{
+func TestConvert_TopicSegmentOutOfRange(t *testing.T) {
+	c := newTestConverter(
+		convert.MappingConfig{
 			DeviceID: `{{ seg .topic 5 }}`,
-			Sensors: []transform.SensorMapping{
+			Sensors: []convert.SensorMapping{
 				{Sensor: `{{ jsonpath .payload "name" }}`, Value: `{{ jsonpath .payload "value" }}`},
 			},
 		},
-		transform.TargetConfig{SubjectPattern: "telemetry.{{ .device_id }}"},
+		convert.TargetConfig{SubjectPattern: "telemetry.{{ .device_id }}"},
 	)
 
-	_, err := tr.Transform("a/b", []byte(`{"name":"s","value":"1"}`))
+	_, err := c.Convert("a/b", []byte(`{"name":"s","value":"1"}`))
 	if err == nil {
 		t.Error("expected error for topic segment out of range")
 	}
 }
 
-func TestTransform_StaticDataType(t *testing.T) {
-	tr := newTestTransformer(
-		transform.MappingConfig{
+func TestConvert_StaticDataType(t *testing.T) {
+	c := newTestConverter(
+		convert.MappingConfig{
 			DeviceID: `{{ seg .topic 1 }}`,
-			Sensors: []transform.SensorMapping{
+			Sensors: []convert.SensorMapping{
 				{
 					Sensor:   `{{ jsonpath .payload "name" }}`,
 					Value:    `{{ jsonpath .payload "value" }}`,
@@ -198,10 +198,10 @@ func TestTransform_StaticDataType(t *testing.T) {
 				},
 			},
 		},
-		transform.TargetConfig{SubjectPattern: "telemetry.{{ .device_id }}.{{ .sensor }}"},
+		convert.TargetConfig{SubjectPattern: "telemetry.{{ .device_id }}.{{ .sensor }}"},
 	)
 
-	result, err := tr.Transform("test/dev1/data", []byte(`{"name":"firmware","value":"v2.1"}`))
+	result, err := c.Convert("test/dev1/data", []byte(`{"name":"firmware","value":"v2.1"}`))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
