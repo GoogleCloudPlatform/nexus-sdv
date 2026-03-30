@@ -10,9 +10,9 @@ import (
 	"syscall"
 
 	telemetry "data-converter/api/gen/telemetry"
-	"data-converter/src/adapter"
-	"data-converter/src/adapter/mqtt"
 	"data-converter/src/egress"
+	"data-converter/src/ingress"
+	"data-converter/src/ingress/mqtt"
 	"data-converter/src/transform"
 
 	"go.uber.org/zap"
@@ -112,7 +112,7 @@ func main() {
 	)
 
 	// --- Core Loop ---
-	coreLoop(ctx, mqttAdapter, pub, logger, func(msg adapter.RawMessage) (*telemetry.TelemetryMessage, string, error) {
+	coreLoop(ctx, mqttAdapter, pub, logger, func(msg ingress.RawMessage) (*telemetry.TelemetryMessage, string, error) {
 		t := findTransformer(transformers, msg.Topic)
 		if t == nil {
 			return nil, "", fmt.Errorf("no transformer matched topic %q", msg.Topic)
@@ -159,10 +159,10 @@ func matchMQTTTopic(pattern, topic string) bool {
 }
 
 // transformFunc is the signature for a message transformation function.
-type transformFunc func(msg adapter.RawMessage) (*telemetry.TelemetryMessage, string, error)
+type transformFunc func(msg ingress.RawMessage) (*telemetry.TelemetryMessage, string, error)
 
 // coreLoop reads messages from the adapter, transforms them, and publishes to NATS.
-func coreLoop(ctx context.Context, a adapter.IngressAdapter, pub egress.Publisher, logger *zap.Logger, transform transformFunc) {
+func coreLoop(ctx context.Context, a ingress.Adapter, pub egress.Publisher, logger *zap.Logger, transform transformFunc) {
 	for {
 		select {
 		case <-ctx.Done():

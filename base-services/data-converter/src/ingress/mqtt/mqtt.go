@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"data-converter/src/adapter"
+	"data-converter/src/ingress"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"go.uber.org/zap"
@@ -29,11 +29,11 @@ type TopicConfig struct {
 	QoS   byte
 }
 
-// Adapter implements adapter.IngressAdapter for MQTT.
+// Adapter implements ingress.Adapter for MQTT.
 type Adapter struct {
 	cfg    Config
 	client mqtt.Client
-	msgs   chan adapter.RawMessage
+	msgs   chan ingress.RawMessage
 	logger *zap.Logger
 }
 
@@ -44,7 +44,7 @@ func New(cfg Config, logger *zap.Logger) *Adapter {
 	}
 	return &Adapter{
 		cfg:    cfg,
-		msgs:   make(chan adapter.RawMessage, cfg.BufferSize),
+		msgs:   make(chan ingress.RawMessage, cfg.BufferSize),
 		logger: logger.Named("mqtt"),
 	}
 }
@@ -96,7 +96,7 @@ func (a *Adapter) onConnect(c mqtt.Client) {
 // handleMessage is the MQTT message callback. It pushes messages into the channel,
 // dropping the oldest message if the buffer is full (backpressure).
 func (a *Adapter) handleMessage(_ mqtt.Client, msg mqtt.Message) {
-	raw := adapter.RawMessage{
+	raw := ingress.RawMessage{
 		Source:  "mqtt",
 		Topic:   msg.Topic(),
 		Payload: msg.Payload(),
@@ -134,6 +134,6 @@ func (a *Adapter) Stop(_ context.Context) error {
 	return nil
 }
 
-func (a *Adapter) Messages() <-chan adapter.RawMessage {
+func (a *Adapter) Messages() <-chan ingress.RawMessage {
 	return a.msgs
 }

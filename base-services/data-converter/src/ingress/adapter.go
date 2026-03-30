@@ -1,11 +1,11 @@
-package adapter
+package ingress
 
 import "context"
 
-// IngressAdapter defines the interface for protocol-specific ingress adapters.
+// Adapter defines the interface for protocol-specific ingress adapters.
 // Each adapter connects to an external source, consumes messages, and forwards
 // them as RawMessages through a channel.
-type IngressAdapter interface {
+type Adapter interface {
 	// Start begins consuming messages from the source.
 	Start(ctx context.Context) error
 	// Stop gracefully shuts down the adapter.
