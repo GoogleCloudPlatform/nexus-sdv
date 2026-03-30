@@ -2,6 +2,9 @@
 
 Converts telemetry data from IoT protocols (MQTT) into the Nexus Protobuf format (`TelemetryMessage`) and publishes it to NATS.
 
+- [Architecture](docs/architecture.md) — explains the adapter-based pipeline design and data flow from ingress to NATS.
+- [Configuration](docs/configuration.md) — describes how to write a `config.yaml` with adapters, converters, and template mappings.
+
 ## Prerequisites
 
 - Go 1.24+
@@ -53,7 +56,7 @@ Expected output: decoded TelemetryMessage with `device_id: "deviceId001"` on sub
 
 ### Inspect MQTT messages
 
-Subscribe to all messages on the Mosquitto broker (runs inside the container, no local install needed):
+Subscribe to all messages on the Mosquitto broker (runs inside the container, no local installation needed):
 
 ```bash
 docker compose exec mosquitto mosquitto_sub -t "telemetry/#" -v
