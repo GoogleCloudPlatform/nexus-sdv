@@ -12,7 +12,7 @@ import (
 	telemetry "data-converter/api/gen/telemetry"
 	"data-converter/src/egress"
 	"data-converter/src/ingress"
-	"data-converter/src/ingress/mqtt"
+	_ "data-converter/src/ingress/mqtt" // register MQTT adapter
 	"data-converter/src/transform"
 
 	"go.uber.org/zap"
@@ -57,19 +57,13 @@ func main() {
 	}
 	defer pub.Close()
 
-	// --- Build MQTT topics and transformers from converters ---
-	var topics []mqtt.TopicConfig
+	// --- Build adapters and transformers from converters ---
+	// Group converter sources by adapter type
+	adapterSources := make(map[string][]ingress.ConverterSource)
 	transformers := make(map[string]*transform.Transformer)
 
 	for _, conv := range cfg.Converters {
-		if conv.Source.Adapter != "mqtt" {
-			logger.Warn("unsupported adapter, skipping converter",
-				zap.String("converter", conv.Name),
-				zap.String("adapter", conv.Source.Adapter))
-			continue
-		}
-
-		topics = append(topics, mqtt.TopicConfig{
+		adapterSources[conv.Source.Adapter] = append(adapterSources[conv.Source.Adapter], ingress.ConverterSource{
 			Topic: conv.Source.Topic,
 			QoS:   conv.Source.QoS,
 		})
@@ -82,37 +76,45 @@ func main() {
 		transformers[conv.Source.Topic] = transform.NewTransformer(def, logger)
 	}
 
-	if len(topics) == 0 {
-		logger.Fatal("no MQTT converters configured")
+	// Create and start one adapter per type
+	var adapters []ingress.Adapter
+	for adapterName, sources := range adapterSources {
+		adapterCfg, ok := cfg.Adapters[adapterName]
+		if !ok {
+			logger.Fatal("adapter referenced in converter but not configured",
+				zap.String("adapter", adapterName))
+		}
+
+		a, err := ingress.NewAdapter(adapterName, adapterCfg, sources, logger)
+		if err != nil {
+			logger.Fatal("failed to create adapter",
+				zap.String("adapter", adapterName),
+				zap.Error(err))
+		}
+
+		if err := a.Start(ctx); err != nil {
+			logger.Fatal("failed to start adapter",
+				zap.String("adapter", adapterName),
+				zap.Error(err))
+		}
+		defer a.Stop(ctx)
+
+		adapters = append(adapters, a)
 	}
 
-	// --- MQTT Adapter ---
-	bufSize := cfg.Adapters.MQTT.BufferSize
-	if bufSize <= 0 {
-		bufSize = 1000
+	if len(adapters) == 0 {
+		logger.Fatal("no adapters configured")
 	}
-
-	mqttAdapter := mqtt.New(mqtt.Config{
-		Broker:     cfg.Adapters.MQTT.Broker,
-		ClientID:   cfg.Adapters.MQTT.ClientID,
-		Username:   cfg.Adapters.MQTT.Auth.Username,
-		Password:   cfg.Adapters.MQTT.Auth.Password,
-		Topics:     topics,
-		BufferSize: bufSize,
-	}, logger)
-
-	if err := mqttAdapter.Start(ctx); err != nil {
-		logger.Fatal("failed to start MQTT adapter", zap.Error(err))
-	}
-	defer mqttAdapter.Stop(ctx)
 
 	logger.Info("data-converter started",
 		zap.String("config", configPath),
 		zap.Int("converters", len(transformers)),
+		zap.Int("adapters", len(adapters)),
 	)
 
 	// --- Core Loop ---
-	coreLoop(ctx, mqttAdapter, pub, logger, func(msg ingress.RawMessage) (*telemetry.TelemetryMessage, string, error) {
+	// Merge all adapter channels into the same loop
+	transformFn := func(msg ingress.RawMessage) (*telemetry.TelemetryMessage, string, error) {
 		t := findTransformer(transformers, msg.Topic)
 		if t == nil {
 			return nil, "", fmt.Errorf("no transformer matched topic %q", msg.Topic)
@@ -122,7 +124,36 @@ func main() {
 			return nil, "", err
 		}
 		return result.Message, result.Subject, nil
-	})
+	}
+
+	if len(adapters) == 1 {
+		coreLoop(ctx, adapters[0], pub, logger, transformFn)
+	} else {
+		// Fan-in: merge multiple adapter channels
+		merged := fanIn(ctx, adapters)
+		coreLoopChan(ctx, merged, pub, logger, transformFn)
+	}
+}
+
+// fanIn merges message channels from multiple adapters into one.
+func fanIn(ctx context.Context, adapters []ingress.Adapter) <-chan ingress.RawMessage {
+	merged := make(chan ingress.RawMessage, 1000)
+	for _, a := range adapters {
+		go func(ch <-chan ingress.RawMessage) {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case msg, ok := <-ch:
+					if !ok {
+						return
+					}
+					merged <- msg
+				}
+			}
+		}(a.Messages())
+	}
+	return merged
 }
 
 // findTransformer finds the matching transformer for a given topic.
@@ -161,14 +192,19 @@ func matchMQTTTopic(pattern, topic string) bool {
 // transformFunc is the signature for a message transformation function.
 type transformFunc func(msg ingress.RawMessage) (*telemetry.TelemetryMessage, string, error)
 
-// coreLoop reads messages from the adapter, transforms them, and publishes to NATS.
+// coreLoop reads messages from a single adapter and publishes to NATS.
 func coreLoop(ctx context.Context, a ingress.Adapter, pub egress.Publisher, logger *zap.Logger, transform transformFunc) {
+	coreLoopChan(ctx, a.Messages(), pub, logger, transform)
+}
+
+// coreLoopChan reads messages from a channel and publishes to NATS.
+func coreLoopChan(ctx context.Context, msgs <-chan ingress.RawMessage, pub egress.Publisher, logger *zap.Logger, transform transformFunc) {
 	for {
 		select {
 		case <-ctx.Done():
 			logger.Info("shutting down")
 			return
-		case msg, ok := <-a.Messages():
+		case msg, ok := <-msgs:
 			if !ok {
 				logger.Info("message channel closed")
 				return

@@ -9,18 +9,41 @@ import (
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"go.uber.org/zap"
+	"gopkg.in/yaml.v3"
 )
 
-// Config holds MQTT adapter configuration.
+func init() {
+	ingress.Register("mqtt", Factory)
+}
+
+// Factory creates an MQTT adapter from raw YAML config.
+func Factory(rawCfg yaml.Node, sources []ingress.ConverterSource, logger *zap.Logger) (ingress.Adapter, error) {
+	var cfg Config
+	if err := rawCfg.Decode(&cfg); err != nil {
+		return nil, fmt.Errorf("mqtt: parse config: %w", err)
+	}
+
+	for _, s := range sources {
+		cfg.Topics = append(cfg.Topics, TopicConfig{Topic: s.Topic, QoS: s.QoS})
+	}
+
+	return New(cfg, logger), nil
+}
+
+// Config holds MQTT-specific adapter configuration.
 type Config struct {
-	Broker   string
-	ClientID string
-	Username string
-	Password string
+	Broker   string     `yaml:"broker"`
+	ClientID string     `yaml:"client_id"`
+	Auth     AuthConfig `yaml:"auth"`
 	Topics   []TopicConfig
-	QoS      byte
 	// BufferSize is the capacity of the internal message channel.
-	BufferSize int
+	BufferSize int `yaml:"buffer_size"`
+}
+
+// AuthConfig holds MQTT authentication credentials.
+type AuthConfig struct {
+	Username string `yaml:"username"`
+	Password string `yaml:"password"`
 }
 
 // TopicConfig defines a single MQTT subscription.
@@ -62,9 +85,9 @@ func (a *Adapter) Start(ctx context.Context) error {
 			a.logger.Warn("connection lost", zap.Error(err))
 		})
 
-	if a.cfg.Username != "" {
-		opts.SetUsername(a.cfg.Username)
-		opts.SetPassword(a.cfg.Password)
+	if a.cfg.Auth.Username != "" {
+		opts.SetUsername(a.cfg.Auth.Username)
+		opts.SetPassword(a.cfg.Auth.Password)
 	}
 
 	a.client = mqtt.NewClient(opts)

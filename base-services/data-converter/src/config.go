@@ -11,10 +11,10 @@ import (
 
 // Config is the top-level configuration for the data-converter service.
 type Config struct {
-	Service    ServiceConfig    `yaml:"service"`
-	NATS       NATSConfig        `yaml:"nats"`
-	Adapters   AdaptersConfig   `yaml:"adapters"`
-	Converters []ConverterConfig `yaml:"converters"`
+	Service    ServiceConfig            `yaml:"service"`
+	NATS       NATSConfig               `yaml:"nats"`
+	Adapters   map[string]yaml.Node     `yaml:"adapters"`
+	Converters []ConverterConfig        `yaml:"converters"`
 }
 
 // ServiceConfig holds general service settings.
@@ -27,26 +27,6 @@ type ServiceConfig struct {
 type NATSConfig struct {
 	URL   string `yaml:"url"`
 	Token string `yaml:"token"`
-}
-
-// AdaptersConfig holds configuration for all ingress adapters.
-type AdaptersConfig struct {
-	MQTT MQTTAdapterConfig `yaml:"mqtt"`
-}
-
-// MQTTAdapterConfig holds MQTT-specific adapter settings.
-type MQTTAdapterConfig struct {
-	Enabled    bool           `yaml:"enabled"`
-	Broker     string         `yaml:"broker"`
-	ClientID   string         `yaml:"client_id"`
-	Auth       MQTTAuthConfig `yaml:"auth"`
-	BufferSize int            `yaml:"buffer_size"`
-}
-
-// MQTTAuthConfig holds MQTT authentication credentials.
-type MQTTAuthConfig struct {
-	Username string `yaml:"username"`
-	Password string `yaml:"password"`
 }
 
 // ConverterConfig defines a single conversion pipeline.

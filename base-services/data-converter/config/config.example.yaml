@@ -8,7 +8,6 @@ nats:
 
 adapters:
   mqtt:
-    enabled: true
     broker: tcp://${MQTT_HOST}:1883
     client_id: nexus-converter
     buffer_size: 1000
