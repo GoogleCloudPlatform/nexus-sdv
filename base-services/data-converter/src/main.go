@@ -6,7 +6,6 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 
 	telemetry "data-converter/api/gen/telemetry"
@@ -18,6 +17,12 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 )
+
+// converterEntry pairs a transformer with the topic matcher of its adapter.
+type converterEntry struct {
+	transformer *transform.Transformer
+	matcher     ingress.TopicMatcher
+}
 
 func main() {
 	// --- Config ---
@@ -60,7 +65,7 @@ func main() {
 	// --- Build adapters and transformers from converters ---
 	// Group converter sources by adapter type
 	adapterSources := make(map[string][]ingress.ConverterSource)
-	transformers := make(map[string]*transform.Transformer)
+	converters := make(map[string]converterEntry)
 
 	for _, conv := range cfg.Converters {
 		adapterSources[conv.Source.Adapter] = append(adapterSources[conv.Source.Adapter], ingress.ConverterSource{
@@ -73,7 +78,10 @@ func main() {
 			Mapping: conv.Mapping,
 			Target:  conv.Target,
 		}
-		transformers[conv.Source.Topic] = transform.NewTransformer(def, logger)
+		converters[conv.Source.Topic] = converterEntry{
+			transformer: transform.NewTransformer(def, logger),
+			matcher:     ingress.GetTopicMatcher(conv.Source.Adapter),
+		}
 	}
 
 	// Create and start one adapter per type
@@ -108,14 +116,14 @@ func main() {
 
 	logger.Info("data-converter started",
 		zap.String("config", configPath),
-		zap.Int("converters", len(transformers)),
+		zap.Int("converters", len(converters)),
 		zap.Int("adapters", len(adapters)),
 	)
 
 	// --- Core Loop ---
 	// Merge all adapter channels into the same loop
 	transformFn := func(msg ingress.RawMessage) (*telemetry.TelemetryMessage, string, error) {
-		t := findTransformer(transformers, msg.Topic)
+		t := findTransformer(converters, msg.Topic)
 		if t == nil {
 			return nil, "", fmt.Errorf("no transformer matched topic %q", msg.Topic)
 		}
@@ -157,36 +165,17 @@ func fanIn(ctx context.Context, adapters []ingress.Adapter) <-chan ingress.RawMe
 }
 
 // findTransformer finds the matching transformer for a given topic.
-// It checks for exact match first, then tries MQTT wildcard matching.
-func findTransformer(transformers map[string]*transform.Transformer, topic string) *transform.Transformer {
-	if t, ok := transformers[topic]; ok {
-		return t
+// It checks for exact match first, then uses each converter's protocol-specific matcher.
+func findTransformer(converters map[string]converterEntry, topic string) *transform.Transformer {
+	if entry, ok := converters[topic]; ok {
+		return entry.transformer
 	}
-	for pattern, t := range transformers {
-		if matchMQTTTopic(pattern, topic) {
-			return t
+	for pattern, entry := range converters {
+		if entry.matcher(pattern, topic) {
+			return entry.transformer
 		}
 	}
 	return nil
-}
-
-// matchMQTTTopic checks if a topic matches an MQTT wildcard pattern.
-func matchMQTTTopic(pattern, topic string) bool {
-	patternParts := strings.Split(pattern, "/")
-	topicParts := strings.Split(topic, "/")
-
-	for i, pp := range patternParts {
-		if pp == "#" {
-			return true
-		}
-		if i >= len(topicParts) {
-			return false
-		}
-		if pp != "+" && pp != topicParts[i] {
-			return false
-		}
-	}
-	return len(patternParts) == len(topicParts)
 }
 
 // transformFunc is the signature for a message transformation function.

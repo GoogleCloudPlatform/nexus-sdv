@@ -3,6 +3,7 @@ package mqtt
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"data-converter/src/ingress"
@@ -13,7 +14,27 @@ import (
 )
 
 func init() {
-	ingress.Register("mqtt", Factory)
+	ingress.Register("mqtt", Factory, MatchTopic)
+}
+
+// MatchTopic checks if a topic matches an MQTT wildcard pattern.
+// Supports "+" (single-level) and "#" (multi-level) wildcards.
+func MatchTopic(pattern, topic string) bool {
+	patternParts := strings.Split(pattern, "/")
+	topicParts := strings.Split(topic, "/")
+
+	for i, pp := range patternParts {
+		if pp == "#" {
+			return true
+		}
+		if i >= len(topicParts) {
+			return false
+		}
+		if pp != "+" && pp != topicParts[i] {
+			return false
+		}
+	}
+	return len(patternParts) == len(topicParts)
 }
 
 // Factory creates an MQTT adapter from raw YAML config.

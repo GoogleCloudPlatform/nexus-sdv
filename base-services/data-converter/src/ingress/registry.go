@@ -12,24 +12,42 @@ type ConverterSource struct {
 	QoS   byte
 }
 
+// TopicMatcher checks if a topic matches a pattern using protocol-specific rules
+// (e.g. MQTT wildcards +/#, or exact string matching for other protocols).
+type TopicMatcher func(pattern, topic string) bool
+
 // AdapterFactory creates an Adapter from raw YAML config and a list of converter sources.
 // Each adapter is responsible for parsing its own config structure from the yaml.Node.
 type AdapterFactory func(rawCfg yaml.Node, sources []ConverterSource, logger *zap.Logger) (Adapter, error)
 
-var registry = map[string]AdapterFactory{}
+type adapterRegistration struct {
+	factory AdapterFactory
+	matcher TopicMatcher
+}
 
-// Register adds an adapter factory to the registry.
-func Register(name string, factory AdapterFactory) {
-	registry[name] = factory
+var registry = map[string]adapterRegistration{}
+
+// Register adds an adapter factory and its topic matcher to the registry.
+func Register(name string, factory AdapterFactory, matcher TopicMatcher) {
+	registry[name] = adapterRegistration{factory: factory, matcher: matcher}
 }
 
 // NewAdapter creates an adapter by looking up its factory in the registry.
 func NewAdapter(name string, rawCfg yaml.Node, sources []ConverterSource, logger *zap.Logger) (Adapter, error) {
-	factory, ok := registry[name]
+	reg, ok := registry[name]
 	if !ok {
 		return nil, &UnsupportedAdapterError{Name: name}
 	}
-	return factory(rawCfg, sources, logger)
+	return reg.factory(rawCfg, sources, logger)
+}
+
+// GetTopicMatcher returns the topic matcher for a registered adapter.
+func GetTopicMatcher(name string) TopicMatcher {
+	reg, ok := registry[name]
+	if !ok {
+		return func(pattern, topic string) bool { return pattern == topic }
+	}
+	return reg.matcher
 }
 
 // UnsupportedAdapterError is returned when no factory is registered for the given adapter name.
