@@ -16,10 +16,10 @@ adapters:
       password: "${MQTT_PASS}"
 
 converters:
-  - name: factory-sensors
+  - name: telemetry-sensors
     source:
       adapter: mqtt
-      topic: "factory/+/sensors/#"
+      topic: "telemetry/+/sensors/#"
       qos: 1
     mapping:
       device_id: "{{ seg .topic 1 }}"

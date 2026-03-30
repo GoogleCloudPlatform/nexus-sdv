@@ -15,7 +15,7 @@ func TemplateFuncs() template.FuncMap {
 }
 
 // seg extracts a segment from a topic string split by "/".
-// Example: seg("factory/line1/sensors/temp", 1) → "line1"
+// Example: seg("telemetry/deviceId/sensors/temp", 1) → "deviceId"
 func seg(topic string, index int) (string, error) {
 	parts := strings.Split(topic, "/")
 	if index < 0 || index >= len(parts) {

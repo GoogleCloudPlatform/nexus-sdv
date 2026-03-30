@@ -46,17 +46,17 @@ docker compose logs -f nats-subscriber
 
 Terminal 2 — publish a test message via MQTT:
 ```bash
-mosquitto_pub -t "factory/line1/sensors/temp" -m '{"name":"temperature","value":"42.3"}'
+mosquitto_pub -t "telemetry/deviceId001/sensors/temp" -m '{"name":"temperature","value":"42.3"}'
 ```
 
-Expected output: decoded TelemetryMessage with `device_id: "line1"` on subject `telemetry.line1.temperature`.
+Expected output: decoded TelemetryMessage with `device_id: "deviceId001"` on subject `telemetry.deviceId001.temperature`.
 
 ### Inspect MQTT messages
 
 Subscribe to all messages on the Mosquitto broker (runs inside the container, no local install needed):
 
 ```bash
-docker compose exec mosquitto mosquitto_sub -t "factory/#" -v
+docker compose exec mosquitto mosquitto_sub -t "telemetry/#" -v
 ```
 
 ### NATS monitoring
@@ -92,14 +92,14 @@ MQTT_HOST=localhost NATS_HOST=localhost CONFIG_PATH=./config/config.example.yaml
 
 See [`config/config.example.yaml`](config/config.example.yaml) for the full reference.
 
-| Environment Variable | Description |
-|---|---|
-| `CONFIG_PATH` | Path to the YAML config file (required) |
-| `MQTT_HOST` | MQTT broker hostname (set automatically in Docker) |
-| `NATS_HOST` | NATS server hostname (set automatically in Docker) |
-| `MQTT_USER` | Injected into config via `${MQTT_USER}` |
-| `MQTT_PASS` | Injected into config via `${MQTT_PASS}` |
-| `NATS_TOKEN` | Injected into config via `${NATS_TOKEN}` |
+| Environment Variable | Description                                        |
+|----------------------|----------------------------------------------------|
+| `CONFIG_PATH`        | Path to the YAML config file (required)            |
+| `MQTT_HOST`          | MQTT broker hostname (set automatically in Docker) |
+| `NATS_HOST`          | NATS server hostname (set automatically in Docker) |
+| `MQTT_USER`          | Injected into config via `${MQTT_USER}`            |
+| `MQTT_PASS`          | Injected into config via `${MQTT_PASS}`            |
+| `NATS_TOKEN`         | Injected into config via `${NATS_TOKEN}`           |
 
 Secrets are injected via `${VAR_NAME}` syntax in the YAML file — they are resolved from environment variables at startup.
 
@@ -107,10 +107,10 @@ Secrets are injected via `${VAR_NAME}` syntax in the YAML file — they are reso
 
 The field mapping uses Go `text/template` with two custom functions:
 
-| Function | Description | Example |
-|---|---|---|
-| `seg <topic> <index>` | Extract segment from `/`-delimited topic | `{{ seg .topic 1 }}` on `factory/line1/data` → `line1` |
-| `jsonpath <payload> <path>` | Extract value from JSON by dot-path | `{{ jsonpath .payload "sensor.type" }}` |
+| Function                    | Description                              | Example                                                              |
+|-----------------------------|------------------------------------------|----------------------------------------------------------------------|
+| `seg <topic> <index>`       | Extract segment from `/`-delimited topic | `{{ seg .topic 1 }}` on `telemetry/deviceId001/data` → `deviceId001` |
+| `jsonpath <payload> <path>` | Extract value from JSON by dot-path      | `{{ jsonpath .payload "sensor.type" }}`                              |
 
 ## Unit Tests
 
@@ -135,11 +135,11 @@ docker build -t data-converter .
 
 ## Makefile Targets
 
-| Target | Description |
-|---|---|
+| Target       | Description                               |
+|--------------|-------------------------------------------|
 | `make proto` | Regenerate Go code from `telemetry.proto` |
-| `make build` | Compile binary to `bin/data-converter` |
-| `make run` | Run the service with `go run` |
-| `make test` | Run unit tests |
-| `make deps` | Tidy and download Go modules |
-| `make clean` | Remove generated `api/` directory |
+| `make build` | Compile binary to `bin/data-converter`    |
+| `make run`   | Run the service with `go run`             |
+| `make test`  | Run unit tests                            |
+| `make deps`  | Tidy and download Go modules              |
+| `make clean` | Remove generated `api/` directory         |

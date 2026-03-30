@@ -33,13 +33,13 @@ func TestConvert_BasicJSON(t *testing.T) {
 		},
 	)
 
-	result, err := c.Convert("factory/line1/sensors/temp", []byte(`{"name":"temperature","value":"42.3"}`))
+	result, err := c.Convert("telemetry/deviceId/sensors/temp", []byte(`{"name":"temperature","value":"42.3"}`))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if result.Message.DeviceId != "line1" {
-		t.Errorf("device_id = %q, want %q", result.Message.DeviceId, "line1")
+	if result.Message.DeviceId != "deviceId" {
+		t.Errorf("device_id = %q, want %q", result.Message.DeviceId, "deviceId")
 	}
 	if len(result.Message.SensorData) != 1 {
 		t.Fatalf("sensor_data count = %d, want 1", len(result.Message.SensorData))
@@ -50,8 +50,8 @@ func TestConvert_BasicJSON(t *testing.T) {
 	if result.Message.SensorData[0].Value != "42.3" {
 		t.Errorf("value = %q, want %q", result.Message.SensorData[0].Value, "42.3")
 	}
-	if result.Subject != "telemetry.line1.temperature" {
-		t.Errorf("subject = %q, want %q", result.Subject, "telemetry.line1.temperature")
+	if result.Subject != "telemetry.deviceId.temperature" {
+		t.Errorf("subject = %q, want %q", result.Subject, "telemetry.deviceId.temperature")
 	}
 	if result.Message.MessageId == "" {
 		t.Error("message_id should not be empty")

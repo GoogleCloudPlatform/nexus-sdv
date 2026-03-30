@@ -12,9 +12,9 @@ func TestSeg_ValidIndex(t *testing.T) {
 		index int
 		want  string
 	}{
-		{"factory/line1/sensors/temp", 0, "factory"},
-		{"factory/line1/sensors/temp", 1, "line1"},
-		{"factory/line1/sensors/temp", 3, "temp"},
+		{"telemetry/deviceId/sensors/temp", 0, "telemetry"},
+		{"telemetry/deviceId/sensors/temp", 1, "deviceId"},
+		{"telemetry/deviceId/sensors/temp", 3, "temp"},
 		{"single", 0, "single"},
 	}
 
