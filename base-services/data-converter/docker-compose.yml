@@ -31,7 +31,7 @@ services:
       - MQTT_PASS=${MQTT_PASS:-}
       - NATS_TOKEN=${NATS_TOKEN:-}
     volumes:
-      - ./config/config.example.yaml:/config/config.yaml:ro
+      - ./config/config.yaml:/config/config.yaml:ro
 
   nats-subscriber:
     build:

@@ -28,30 +28,32 @@ go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
 
 ## Local Test Environment
 
+### Create config file
+
+```bash
+make config
+```
+
 ### Start the full stack
 
 ```bash
-docker compose up -d
+docker compose up --build
 ```
 
 This starts:
 - **Mosquitto** (MQTT broker) on `localhost:1883` — anonymous access enabled
-- **NATS** on `localhost:4222` — with JetStream, monitoring on `localhost:8222`
-- **Data Converter** — connected to both, using `config/config.example.yaml`
+- **NATS** on `localhost:4222` — monitoring on `localhost:8222`
+- **Data Converter** — connected to both, using `config/config.yaml`
 - **NATS Subscriber** — decodes and pretty-prints TelemetryMessages from NATS
 
 ### End-to-end test
 
-Terminal 1 — watch decoded NATS output:
-```bash
-docker compose logs -f nats-subscriber
-```
+Use the Go [mqtt-client](../../sample-clients/mqtt-client/README.md) to publish MQTT messages at regular intervals.
 
-Terminal 2 — publish a test message via MQTT:
+Alternatively you can publish a test message via MQTT manually:
 ```bash
 mosquitto_pub -t "telemetry/deviceId001/sensors/temp" -m '{"name":"temperature","value":"42.3"}'
 ```
-
 Expected output: decoded TelemetryMessage with `device_id: "deviceId001"` on subject `telemetry.deviceId001.temperature`.
 
 ### Inspect MQTT messages
@@ -59,7 +61,7 @@ Expected output: decoded TelemetryMessage with `device_id: "deviceId001"` on sub
 Subscribe to all messages on the Mosquitto broker (runs inside the container, no local installation needed):
 
 ```bash
-docker compose exec mosquitto mosquitto_sub -t "telemetry/#" -v
+make monitor
 ```
 
 ### NATS monitoring

@@ -1,4 +1,4 @@
-.PHONY: proto clean build run test deps
+.PHONY: proto clean build run test deps config monitor
 
 # Generate protobuf files
 proto:
@@ -29,3 +29,19 @@ test:
 deps:
 	go mod tidy
 	go mod download
+
+
+CONFIG_FILE_SOURCE := config/config.example.yaml
+CONFIG_FILE := config/config.yaml
+config:
+ifneq ("$(wildcard $(CONFIG_FILE))","")
+	@echo "Config file $(CONFIG_FILE) already exists."
+else
+	@echo "Creating config $(CONFIG_FILE)"
+	@cp $(CONFIG_FILE_SOURCE) $(CONFIG_FILE)
+endif
+
+MQTT_TOPIC := "telemetry/\#"
+monitor:
+	@echo "Subscribing to MQTT topic: $(MQTT_TOPIC)"
+	docker compose exec mosquitto mosquitto_sub -t $(MQTT_TOPIC) -v
