@@ -25,8 +25,10 @@ type ServiceConfig struct {
 
 // NATSConfig holds NATS connection settings.
 type NATSConfig struct {
-	URL   string `yaml:"url"`
-	Token string `yaml:"token"`
+	URL      string `yaml:"url"`
+	Token    string `yaml:"token"`
+	User     string `yaml:"user"`
+	Password string `yaml:"password"`
 }
 
 // ConverterConfig defines a single conversion pipeline.

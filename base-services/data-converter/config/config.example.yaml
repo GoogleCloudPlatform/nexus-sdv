@@ -4,7 +4,10 @@ service:
 
 nats:
   url: nats://${NATS_HOST}:4222
-  token: "${NATS_TOKEN}"
+  # Auth: use either user/password (basic auth) or token — not both
+  user: "${NATS_USER}"
+  password: "${NATS_PASSWORD}"
+  # token: "${NATS_TOKEN}"
 
 adapters:
   mqtt:

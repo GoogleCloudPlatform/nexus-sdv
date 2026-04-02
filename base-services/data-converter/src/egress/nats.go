@@ -22,8 +22,10 @@ type NATSPublisher struct {
 
 // NATSConfig holds NATS connection configuration.
 type NATSConfig struct {
-	URL   string
-	Token string
+	URL      string
+	Token    string
+	User     string
+	Password string
 }
 
 // NewNATSPublisher connects to NATS and returns a publisher.
@@ -39,7 +41,9 @@ func NewNATSPublisher(cfg NATSConfig, logger *zap.Logger) (*NATSPublisher, error
 		}),
 	}
 
-	if cfg.Token != "" {
+	if cfg.User != "" {
+		opts = append(opts, nats.UserInfo(cfg.User, cfg.Password))
+	} else if cfg.Token != "" {
 		opts = append(opts, nats.Token(cfg.Token))
 	}
 

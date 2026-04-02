@@ -54,8 +54,10 @@ func main() {
 
 	// --- NATS Publisher ---
 	pub, err := egress.NewNATSPublisher(egress.NATSConfig{
-		URL:   cfg.NATS.URL,
-		Token: cfg.NATS.Token,
+		URL:      cfg.NATS.URL,
+		Token:    cfg.NATS.Token,
+		User:     cfg.NATS.User,
+		Password: cfg.NATS.Password,
 	}, logger)
 	if err != nil {
 		logger.Fatal("failed to connect to NATS", zap.Error(err))
