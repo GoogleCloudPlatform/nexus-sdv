@@ -1,4 +1,7 @@
-.PHONY: proto clean build run test deps config monitor
+.PHONY: proto clean build run test deps image image-multiarch config monitor
+
+REGISTRY ?=
+IMAGE_TAG := $(if $(REGISTRY),$(REGISTRY)/)data-converter:latest
 
 # Generate protobuf files
 proto:
@@ -30,7 +33,18 @@ deps:
 	go mod tidy
 	go mod download
 
+# Build data-converter Dockerimage
+image:
+	docker build -t $(IMAGE_TAG) .
 
+# Build multi-platform data-converter Dockerimage
+image-multiarch:
+	docker buildx build --platform linux/amd64,linux/arm64 \
+		-t $(IMAGE_TAG) \
+		--push \
+		.
+
+# Create config file, if not exists
 CONFIG_FILE_SOURCE := config/config.example.yaml
 CONFIG_FILE := config/config.yaml
 config:
@@ -41,6 +55,7 @@ else
 	@cp $(CONFIG_FILE_SOURCE) $(CONFIG_FILE)
 endif
 
+# Monitor MQTT messages received by mosquitto broker
 MQTT_TOPIC := "telemetry/\#"
 monitor:
 	@echo "Subscribing to MQTT topic: $(MQTT_TOPIC)"
