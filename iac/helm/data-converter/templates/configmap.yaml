@@ -1,0 +1,47 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "data-converter.fullname" . }}-config
+  labels:
+    {{- include "data-converter.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    service:
+      name: {{ .Chart.Name }}
+      log_level: {{ .Values.config.logLevel }}
+
+    nats:
+      url: {{ .Values.config.nats.url }}
+      user: "${NATS_USER}"
+      password: "${NATS_PASSWORD}"
+
+    adapters:
+      mqtt:
+        {{- if .Values.mosquitto.enabled }}
+        broker: tcp://{{ include "data-converter.fullname" . }}-mosquitto:{{ .Values.mosquitto.port }}
+        {{- else }}
+        broker: {{ .Values.config.mqtt.broker }}
+        {{- end }}
+        client_id: {{ .Values.config.mqtt.clientId }}
+        buffer_size: {{ .Values.config.mqtt.bufferSize }}
+        auth:
+          username: "${MQTT_USER}"
+          password: "${MQTT_PASS}"
+
+    converters:
+      {{- range .Values.config.converters }}
+      - name: {{ .name }}
+        source:
+          {{- toYaml .source | nindent 10 }}
+        mapping:
+          device_id: {{ .mapping.device_id | quote }}
+          sensors:
+            {{- range .mapping.sensors }}
+            - sensor: {{ .sensor | quote }}
+              value: {{ .value | quote }}
+              data_type: {{ .data_type }}
+            {{- end }}
+        target:
+          subject_prefix: {{ .target.subject_prefix | quote }}
+          subject_pattern: {{ .target.subject_pattern | quote }}
+      {{- end }}
