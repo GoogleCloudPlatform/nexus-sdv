@@ -78,6 +78,14 @@ jobs:
             JWT_ACC_SIGNING_KEY:projects/${{ vars.GCP_PROJECT_ID }}/secrets/JWT_ACC_SIGNING_KEY/versions/latest
           export_to_environment: true
 
+      - name: Import optional Data Converter secret
+        continue-on-error: true
+        uses: google-github-actions/get-secretmanager-secrets@v3
+        with:
+          secrets: |-
+            NATS_DATA_CONVERTER_PASSWORD:projects/${{ vars.GCP_PROJECT_ID }}/secrets/NATS_DATA_CONVERTER_PASSWORD/versions/latest
+          export_to_environment: true
+
       - name: Import Base Domain and CA Pool Configuration (Remote Only)
         if: ${{ (inputs.pki_strategy || 'local') == 'remote' }}
         uses: google-github-actions/get-secretmanager-secrets@v3
