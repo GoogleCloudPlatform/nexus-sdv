@@ -106,9 +106,10 @@ func (c *Converter) Convert(topic string, payload []byte) (*ConvertResult, error
 
 	// Resolve NATS subject
 	subjectCtx := map[string]interface{}{
-		"device_id": deviceID,
-		"sensor":    lastSensorName,
-		"topic":     topic,
+		"device_id":      deviceID,
+		"sensor":         lastSensorName,
+		"topic":          topic,
+		"subject_prefix": c.def.Target.SubjectPrefix,
 	}
 	subject, err := c.execTemplate("subject", c.def.Target.SubjectPattern, subjectCtx)
 	if err != nil {

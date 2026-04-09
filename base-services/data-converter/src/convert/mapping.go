@@ -16,6 +16,7 @@ type SensorMapping struct {
 
 // TargetConfig defines the NATS subject pattern for publishing.
 type TargetConfig struct {
+	SubjectPrefix  string `yaml:"subject_prefix"`
 	SubjectPattern string `yaml:"subject_pattern"`
 }
 

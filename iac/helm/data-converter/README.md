@@ -77,7 +77,8 @@ config:
             value: '{{ jsonpath .payload "value" }}'
             data_type: DYNAMIC
       target:
-        subject_pattern: 'telemetry.{{ .device_id }}.{{ .sensor }}'
+        subject_prefix: "prod.bigtable"
+        subject_pattern: 'telemetry.{{ .subject_prefix }}.{{ .device_id }}.{{ .sensor }}'
 
 secrets:
   natsUser: "<from step 2>"

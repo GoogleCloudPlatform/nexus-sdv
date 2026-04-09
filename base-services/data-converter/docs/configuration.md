@@ -91,7 +91,8 @@ converters:
           value: "{{ jsonpath .payload \"value\" }}"
           data_type: DYNAMIC
     target:
-      subject_pattern: "telemetry.{{ .device_id }}.{{ .sensor }}"
+      subject_prefix: "prod.bigtable"
+      subject_pattern: "telemetry.{{ .subject_prefix }}.{{ .device_id }}.{{ .sensor }}"
 ```
 
 ### `source`
@@ -145,12 +146,14 @@ Given topic `telemetry/deviceId001/sensors/temp` and payload `{"name": "temperat
 
 | Field | Type | Description |
 |---|---|---|
+| `subject_prefix` | string | Prefix segment for the NATS subject (e.g. `prod.bigtable`) |
 | `subject_pattern` | string (template) | Go template for the NATS subject to publish to |
 
 The subject pattern template has access to:
 
 | Variable | Type | Description |
 |---|---|---|
+| `.subject_prefix` | string | The configured subject prefix |
 | `.device_id` | string | The resolved device ID from the mapping |
 | `.sensor` | string | The name of the last resolved sensor |
 | `.topic` | string | The original source topic |
@@ -188,5 +191,6 @@ converters:
           value: "{{ jsonpath .payload \"value\" }}"
           data_type: DYNAMIC
     target:
-      subject_pattern: "telemetry.{{ .device_id }}.{{ .sensor }}"
+      subject_prefix: "prod.bigtable"
+      subject_pattern: "telemetry.{{ .subject_prefix }}.{{ .device_id }}.{{ .sensor }}"
 ```
