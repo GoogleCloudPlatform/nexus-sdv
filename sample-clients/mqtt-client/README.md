@@ -20,10 +20,23 @@ go run main.go
 |-------------|---------|---------------------------------------------|
 | `-interval` | `5s`    | Publish interval (e.g. `2s`, `500ms`, `1m`) |
 
-### Example
+### Environment variables
+
+| Variable        | Required | Description                                              |
+|-----------------|----------|----------------------------------------------------------|
+| `MQTT_USERNAME` | No       | Username for basic auth. If unset, no auth is used.      |
+| `MQTT_PASSWORD` | No       | Password for basic auth. Only used if username is set.   |
+
+### Examples
 
 ```bash
 go run main.go -interval 2s
+```
+
+With authentication:
+
+```bash
+MQTT_USERNAME=user MQTT_PASSWORD=secret go run main.go
 ```
 
 ## What it does

@@ -50,6 +50,11 @@ func connect() mqtt.Client {
 		AddBroker("tcp://localhost:1883").
 		SetClientID("sample-mqtt-client")
 
+	if user := os.Getenv("MQTT_USERNAME"); user != "" {
+		opts.SetUsername(user)
+		opts.SetPassword(os.Getenv("MQTT_PASSWORD"))
+	}
+
 	client := mqtt.NewClient(opts)
 	token := client.Connect()
 	token.WaitTimeout(10 * time.Second)
