@@ -37,7 +37,8 @@ export async function GET(
     const range = parseRange(searchParams.get('range'));
     const data = await getDeviceTimeSeries(id, range);
     return NextResponse.json(data);
-  } catch {
+  } catch (err) {
+    console.error('[/api/devices/[id]]', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

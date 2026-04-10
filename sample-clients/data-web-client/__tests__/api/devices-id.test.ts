@@ -21,7 +21,7 @@ describe('GET /api/devices/[id]', () => {
   it('returns 401 when not authenticated', async () => {
     (getServerSession as jest.Mock).mockResolvedValue(null);
 
-    const res = await GET(makeRequest('dev-001'), { params: { id: 'dev-001' } });
+    const res = await GET(makeRequest('dev-001'), { params: Promise.resolve({ id: 'dev-001' }) });
 
     expect(res.status).toBe(401);
   });
@@ -30,7 +30,7 @@ describe('GET /api/devices/[id]', () => {
     (getServerSession as jest.Mock).mockResolvedValue({ user: { email: 'a@test.com' }, groups: ['fleet-a'] });
     (getAllowedVehicleIds as jest.Mock).mockResolvedValue(['dev-999']);
 
-    const res = await GET(makeRequest('dev-001'), { params: { id: 'dev-001' } });
+    const res = await GET(makeRequest('dev-001'), { params: Promise.resolve({ id: 'dev-001' }) });
 
     expect(res.status).toBe(404);
   });
@@ -38,7 +38,7 @@ describe('GET /api/devices/[id]', () => {
   it('returns 400 for invalid device ID containing #', async () => {
     (getServerSession as jest.Mock).mockResolvedValue({ user: { email: 'a@test.com' }, groups: ['fleet-a'] });
 
-    const res = await GET(makeRequest('dev#001'), { params: { id: 'dev#001' } });
+    const res = await GET(makeRequest('dev#001'), { params: Promise.resolve({ id: 'dev#001' }) });
 
     expect(res.status).toBe(400);
   });
@@ -49,7 +49,7 @@ describe('GET /api/devices/[id]', () => {
       deviceId: 'dev-001', columns: ['dynamic:temp'], rows: [],
     });
 
-    const res = await GET(makeRequest('dev-001'), { params: { id: 'dev-001' } });
+    const res = await GET(makeRequest('dev-001'), { params: Promise.resolve({ id: 'dev-001' }) });
     const body = await res.json();
 
     expect(res.status).toBe(200);
@@ -63,7 +63,7 @@ describe('GET /api/devices/[id]', () => {
       deviceId: 'dev-001', columns: [], rows: [],
     });
 
-    await GET(makeRequest('dev-001', '7d'), { params: { id: 'dev-001' } });
+    await GET(makeRequest('dev-001', '7d'), { params: Promise.resolve({ id: 'dev-001' }) });
 
     expect(getDeviceTimeSeries).toHaveBeenCalledWith('dev-001', '7d');
   });
@@ -74,7 +74,7 @@ describe('GET /api/devices/[id]', () => {
       deviceId: 'dev-001', columns: [], rows: [],
     });
 
-    await GET(makeRequest('dev-001', 'invalid'), { params: { id: 'dev-001' } });
+    await GET(makeRequest('dev-001', 'invalid'), { params: Promise.resolve({ id: 'dev-001' }) });
 
     expect(getDeviceTimeSeries).toHaveBeenCalledWith('dev-001', '1h');
   });
@@ -83,7 +83,7 @@ describe('GET /api/devices/[id]', () => {
     (getServerSession as jest.Mock).mockResolvedValue({ user: { email: 'a@test.com' }, groups: ['fleet-a'] });
     (getDeviceTimeSeries as jest.Mock).mockRejectedValue(new Error('bigtable down'));
 
-    const res = await GET(makeRequest('dev-001'), { params: { id: 'dev-001' } });
+    const res = await GET(makeRequest('dev-001'), { params: Promise.resolve({ id: 'dev-001' }) });
 
     expect(res.status).toBe(500);
   });

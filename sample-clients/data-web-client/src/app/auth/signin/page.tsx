@@ -8,10 +8,10 @@ export default function SignInPage() {
         <h1 className="text-2xl font-bold text-gray-900">Nexus SDV</h1>
         <p className="text-gray-500">Sign in to access the dashboard</p>
         <button
-          onClick={() => signIn('google', { callbackUrl: '/fleet' })}
+          onClick={() => signIn('keycloak', { callbackUrl: '/fleet' })}
           className="px-6 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
         >
-          Sign in with Google
+          Sign in
         </button>
       </div>
     </div>
