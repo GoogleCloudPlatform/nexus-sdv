@@ -1,24 +1,40 @@
 import type { NextAuthOptions } from 'next-auth';
-import GoogleProvider from 'next-auth/providers/google';
+import KeycloakProvider from 'next-auth/providers/keycloak';
 
-const allowedEmails = process.env.ALLOWED_EMAILS
-  ? process.env.ALLOWED_EMAILS.split(',').map((e) => e.trim())
-  : [];
+// Extend NextAuth types so session.groups is available project-wide.
+declare module 'next-auth' {
+  interface Session {
+    groups: string[];
+  }
+}
+declare module 'next-auth/jwt' {
+  interface JWT {
+    groups?: string[];
+  }
+}
 
 export const authOptions: NextAuthOptions = {
   providers: [
-    GoogleProvider({
-      clientId: process.env.GOOGLE_CLIENT_ID!,
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+    KeycloakProvider({
+      clientId: process.env.KEYCLOAK_CLIENT_ID!,
+      clientSecret: process.env.KEYCLOAK_CLIENT_SECRET!,
+      issuer: process.env.KEYCLOAK_ISSUER!,
     }),
   ],
   pages: {
     signIn: '/auth/signin',
   },
   callbacks: {
-    signIn({ user }) {
-      if (allowedEmails.length === 0) return false;
-      return allowedEmails.includes(user.email ?? '');
+    jwt({ token, profile }) {
+      // profile is only present on first sign-in; persist groups into JWT.
+      if (profile) {
+        token.groups = (profile as { groups?: string[] }).groups ?? [];
+      }
+      return token;
+    },
+    session({ session, token }) {
+      session.groups = token.groups ?? [];
+      return session;
     },
   },
 };
