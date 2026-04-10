@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { getDevices } from '@/lib/devices';
+import { getAllowedVehicleIds } from '@/lib/acl';
 
 export async function GET() {
   const session = await getServerSession(authOptions);
@@ -10,7 +11,8 @@ export async function GET() {
   }
 
   try {
-    const devices = await getDevices();
+    const allowedIds = await getAllowedVehicleIds(session.groups);
+    const devices = await getDevices(allowedIds);
     return NextResponse.json({ devices });
   } catch (err) {
     console.error('[/api/devices]', err);
