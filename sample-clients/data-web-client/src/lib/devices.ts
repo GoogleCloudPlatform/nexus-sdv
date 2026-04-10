@@ -1,21 +1,28 @@
 import { getTelemetryTable } from './bigtable';
 import type { DeviceRow } from '@/types/telemetry';
 
-export async function getDevices(): Promise<DeviceRow[]> {
+export async function getDevices(allowedVehicleIds?: string[]): Promise<DeviceRow[]> {
   const table = getTelemetryTable();
 
-  // Pass 1: key-only scan to discover unique device IDs.
-  // StripValueTransformer filter reads keys and discards all cell values.
-  const deviceIds = await new Promise<Set<string>>((resolve, reject) => {
-    const ids = new Set<string>();
-    const stream = table.createReadStream({ filter: [{ value: { strip: true } }] });
-    stream.on('data', (row: { id: string }) => {
-      const sep = row.id.indexOf('#');
-      if (sep > 0) ids.add(row.id.slice(0, sep));
+  let deviceIds: Set<string>;
+
+  if (allowedVehicleIds !== undefined) {
+    // ACL path: skip the key scan entirely, use the caller-supplied list.
+    deviceIds = new Set(allowedVehicleIds);
+  } else {
+    // Pass 1: key-only scan to discover unique device IDs.
+    // StripValueTransformer filter reads keys and discards all cell values.
+    deviceIds = await new Promise<Set<string>>((resolve, reject) => {
+      const ids = new Set<string>();
+      const stream = table.createReadStream({ filter: [{ value: { strip: true } }] });
+      stream.on('data', (row: { id: string }) => {
+        const sep = row.id.indexOf('#');
+        if (sep > 0) ids.add(row.id.slice(0, sep));
+      });
+      stream.on('error', reject);
+      stream.on('end', () => resolve(ids));
     });
-    stream.on('error', reject);
-    stream.on('end', () => resolve(ids));
-  });
+  }
 
   // Pass 2: reversed scan per device — first result = latest row.
   // Range [{deviceId}#, {deviceId}$) covers all timestamps for that device.
