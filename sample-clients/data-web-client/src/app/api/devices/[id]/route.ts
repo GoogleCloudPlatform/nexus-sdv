@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { getDeviceTimeSeries } from '@/lib/device-detail';
+import { getAllowedVehicleIds } from '@/lib/acl';
 import type { TimeRange } from '@/types/telemetry';
 
 const VALID_RANGES = new Set<TimeRange>(['1h', '6h', '24h', '7d']);
@@ -26,10 +27,14 @@ export async function GET(
     return NextResponse.json({ error: 'Invalid device ID' }, { status: 400 });
   }
 
-  const { searchParams } = new URL(request.url);
-  const range = parseRange(searchParams.get('range'));
-
   try {
+    const allowedIds = await getAllowedVehicleIds(session.groups);
+    if (!allowedIds.includes(id)) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
+
+    const { searchParams } = new URL(request.url);
+    const range = parseRange(searchParams.get('range'));
     const data = await getDeviceTimeSeries(id, range);
     return NextResponse.json(data);
   } catch {
