@@ -1,0 +1,103 @@
+name: Build, Push and Deploy the Data Web Client
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment (sandbox, dev, ...)"
+        required: true
+      helmAction:
+        type: choice
+        description: "Sets the action for the helmfile plugin: 'sync' forces an update and 'apply' checks for differences"
+        required: false
+        default: "sync"
+        options:
+          - apply
+          - sync
+
+  workflow_call:
+    inputs:
+      environment:
+        type: string
+        required: true
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  DOCKER_BUILD_SUMMARY: false
+  GKE_CLUSTER_NAME: "${{ inputs.environment }}-gke"
+
+jobs:
+  deploy-data-web-client:
+    name: Deploy the Data Web Client
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    environment: ${{ inputs.environment }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure Google Cloud Auth
+        uses: google-github-actions/auth@v2
+        with:
+          token_format: access_token
+          workload_identity_provider: projects/${{ vars.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/${{ vars.GCP_WORKLOAD_IDENTITY_POOL_ID }}/providers/${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER_ID }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - name: Import secrets
+        uses: google-github-actions/get-secretmanager-secrets@v3
+        with:
+          secrets: |-
+            IMAGE_REPO:projects/${{ vars.GCP_PROJECT_ID }}/secrets/IMAGE_REPO/versions/latest
+            DATA_API_BIGTABLE_CONNECTOR_GCP_SERVICE_ACCOUNT:projects/${{ vars.GCP_PROJECT_ID }}/secrets/DATA_API_BIGTABLE_CONNECTOR_GCP_SERVICE_ACCOUNT/versions/latest
+            WEBCLIENT_DB_PASSWORD:projects/${{ vars.GCP_PROJECT_ID }}/secrets/WEBCLIENT_DB_PASSWORD/versions/latest
+            NEXTAUTH_SECRET:projects/${{ vars.GCP_PROJECT_ID }}/secrets/NEXTAUTH_SECRET/versions/latest
+            KEYCLOAK_CLIENT_SECRET:projects/${{ vars.GCP_PROJECT_ID }}/secrets/KEYCLOAK_CLIENT_SECRET/versions/latest
+            NEXT_PUBLIC_GOOGLE_MAPS_API_KEY:projects/${{ vars.GCP_PROJECT_ID }}/secrets/NEXT_PUBLIC_GOOGLE_MAPS_API_KEY/versions/latest
+          export_to_environment: true
+
+      - name: Docker auth
+        run: |-
+          gcloud auth configure-docker ${{ vars.GCP_REGION }}-docker.pkg.dev --quiet
+
+      - name: Build and Push Data Web Client
+        uses: docker/build-push-action@v6
+        with:
+          push: true
+          tags: ${{ env.IMAGE_REPO }}/data-web-client:latest
+          file: ./sample-clients/data-web-client/Dockerfile
+          context: ./sample-clients/data-web-client
+          build-args: |
+            NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=${{ env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY }}
+            NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID=${{ vars.NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID }}
+          provenance: false
+          sbom: false
+
+      - name: Get GKE credentials and write kubeconfig
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ env.GKE_CLUSTER_NAME }}
+          location: ${{ vars.GCP_REGION }}
+          use_dns_based_endpoint: true
+
+      - name: Deploy Data Web Client
+        uses: helmfile/helmfile-action@v2.0.4
+        env:
+          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          GCP_REGION: ${{ vars.GCP_REGION }}
+          IMAGE_REPO: ${{ env.IMAGE_REPO }}
+          DATA_API_BIGTABLE_CONNECTOR_GCP_SERVICE_ACCOUNT: ${{ env.DATA_API_BIGTABLE_CONNECTOR_GCP_SERVICE_ACCOUNT }}
+          WEBCLIENT_DB_PASSWORD: ${{ env.WEBCLIENT_DB_PASSWORD }}
+          NEXTAUTH_SECRET: ${{ env.NEXTAUTH_SECRET }}
+          NEXTAUTH_URL: ${{ vars.NEXTAUTH_URL }}
+          KEYCLOAK_CLIENT_ID: ${{ vars.KEYCLOAK_CLIENT_ID }}
+          KEYCLOAK_CLIENT_SECRET: ${{ env.KEYCLOAK_CLIENT_SECRET }}
+          KEYCLOAK_ISSUER: ${{ vars.KEYCLOAK_ISSUER }}
+          BIGTABLE_INSTANCE_ID: ${{ vars.BIGTABLE_INSTANCE_ID }}
+          CLOUD_SQL_INSTANCE_CONNECTION_NAME: ${{ vars.CLOUD_SQL_INSTANCE_CONNECTION_NAME }}
+        with:
+          helm-version: "v3.19.0"
+          helmfile-workdirectory: iac/helm/helmfile.d
+          helmfile-args: --file data-web-client.yaml.gotmpl ${{ inputs.helmAction || 'apply' }}
