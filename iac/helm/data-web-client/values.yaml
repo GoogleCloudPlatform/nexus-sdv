@@ -1,0 +1,30 @@
+image:
+  repository: ""
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+service:
+  type: LoadBalancer
+  port: 3000
+
+gcp:
+  projectId: ""
+  serviceAccountEmail: ""
+
+database:
+  instanceConnectionName: ""
+  name: "nexus_acl"
+  user: "webclient"
+  password: ""
+
+nextauth:
+  secret: ""
+  url: ""
+
+keycloak:
+  clientId: ""
+  clientSecret: ""
+  issuer: ""
+
+bigtable:
+  instanceId: ""
