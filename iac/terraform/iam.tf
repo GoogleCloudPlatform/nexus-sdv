@@ -69,3 +69,15 @@ resource "google_service_account_iam_member" "workload_identity_user_registratio
   role               = "roles/iam.workloadIdentityUser"
   member             = "serviceAccount:${var.project_id}.svc.id.goog[base-services/registration-ksa]"
 }
+
+resource "google_project_iam_member" "data_api_bigtable_connector_sql_client" {
+  project = var.project_id
+  role    = "roles/cloudsql.client"
+  member  = "serviceAccount:${google_service_account.data_api_bigtable_connector.email}"
+}
+
+resource "google_service_account_iam_member" "workload_identity_user_data_web_client" {
+  service_account_id = google_service_account.data_api_bigtable_connector.name
+  role               = "roles/iam.workloadIdentityUser"
+  member             = "serviceAccount:${var.project_id}.svc.id.goog[sample-services/data-web-client-ksa]"
+}
