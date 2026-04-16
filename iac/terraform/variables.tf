@@ -45,6 +45,12 @@ variable "pki_strategy" {
   default     = "local"
 }
 
+variable "enable_web_client" {
+  description = "Deploy web data client infrastructure (nexus_acl database and webclient user)"
+  type        = bool
+  default     = false
+}
+
 variable "keycloak_hostname" {
   type        = string
   description = "The hostname for Keycloak service"

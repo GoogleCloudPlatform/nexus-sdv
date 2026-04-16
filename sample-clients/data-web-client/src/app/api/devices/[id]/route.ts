@@ -29,7 +29,7 @@ export async function GET(
 
   try {
     const allowedIds = await getAllowedVehicleIds(session.groups);
-    if (!allowedIds.includes(id)) {
+    if (allowedIds !== undefined && !allowedIds.includes(id)) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
 

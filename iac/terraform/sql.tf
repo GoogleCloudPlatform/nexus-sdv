@@ -87,6 +87,60 @@ resource "google_secret_manager_secret_version" "keycloak_db_password" {
   depends_on = [google_sql_user.keycloak_user]
 }
 
+# ---------------------------------------------------------------------------
+# Web data client (optional — enabled via enable_web_client variable)
+# ---------------------------------------------------------------------------
+
+resource "google_sql_database" "nexus_acl" {
+  count    = var.enable_web_client ? 1 : 0
+  name     = "nexus_acl"
+  instance = google_sql_database_instance.sql_db.name
+
+  depends_on = [google_project_service.project_apis]
+}
+
+resource "random_password" "webclient_db_password" {
+  count   = var.enable_web_client ? 1 : 0
+  length  = 32
+  special = false
+  keepers = {
+    environment = var.environment
+    suffix      = var.random_suffix
+  }
+}
+
+resource "google_sql_user" "webclient_user" {
+  count    = var.enable_web_client ? 1 : 0
+  name     = "webclient"
+  instance = google_sql_database_instance.sql_db.name
+  password = random_password.webclient_db_password[0].result
+
+  depends_on = [google_sql_database.nexus_acl]
+}
+
+resource "google_secret_manager_secret" "webclient_db_password" {
+  count     = var.enable_web_client ? 1 : 0
+  secret_id = "WEBCLIENT_DB_PASSWORD"
+  replication {
+    auto {}
+  }
+  depends_on = [google_project_service.project_apis]
+}
+
+resource "google_secret_manager_secret_version" "webclient_db_password" {
+  count       = var.enable_web_client ? 1 : 0
+  secret      = google_secret_manager_secret.webclient_db_password[0].id
+  secret_data = random_password.webclient_db_password[0].result
+
+  depends_on = [google_sql_user.webclient_user]
+}
+
+output "webclient_db_password" {
+  description = "Web client database password (sensitive)"
+  value       = var.enable_web_client ? random_password.webclient_db_password[0].result : null
+  sensitive   = true
+}
+
 # Output the connection details (password will be marked as sensitive)
 output "keycloak_db_user" {
   description = "Keycloak database username"
