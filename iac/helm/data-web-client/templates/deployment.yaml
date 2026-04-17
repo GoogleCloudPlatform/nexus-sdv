@@ -45,8 +45,16 @@ spec:
               value: {{ .Values.gcp.projectId | quote }}
             - name: BIGTABLE_INSTANCE_ID
               value: {{ .Values.bigtable.instanceId | quote }}
-            - name: DATABASE_URL
-              value: "postgresql://{{ .Values.database.user }}:{{ .Values.database.password }}@localhost:5432/{{ .Values.database.name }}"
+            - name: DB_HOST
+              value: "localhost"
+            - name: DB_PORT
+              value: "5432"
+            - name: DB_USER
+              value: {{ .Values.database.user | quote }}
+            - name: DB_PASSWORD
+              value: {{ .Values.database.password | quote }}
+            - name: DB_NAME
+              value: {{ .Values.database.name | quote }}
         {{- if .Values.database.instanceConnectionName }}
         - name: cloud-sql-proxy
           image: "gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.18.0"
