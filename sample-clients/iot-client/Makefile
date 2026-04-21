@@ -4,7 +4,7 @@ PROTO_SOURCE = ../../proto/telemetry.proto
 
 help:
 	@echo "Available targets:"
-	@echo "  config     - Create config.h and urls.json from examples (won't overwrite)"
+	@echo "  config     - Create config.h from config.example.h (won't overwrite)"
 	@echo "  proto      - Copy and generate nanopb code from telemetry.proto"
 	@echo "  build      - Build the firmware"
 	@echo "  upload     - Build and upload firmware to ESP32"
@@ -20,12 +20,6 @@ config:
 	else \
 		cp include/config.example.h include/config.h; \
 		echo "Created include/config.h from config.example.h — edit it with your settings."; \
-	fi
-	@if [ -f data/urls.json ]; then \
-		echo "data/urls.json already exists — not overwriting."; \
-	else \
-		printf '{\n  "keycloak_url": "https://keycloak.example.com:8443",\n  "nats_url": "nats://nats.example.com:4222"\n}\n' > data/urls.json; \
-		echo "Created data/urls.json with example URLs — edit it with your URLs."; \
 	fi
 
 proto:

@@ -59,15 +59,37 @@ Then edit `include/config.h` with your settings:
 | `GPS_WAIT_FOR_FIX`      | `false` | Wait for a GPS fix before connecting to NATS. Sends without GPS if the timeout expires.                             |
 | `GPS_FIX_TIMEOUT_S`     | `90`    | Maximum seconds to wait for a GPS fix before sending without it. Set to `0` to wait indefinitely.                   |
 
-### 3. Provision certificates
+### 3. Provision certificates and runtime URLs
 
-Place the operational certificates (obtained from the external registration program) into `data/certs/`:
+On boot the firmware loads the operational certificates and (optionally) a `urls.json` from LittleFS:
 
 ```
 data/certs/operational.crt.pem   # Operational certificate
 data/certs/operational.key.pem   # Operational private key
 data/certs/ca.crt.pem            # CA certificate (for Keycloak TLS verification)
+data/urls.json                   # Keycloak and NATS URLs (overrides config.h defaults)
 ```
+
+The `urls.json` has the form:
+
+```json
+{
+  "keycloak_url": "https://keycloak.example.com:8443",
+  "nats_url": "nats://nats.example.com:4222"
+}
+```
+
+The standard way to produce all of these is the [devices client](../devices/README.md), which registers the device against the platform and writes both the certificates (into `certs/`) and `urls.json` into its output directory.
+Point its `-output` flag at this client's `data/` directory so everything lands in the expected layout:
+
+```bash
+cd ../devices
+uv run main.py -output ../iot-client/data
+```
+
+`make uploadfs` (see next step) then flashes the whole `data/` tree to the ESP32.
+
+If `/urls.json` is missing or malformed, the firmware falls back to the `KEYCLOAK_URL` and `NATS_URL` compile-time defaults from `config.h`.
 
 ### 4. Upload filesystem and firmware
 
