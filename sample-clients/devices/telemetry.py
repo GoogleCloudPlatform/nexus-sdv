@@ -3,6 +3,8 @@ from proto import telemetry_pb2
 from datetime import datetime, timezone
 from dataclasses import dataclass
 
+DataType = telemetry_pb2.DataType
+
 @dataclass
 class SensorReading:
     sensor: str

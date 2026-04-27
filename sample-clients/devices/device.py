@@ -139,8 +139,11 @@ def get_access_token(
             keycloak_server_url,
             client_id="car",
             realm_name="sdv-telemetry",
-            cert=(operational_path + OPERATIONAL_CERTIFICATE_FILE, operational_path + OPERATIONAL_KEY_FILE),
-            verify=str(Path(operational_path) / OPERATIONAL_KEYCLOAK_CA_FILE),
+            cert=(
+                str(Path(operational_path) / "certs" / OPERATIONAL_CERTIFICATE_FILE),
+                str(Path(operational_path) / "certs" / OPERATIONAL_KEY_FILE),
+            ),
+            verify=str(Path(operational_path) / "certs" / "ca.crt.pem"),
         )
 
         token = keycloak.token(grant_type="client_credentials")
