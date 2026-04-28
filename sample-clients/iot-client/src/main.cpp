@@ -39,9 +39,11 @@ static NatsClient *natsClient = nullptr;
 RTC_DATA_ATTR int messageIndex = 0;
 static unsigned long lastSendTime = 0;
 
-// Throttle token-validity checks (each check decodes/parses the JWT).
+// Fallback for users whose (gitignored) config.h predates this flag.
+#ifndef TOKEN_CHECK_INTERVAL_MS
+#define TOKEN_CHECK_INTERVAL_MS 10000
+#endif
 static unsigned long lastTokenCheck = 0;
-static const unsigned long TOKEN_CHECK_INTERVAL_MS = 10000;
 
 // Tracks when STATE_GPS_WAIT was entered to enforce GPS_FIX_TIMEOUT_S
 static unsigned long gpsWaitStart = 0;
