@@ -1,0 +1,35 @@
+service:
+  name: data-converter
+  log_level: debug
+
+nats:
+  url: nats://${NATS_HOST}:4222
+  # Auth: use either user/password (basic auth) or token — not both
+  user: "${NATS_USER}"
+  password: "${NATS_PASSWORD}"
+  # token: "${NATS_TOKEN}"
+
+adapters:
+  mqtt:
+    broker: tcp://${MQTT_HOST}:1883
+    client_id: nexus-converter
+    buffer_size: 1000
+    auth:
+      username: "${MQTT_USER}"
+      password: "${MQTT_PASS}"
+
+converters:
+  - name: telemetry-sensors
+    source:
+      adapter: mqtt
+      topic: "telemetry/+/sensors/#"
+      qos: 1
+    mapping:
+      device_id: "{{ seg .topic 1 }}"
+      sensors:
+        - sensor: "{{ jsonpath .payload \"name\" }}"
+          value: "{{ jsonpath .payload \"value\" }}"
+          data_type: DYNAMIC
+    target:
+      subject_prefix: "prod.bigtable"
+      subject_pattern: "telemetry.{{ .subject_prefix }}.{{ .device_id }}.{{ .sensor }}"
