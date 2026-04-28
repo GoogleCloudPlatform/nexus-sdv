@@ -29,3 +29,11 @@ resource "google_bigtable_table" "table" {
     family = "dynamic"
   }
 }
+
+output "bigtable_instance_name" {
+  value = google_bigtable_instance.production_instance.name
+}
+
+output "bigtable_table_name" {
+  value = google_bigtable_table.table.name
+}

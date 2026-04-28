@@ -51,13 +51,13 @@ echo "1. Generating private key..."
 openssl genrsa -out "${OUTPUT_PREFIX}-key.pem" 2048
 
 # Create CSR with correct CN format (VIN:xxx DEVICE:xxx)
-echo "2. Creating certificate signing request..."
+echo "2. Creating certificate signing request to create client certificate for the registration server..."
 openssl req -new -key "${OUTPUT_PREFIX}-key.pem" \
   -out "${OUTPUT_PREFIX}.csr" \
   -subj "/O=Vehicle Manufacturer/CN=VIN:${VIN} DEVICE:${VIN}"
 
 # Sign the CSR with GCP CAS Factory CA
-echo "3. Signing certificate with GCP CAS Factory CA..."
+echo "3. Signing client certificate certificate with GCP CAS Factory CA..."
 CERT_ID="factory-cert-$(date +%s)-${VIN}"
 
 gcloud privateca certificates create "$CERT_ID" \
@@ -95,6 +95,7 @@ echo "5. Creating certificate chain..."
 
 echo ""
 echo "✓ Certificate generation complete!"
+echo "The client can now connect to the registration server"
 echo ""
 echo "Generated files:"
 echo "  - ${OUTPUT_PREFIX}-key.pem      (Private key - keep secure)"

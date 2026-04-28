@@ -17,7 +17,7 @@ Follow our **[Online Setup Guide](https://docs.nexus-sdv.io)** to get started. Y
 
 ## Architecture Overview
 
-![Nexus Architecture](nexus_architecture_main.png)
+![Nexus Architecture](docs/assets/nexus_architecture_main.png)
 
 ### Technology Stack and Data Flow
 
@@ -41,6 +41,10 @@ By bridging vehicle signals and data to the cloud, Nexus establishes a **unified
 ## Outlook and Community
 
 We plan to continuously develop and maintain this project to provide you with more features and enable partners to offer complementary features. **We rely on your feedback and contributions.**
+
+## Release Notes
+
+For a detailed record of changes, including new features, improvements, and version history, please refer to our **[Changelog](docs/changelog.md)**.
 
 ## Disclaimer
 

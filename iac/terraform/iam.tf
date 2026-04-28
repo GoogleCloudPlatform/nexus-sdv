@@ -37,7 +37,7 @@ resource "google_service_account_iam_member" "workload_identity_user_bigtable_co
 resource "google_service_account" "data_api_bigtable_connector" {
   account_id   = "data-api-bigtable-connector"
   display_name = "Data API to Bigtable Connector Service Account"
-  depends_on = [google_project_service.project_apis]
+  depends_on   = [google_project_service.project_apis]
 }
 
 resource "google_project_iam_member" "data_api_bigtable_connector_user" {
@@ -68,4 +68,19 @@ resource "google_service_account_iam_member" "workload_identity_user_registratio
   service_account_id = google_service_account.registration_gsa.name
   role               = "roles/iam.workloadIdentityUser"
   member             = "serviceAccount:${var.project_id}.svc.id.goog[base-services/registration-ksa]"
+}
+
+output "keycloak_sa_id" {
+  value       = google_service_account.keycloak_gsa.account_id
+  description = "The ID of the Keycloak Service Account"
+}
+
+output "bigtable_connector_sa_id" {
+  value       = google_service_account.bigtable_connector.account_id
+  description = "The ID of the Bigtable Connector Service Account"
+}
+
+output "data_api_bigtable_connector_sa_id" {
+  value       = google_service_account.data_api_bigtable_connector.account_id
+  description = "The ID of the Data API Bigtable Connector Service Account"
 }

@@ -15,8 +15,6 @@ on:
         required: true
         default: "sandbox"
 
-
-
 env:
   IMAGE_NAME: "ai-assistant"
   SERVICE_ACCOUNT: "${{ vars.GCP_SERVICE_ACCOUNT }}"
@@ -67,9 +65,9 @@ jobs:
         run: |-
           gcloud run deploy ${{ env.IMAGE_NAME }} \
           --image '${{ env.IMAGE_REPO }}/${{ env.IMAGE_NAME }}:latest' \
-          --region ${{ vars.GCP_REGION }} \
+          --region europe-central2 \
           --service-account ${{ vars.GCP_SERVICE_ACCOUNT }} \
           --port=8080 \
           --min-instances=1 \
           --memory=1024Mi \
-          --set-env-vars GOOGLE_CLOUD_PROJECT=${{ vars.GCP_PROJECT_ID }},GOOGLE_CLOUD_LOCATION="global",GOOGLE_GENAI_USE_VERTEXAI="1"
+          --set-env-vars GOOGLE_CLOUD_PROJECT=${{ vars.GCP_PROJECT_ID }},GOOGLE_CLOUD_LOCATION="europe-central2",GOOGLE_GENAI_USE_VERTEXAI="1"

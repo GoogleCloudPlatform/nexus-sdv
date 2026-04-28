@@ -1,4 +1,4 @@
-package main
+package service
 
 import (
 	dataapiv1 "data-api/api/gen/dataapi/v1"

@@ -1,0 +1,180 @@
+# =============================================================================
+# deploy-all.yaml — Parent orchestration build
+#
+# Calls each individual Cloud Build YAML in dependency order.
+# Each child build can still be run independently by calling it directly.
+#
+# Dependency graph:
+#
+#   deploy-external-dns (remote only) ─┐
+#                                      ├─ deploy-keycloak ──┐
+#                                      │    └─ build-push-nats-auth-callout
+#                                      │         └─ deploy-nats-auth-callout ──┐
+#                                      ├─ deploy-nats ──────────────────────────┼─ build-push-deploy-registration
+#                                      │    └─ deploy-nats-bigtable-connector
+#                                      └─ build-push-deploy-data-api
+#                                           └─ build-push-deploy-data-api-sampler
+# =============================================================================
+
+steps:
+  # ===========================================================================
+  # WAVE 0 — External DNS (remote PKI only, blocks all other deployments)
+  # ===========================================================================
+  - id: 'deploy-external-dns'
+    name: 'gcr.io/cloud-builders/gcloud'
+    entrypoint: 'bash'
+    waitFor: ['-']
+    args:
+      - '-c'
+      - |
+        if [ "${_PKI_STRATEGY}" != "remote" ]; then
+          echo "Skipping external-dns (PKI strategy is '${_PKI_STRATEGY}', not 'remote')"
+          exit 0
+        fi
+        echo "Deploying external-dns..."
+        gcloud builds submit . \
+          --config=iac/cloudbuild/deploy-external-dns.yaml \
+          --project=$PROJECT_ID \
+          --region=${_REGION} \
+          --substitutions=^::^_ARCH=${_ARCH}::_PKI_STRATEGY=${_PKI_STRATEGY}::_BASE_DOMAIN=${_BASE_DOMAIN}::_HELM_ACTION=${_HELM_ACTION}
+
+  # ===========================================================================
+  # WAVE 1 — Keycloak, NATS, Data API (parallel, all wait for external-dns)
+  # ===========================================================================
+  - id: 'deploy-keycloak'
+    name: 'gcr.io/cloud-builders/gcloud'
+    entrypoint: 'bash'
+    waitFor: ['deploy-external-dns']
+    args:
+      - '-c'
+      - |
+        echo "Deploying Keycloak..."
+        gcloud builds submit . \
+          --config=iac/cloudbuild/deploy-keycloak.yaml \
+          --project=$PROJECT_ID \
+          --region=${_REGION} \
+          --substitutions=^::^_ARCH=${_ARCH}::_PKI_STRATEGY=${_PKI_STRATEGY}::_BASE_DOMAIN=${_BASE_DOMAIN}::_HELM_ACTION=${_HELM_ACTION}
+
+  - id: 'build-push-nats-auth-callout'
+    name: 'gcr.io/cloud-builders/gcloud'
+    entrypoint: 'bash'
+    waitFor: ['deploy-keycloak']
+    args:
+      - '-c'
+      - |
+        echo "Building and pushing NATS Auth Callout..."
+        gcloud builds submit . \
+          --config=iac/cloudbuild/build-push-nats-auth-callout.yaml \
+          --project=$PROJECT_ID \
+          --region=${_REGION} \
+          --substitutions=^::^_ARCH=${_ARCH}
+
+  - id: 'deploy-nats-auth-callout'
+    name: 'gcr.io/cloud-builders/gcloud'
+    entrypoint: 'bash'
+    waitFor: ['build-push-nats-auth-callout']
+    args:
+      - '-c'
+      - |
+        echo "Deploying NATS Auth Callout..."
+        gcloud builds submit . \
+          --config=iac/cloudbuild/deploy-nats-auth-callout.yaml \
+          --project=$PROJECT_ID \
+          --region=${_REGION} \
+          --substitutions=^::^_ARCH=${_ARCH}::_HELM_ACTION=${_HELM_ACTION}
+
+  - id: 'deploy-nats'
+    name: 'gcr.io/cloud-builders/gcloud'
+    entrypoint: 'bash'
+    waitFor: ['deploy-external-dns']
+    args:
+      - '-c'
+      - |
+        echo "Deploying NATS..."
+        gcloud builds submit . \
+          --config=iac/cloudbuild/deploy-nats.yaml \
+          --project=$PROJECT_ID \
+          --region=${_REGION} \
+          --substitutions=^::^_ARCH=${_ARCH}::_PKI_STRATEGY=${_PKI_STRATEGY}::_BASE_DOMAIN=${_BASE_DOMAIN}::_HELM_ACTION=${_HELM_ACTION}
+
+  - id: 'build-push-deploy-data-api'
+    name: 'gcr.io/cloud-builders/gcloud'
+    entrypoint: 'bash'
+    waitFor: ['deploy-external-dns']
+    args:
+      - '-c'
+      - |
+        echo "Building and deploying Data API..."
+        gcloud builds submit . \
+          --config=iac/cloudbuild/build-push-deploy-data-api.yaml \
+          --project=$PROJECT_ID \
+          --region=${_REGION} \
+          --substitutions=^::^_ARCH=${_ARCH}::_HELM_ACTION=${_HELM_ACTION}
+
+  # ===========================================================================
+  # WAVE 2 — Registration (needs Keycloak + NATS IPs)
+  #          NATS Bigtable Connector (needs NATS)
+  #          Data API Sampler (needs Data API)
+  # ===========================================================================
+  - id: 'build-push-deploy-registration'
+    name: 'gcr.io/cloud-builders/gcloud'
+    entrypoint: 'bash'
+    waitFor: ['deploy-nats-auth-callout', 'deploy-nats']
+    args:
+      - '-c'
+      - |
+        # Resolve commit SHA: use Cloud Build's $COMMIT_SHA if available,
+        # otherwise fall back to the substitution variable
+        SHA="${_COMMIT_SHA}"
+        if [ -z "$$SHA" ] || [ "$$SHA" = "manual" ]; then
+          SHA="${COMMIT_SHA:-manual-latest}"
+        fi
+        echo "Building and deploying Registration Server (SHA: $$SHA)..."
+        gcloud builds submit . \
+          --config=iac/cloudbuild/build-push-deploy-registration.yaml \
+          --project=$PROJECT_ID \
+          --region=${_REGION} \
+          --substitutions=^::^_ARCH=${_ARCH}::_PKI_STRATEGY=${_PKI_STRATEGY}::_BASE_DOMAIN=${_BASE_DOMAIN}::_HELM_ACTION=${_HELM_ACTION}::_COMMIT_SHA=$$SHA
+
+  - id: 'deploy-nats-bigtable-connector'
+    name: 'gcr.io/cloud-builders/gcloud'
+    entrypoint: 'bash'
+    waitFor: ['deploy-nats']
+    args:
+      - '-c'
+      - |
+        echo "Deploying NATS Bigtable Connector..."
+        gcloud builds submit . \
+          --config=iac/cloudbuild/deploy-nats-bigtable-connector.yaml \
+          --project=$PROJECT_ID \
+          --region=${_REGION} \
+          --substitutions=^::^_ARCH=${_ARCH}::_HELM_ACTION=${_HELM_ACTION}
+
+  - id: 'build-push-deploy-data-api-sampler'
+    name: 'gcr.io/cloud-builders/gcloud'
+    entrypoint: 'bash'
+    waitFor: ['build-push-deploy-data-api']
+    args:
+      - '-c'
+      - |
+        echo "Building and deploying Data API Sampler..."
+        gcloud builds submit . \
+          --config=iac/cloudbuild/build-push-deploy-data-api-sampler.yaml \
+          --project=$PROJECT_ID \
+          --region=${_REGION} \
+          --substitutions=^::^_ARCH=${_ARCH}::_HELM_ACTION=${_HELM_ACTION}
+
+# =============================================================================
+# SUBSTITUTIONS & OPTIONS
+# =============================================================================
+substitutions:
+  _ARCH: "arm64"
+  _PKI_STRATEGY: "local"
+  _BASE_DOMAIN: ""
+  _REGION: "europe-west1"
+  _HELM_ACTION: "sync"
+  _COMMIT_SHA: "manual"
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  substitutionOption: 'ALLOW_LOOSE'

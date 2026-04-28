@@ -86,7 +86,9 @@ func main() {
 		RegistrationServerURL: *registrationURL,
 	}
 
+	log.Printf("================================================")
 	log.Printf("Starting vehicle client for VIN: %s", client.VIN)
+	log.Printf("================================================")
 	log.Printf("Telemetry interval: %d seconds", *interval)
 
 	// Step 1: Register with the registration server
@@ -94,6 +96,8 @@ func main() {
 		log.Fatalf("Registration failed: %v", err)
 	}
 	log.Println("✓ Successfully registered and obtained operational certificate")
+	log.Println("")
+	log.Println("")
 
 	// Step 2: Authenticate with Keycloak to get JWT
 	jwt, err := client.AuthenticateWithKeycloak()
@@ -102,11 +106,12 @@ func main() {
 	}
 	log.Println("✓ Successfully authenticated with Keycloak and obtained JWT")
 
-	// Step 3: Connect to NATS with JWT
+	// Step 3: Smoke test NATS connectivity with JWT
+	log.Println("Smoke testing NATS connectivity (connection will be closed after verification)...")
 	if err := client.ConnectToNATS(jwt); err != nil {
-		log.Fatalf("NATS connection failed: %v", err)
+		log.Fatalf("NATS smoke test failed: %v", err)
 	}
-	log.Println("✓ Successfully connected to NATS")
+	log.Println("✓ NATS smoke test passed (connection closed)")
 
 	// Step 4: Publish telemetry data continuously
 	log.Println("Starting continuous telemetry publishing...")
@@ -117,7 +122,10 @@ func main() {
 
 // Register performs the vehicle registration flow
 func (v *VehicleClient) Register() error {
-	log.Println("Step 1: Generating operational key pair...")
+	log.Printf("************************************************")
+	log.Println(" Starting client registration")
+	log.Printf("************************************************")
+	log.Println("Retrieving operational certificate...")
 
 	// Generate a new RSA key pair for operational use
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -127,14 +135,14 @@ func (v *VehicleClient) Register() error {
 	v.operationalKey = privateKey
 
 	// Create a Certificate Signing Request (CSR)
-	log.Println("Step 2: Creating Certificate Signing Request (CSR)...")
+	log.Println("Creating Certificate Signing Request (CSR)...")
 	csrPEM, err := v.createCSR(privateKey)
 	if err != nil {
 		return fmt.Errorf("failed to create CSR: %w", err)
 	}
 
 	// Load factory certificate and key for mTLS
-	log.Println("Step 3: Loading factory-issued certificate for mTLS...")
+	log.Println("Loading factory-issued certificate for mTLS...")
 	factoryCert, err := tls.LoadX509KeyPair(v.FactoryCertFile, v.FactoryKeyFile)
 	if err != nil {
 		return fmt.Errorf("failed to load factory certificate: %w", err)
@@ -173,7 +181,7 @@ func (v *VehicleClient) Register() error {
 	}
 
 	// Send CSR to registration server
-	log.Printf("Step 4: Sending CSR to registration server at %s...", v.RegistrationServerURL)
+	log.Printf("Sending CSR to registration server at %s...", v.RegistrationServerURL)
 	req, err := http.NewRequest("POST", v.RegistrationServerURL+"/registration", bytes.NewReader(csrPEM))
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
@@ -197,7 +205,7 @@ func (v *VehicleClient) Register() error {
 		return fmt.Errorf("failed to decode response: %w", err)
 	}
 
-	log.Println("Step 5: Parsing operational certificate...")
+	log.Println("Parsing operational certificate...")
 	// Parse the operational certificate
 	block, _ := pem.Decode([]byte(regResp.Certificate))
 	if block == nil {
@@ -218,8 +226,9 @@ func (v *VehicleClient) Register() error {
 	log.Printf("  NATS URL: %s", v.natsURL)
 	log.Printf("  Certificate valid until: %s", cert.NotAfter)
 
+	certDir := "certificates/"
 	// Save operational certificate and key to files for reuse
-	if err := os.WriteFile("operational-cert.pem", v.operationalCertPEM, 0644); err != nil {
+	if err := os.WriteFile(certDir+"operational-cert.pem", v.operationalCertPEM, 0644); err != nil {
 		log.Printf("Warning: Failed to save operational certificate: %v", err)
 	} else {
 		log.Println("  Saved operational certificate to operational-cert.pem")
@@ -229,7 +238,7 @@ func (v *VehicleClient) Register() error {
 		Type:  "RSA PRIVATE KEY",
 		Bytes: x509.MarshalPKCS1PrivateKey(v.operationalKey),
 	})
-	if err := os.WriteFile("operational-key.pem", keyPEM, 0600); err != nil {
+	if err := os.WriteFile(certDir+"operational-key.pem", keyPEM, 0600); err != nil {
 		log.Printf("Warning: Failed to save operational key: %v", err)
 	} else {
 		log.Println("  Saved operational key to operational-key.pem")
@@ -280,7 +289,7 @@ func (v *VehicleClient) createCSR(privateKey *rsa.PrivateKey) ([]byte, error) {
 
 // AuthenticateWithKeycloak obtains a JWT token using the operational certificate
 func (v *VehicleClient) AuthenticateWithKeycloak() (string, error) {
-	log.Println("Step 1: Configuring mTLS with operational certificate...")
+	log.Println("Authenticate With Keycloak Step 1: Configuring mTLS with operational certificate...")
 
 	// Create TLS certificate from operational cert and key
 	keyPEM := pem.EncodeToMemory(&pem.Block{
@@ -325,7 +334,7 @@ func (v *VehicleClient) AuthenticateWithKeycloak() (string, error) {
 	}
 
 	// Request JWT token from Keycloak
-	log.Printf("Step 2: Requesting JWT from Keycloak at %s...", v.keycloakURL)
+	log.Printf("Authenticate With Keycloak Step 2: Requesting JWT from Keycloak at %s...", v.keycloakURL)
 	tokenURL := fmt.Sprintf("%s/realms/sdv-telemetry/protocol/openid-connect/token", v.keycloakURL)
 
 	// For client certificate authentication, we use grant_type=client_credentials
@@ -360,7 +369,7 @@ func (v *VehicleClient) AuthenticateWithKeycloak() (string, error) {
 
 // ConnectToNATS establishes a connection to NATS using the JWT
 func (v *VehicleClient) ConnectToNATS(jwt string) error {
-	log.Printf("Connecting to NATS at %s with JWT...", v.natsURL)
+	log.Printf("[Smoke test] Connecting to NATS at %s with JWT...", v.natsURL)
 
 	// Connect to NATS with JWT authentication
 	// Use nats.Token() to pass the Keycloak JWT for auth-callout validation
@@ -375,7 +384,7 @@ func (v *VehicleClient) ConnectToNATS(jwt string) error {
 	}
 	defer nc.Close()
 
-	log.Println("  Connected to NATS successfully")
+	log.Println("  [Smoke test] Connected to NATS successfully")
 
 	// Wait a moment to ensure connection is stable
 	time.Sleep(1 * time.Second)
@@ -464,6 +473,7 @@ func (v *VehicleClient) PublishTelemetryContinuously(intervalSeconds int) error 
 			nc.Close()
 		}
 
+		log.Println("Establishing telemetry NATS connection (re-authenticating with Keycloak)...")
 		jwt, err := v.AuthenticateWithKeycloak()
 		if err != nil {
 			return fmt.Errorf("failed to get JWT: %w", err)
@@ -477,11 +487,13 @@ func (v *VehicleClient) PublishTelemetryContinuously(intervalSeconds int) error 
 		if err != nil {
 			return fmt.Errorf("failed to connect to NATS: %w", err)
 		}
+		log.Println("  Telemetry NATS connection established")
 
 		return nil
 	}
 
 	// Initial connection
+	log.Println("Establishing initial telemetry NATS connection...")
 	if err := refreshConnection(); err != nil {
 		return err
 	}

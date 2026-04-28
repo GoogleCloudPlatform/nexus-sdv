@@ -4,6 +4,7 @@ releases:
     createNamespace: true
     chart: ../data-api-sampler
     values:
+      - arch: {{ .StateValues.arch | default "arm64" }}
       - image:
           repository: {{ requiredEnv "IMAGE_REPO" }}/data-api-sampler
           tag: 'latest'

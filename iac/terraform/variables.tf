@@ -1,31 +1,32 @@
 variable "environment" {
   type        = string
   description = "The environment where the infrastructure will be deployed"
-  default     = ""
 }
 
 variable "region" {
   type        = string
   description = "The region in which to deploy the resources"
-  default     = ""
 }
 
 variable "zone" {
   type        = string
   description = "The zone in which to deploy the resources"
-  default     = ""
 }
 
 variable "project_id" {
   type        = string
   description = "The project id of your project in GCP"
-  default     = ""
+}
+
+variable "enable_github_oidc" {
+  type        = bool
+  description = "Enable creation of Workload Identity Federation for GitHub Actions. Set to false for Cloud Build / Cloud Shell setups."
+  default     = true
 }
 
 variable "repository" {
   type        = string
   description = "The URL of your (forked) repository"
-  default     = ""
 }
 
 variable "random_suffix" {
@@ -36,7 +37,6 @@ variable "random_suffix" {
 variable "github_org" {
   type        = string
   description = "The ID of your Github organization"
-  default     = ""
 }
 
 variable "pki_strategy" {

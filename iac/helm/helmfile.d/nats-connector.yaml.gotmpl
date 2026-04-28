@@ -5,6 +5,7 @@ releases:
     labels:
       app: nats-bigtable-connector
     values:
+      - arch: {{ .StateValues.arch | default "arm64" }}
       - gcp:
           projectId: '{{ requiredEnv "GCP_PROJECT_ID" }}'
           serviceAccount: '{{ requiredEnv "BIGTABLE_CONNECTOR_GCP_SERVICE_ACCOUNT" }}'

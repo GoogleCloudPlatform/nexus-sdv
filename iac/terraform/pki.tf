@@ -16,7 +16,7 @@ locals {
 # Create new CA pool only if not using existing
 resource "google_privateca_ca_pool" "server_pool" {
   count    = local.create_server_ca ? 1 : 0
-  name     = "${var.created_server_ca_pool}"
+  name     = var.created_server_ca_pool
   location = var.region
   tier     = "DEVOPS"
   project  = var.project_id
@@ -60,10 +60,12 @@ resource "google_privateca_certificate_authority" "server_root" {
   }
   key_spec { algorithm = "RSA_PKCS1_4096_SHA256" }
   ignore_active_certificates_on_deletion = true
-  deletion_protection = false
+  deletion_protection                    = false
 }
 
 # Reference existing Server CA if provided
+#Data source meant to be used for only remote mode, can be ignored at local tftest
+# tflint-ignore: terraform_unused_declarations
 data "google_privateca_certificate_authority" "existing_server_ca" {
   count                    = local.use_existing_server_ca ? 1 : 0
   certificate_authority_id = var.existing_server_ca
@@ -76,7 +78,7 @@ data "google_privateca_certificate_authority" "existing_server_ca" {
 # Create new CA pool only if not using existing
 resource "google_privateca_ca_pool" "reg_pool" {
   count    = local.create_reg_ca ? 1 : 0
-  name     = "${var.created_reg_ca_pool}"
+  name     = var.created_reg_ca_pool
   location = var.region
   tier     = "DEVOPS"
   project  = var.project_id
@@ -120,10 +122,12 @@ resource "google_privateca_certificate_authority" "reg_root" {
   }
   key_spec { algorithm = "RSA_PKCS1_4096_SHA256" }
   ignore_active_certificates_on_deletion = true
-  deletion_protection = false
+  deletion_protection                    = false
 }
 
 # Reference existing Registration CA if provided
+# Data source meant to be used for only remote mode, can be ignored at local tftest
+# tflint-ignore: terraform_unused_declarations 
 data "google_privateca_certificate_authority" "existing_reg_ca" {
   count                    = local.use_existing_reg_ca ? 1 : 0
   certificate_authority_id = var.existing_reg_ca
@@ -136,7 +140,7 @@ data "google_privateca_certificate_authority" "existing_reg_ca" {
 # Create new CA pool only if not using existing
 resource "google_privateca_ca_pool" "factory_pool" {
   count    = local.create_factory_ca ? 1 : 0
-  name     = "${var.created_factory_ca_pool}"
+  name     = var.created_factory_ca_pool
   location = var.region
   tier     = "DEVOPS"
   project  = var.project_id
@@ -179,10 +183,12 @@ resource "google_privateca_certificate_authority" "factory_root" {
   }
   key_spec { algorithm = "RSA_PKCS1_4096_SHA256" }
   ignore_active_certificates_on_deletion = true
-  deletion_protection = false
+  deletion_protection                    = false
 }
 
 # Reference existing Factory CA if provided
+#Data source meant to be used for only remote mode, can be ignored at local tftest
+# tflint-ignore: terraform_unused_declarations
 data "google_privateca_certificate_authority" "existing_factory_ca" {
   count                    = local.use_existing_factory_ca ? 1 : 0
   certificate_authority_id = var.existing_factory_ca

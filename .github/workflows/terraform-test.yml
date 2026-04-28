@@ -1,0 +1,87 @@
+name: Terraform Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment"
+        required: true
+        default: "sandbox"
+      pki_strategy:
+        description: "PKI Strategy"
+        required: true
+        default: "local"
+        type: choice
+        options: [local, remote]
+  workflow_call:
+    inputs:
+      environment:
+        type: string
+        required: true
+        default: "sandbox"
+      pki_strategy:
+        type: string
+        required: true
+        default: "local"
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+env:
+  WORKING_DIRECTORY: "./iac/terraform"
+
+jobs:
+  terraform:
+    name: Terraform Plan (${{ inputs.pki_strategy || 'local' }})
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    environment: ${{ inputs.environment || 'sandbox' }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.11.4"
+
+      - name: Configure Google Cloud Auth
+        uses: google-github-actions/auth@v2
+        with:
+          token_format: access_token
+          workload_identity_provider: projects/${{ vars.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/${{ vars.GCP_WORKLOAD_IDENTITY_POOL_ID }}/providers/${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER_ID }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - name: Terraform Init
+        id: init
+        run: terraform init -backend-config="bucket=${{ vars.GCP_PROJECT_ID }}-tfstate"
+        working-directory: ${{ env.WORKING_DIRECTORY }}
+
+      - name: Terraform Format & Validate
+        run: |
+          terraform fmt -check
+          terraform validate -no-color
+        working-directory: ${{ env.WORKING_DIRECTORY }}
+
+      - name: Setup GCP Environment for Terraform Test
+        run: |
+          gcloud config set project ${{ vars.GCP_PROJECT_ID }}
+          echo "GOOGLE_PROJECT=${{ vars.GCP_PROJECT_ID }}" >> $GITHUB_ENV
+        working-directory: ${{ env.WORKING_DIRECTORY }}
+        
+      - name: Terraform Test
+        id: test
+        run: terraform test -verbose
+        working-directory: ${{ env.WORKING_DIRECTORY }}
+
+      - uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: v0.57.0
+
+      - name: Run TFLint
+        run: |
+          tflint --init
+          tflint -f compact
+        working-directory: ${{ env.WORKING_DIRECTORY }}

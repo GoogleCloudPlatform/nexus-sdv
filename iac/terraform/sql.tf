@@ -23,14 +23,14 @@ resource "google_sql_database_instance" "sql_db" {
 
     # Enable backups
     backup_configuration {
-      enabled                        = true
+      enabled                        = strcontains(var.environment, "prod")
       start_time                     = "03:00"
       point_in_time_recovery_enabled = false
     }
   }
 
   deletion_protection = false
-  depends_on = [google_project_service.project_apis]
+  depends_on = [google_project_service.project_apis, google_service_networking_connection.psc_connection]
 }
 
 resource "google_sql_database" "database_keycloak" {
@@ -55,9 +55,9 @@ resource "random_password" "keycloak_db_user_password" {
 
 # Create the keycloak database user
 resource "google_sql_user" "keycloak_user" {
-  name        = "keycloak"
-  instance    = google_sql_database_instance.sql_db.name
-  password    = random_password.keycloak_db_user_password.result
+  name     = "keycloak"
+  instance = google_sql_database_instance.sql_db.name
+  password = random_password.keycloak_db_user_password.result
 
   depends_on = [google_sql_database.database_keycloak]
 }
@@ -97,6 +97,18 @@ output "keycloak_db_password" {
   description = "Keycloak database password (sensitive)"
   # Corrected the reference to the random_password resource.
   # It was 'random_password.keycloak_db_password.result', but the resource is named 'keycloak_db_user_password'.
-  value       = random_password.keycloak_db_user_password.result
-  sensitive   = true
+  value     = random_password.keycloak_db_user_password.result
+  sensitive = true
+}
+
+output "sql_instance_name" {
+  value = google_sql_database_instance.sql_db.name
+}
+
+output "sql_database_name" {
+  value = google_sql_database.database_keycloak.name
+}
+
+output "sql_user_name" {
+  value = google_sql_user.keycloak_user.name
 }

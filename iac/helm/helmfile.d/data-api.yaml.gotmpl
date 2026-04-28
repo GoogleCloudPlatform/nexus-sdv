@@ -5,6 +5,7 @@ releases:
     labels:
       app: data-api
     values:
+      - arch: {{ .StateValues.arch | default "arm64" }}
       - image:
           repository: '{{ requiredEnv "IMAGE_REPO" }}/data-api'
           tag: 'latest'

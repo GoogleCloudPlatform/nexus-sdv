@@ -12,7 +12,9 @@
 
 set -e
 
+
 FILE_PATH="../../iac/bootstrapping/.bootstrap_env"
+echo ""
 echo "=========================================="
 echo "Check for environment file"
 echo "=========================================="
@@ -67,7 +69,7 @@ if [ -z "$PKI_STRATEGY_VALUE" ]; then
     echo "Examples:"
     echo "  $0 local"
     echo "  $0 remote VEHICLE001"
-    echo "  $0 local VEHICLE001 https://registration.sdv-lal.com:8080 10"
+    echo "  $0 local VEHICLE001 https://registration.sdv-lal.com:8443 10"
     exit 1
 fi
 
@@ -76,10 +78,11 @@ if [ "$PKI_STRATEGY_VALUE" != "local" ] && [ "$PKI_STRATEGY_VALUE" != "remote" ]
     exit 1
 fi
 
+
 if [ "$PKI_STRATEGY_VALUE" = "remote" ]; then
-    REGISTRATION_URL_VALUE="${REGISTRATION_URL_PARAM:-"https://${REGISTRATION_HOSTNAME}.${BASE_DOMAIN}:8080"}"
+    REGISTRATION_URL_VALUE="${REGISTRATION_URL_PARAM:-"https://${REGISTRATION_HOSTNAME}.${BASE_DOMAIN}:8443"}"
 else
-    REGISTRATION_URL_VALUE="${REGISTRATION_URL_PARAM:-"https://${REGISTRATION_HOSTNAME}:8080"}"
+    REGISTRATION_URL_VALUE="${REGISTRATION_URL_PARAM:-"https://${REGISTRATION_HOSTNAME}:8443"}"
 fi
 
 
@@ -90,13 +93,15 @@ echo "PKI Strategy: $PKI_STRATEGY_VALUE"
 echo "VIN: $VIN_VALUE"
 echo "Registration URL: $REGISTRATION_URL_VALUE"
 echo "Interval: ${INTERVAL_VALUE}s"
-echo ""
 
-# Step 1: Generate factory certificate
-echo "Step 1: Generating factory certificate..."
+
+# Generate factory certificate
+echo -e ""
+echo "*** Generating factory certificate... ***"
+echo -e ""
 
 # Define the output path for the certificates
-CERT_DIR="${SCRIPT_DIR}"
+CERT_DIR="${SCRIPT_DIR}/certificates"
 
 if [ "$PKI_STRATEGY_VALUE" = "local" ]; then
     echo "Using local PKI (generate-factory-cert.sh)..."
@@ -123,17 +128,21 @@ if [ ! -f "$FACTORY_KEY" ]; then
     echo "Error: Factory key not found at $FACTORY_KEY"
     exit 1
 fi
-
 echo "✓ Factory certificate generated successfully"
-echo ""
 
-if [ "$PKI_STRATEGY_VALUE" = "remote" ]; then
-    mkdir -p certificates
-    gcloud secrets versions access latest --secret="REGISTRATION_SERVER_TLS_CERT" > certificates/REGISTRATION_SERVER_TLS_CERT.pem
-    gcloud secrets versions access latest --secret="KEYCLOAK_TLS_CRT" > certificates/KEYCLOAK_TLS_CRT.pem
-fi
+echo "Downloading keycloak server certificate from Secret Manager"
+mkdir -p certificates
+gcloud secrets versions access latest --secret="KEYCLOAK_TLS_CRT" --project="$GCP_PROJECT_ID" > certificates/KEYCLOAK_TLS_CRT.pem
+
+
+echo "PKI strategy is remote. Downloading registration server certificate from Secret Manager"
+gcloud secrets versions access latest --secret="REGISTRATION_SERVER_TLS_CERT" --project="$GCP_PROJECT_ID" > certificates/REGISTRATION_SERVER_TLS_CERT.pem
+
+
 # Step 2: Check and build binary
-echo "Step 2: Checking vehicle-client binary..."
+echo -e ""
+echo "*** Checking vehicle-client binary... ***"
+echo -e ""
 BINARY_NAME="vehicle-client"
 
 if [ ! -f "$BINARY_NAME" ]; then
@@ -143,9 +152,10 @@ if [ ! -f "$BINARY_NAME" ]; then
 else
     echo "✓ Binary exists"
 fi
-echo ""
 # Step 3: Run the vehicle client
-echo "Step 3: Running vehicle-client..."
+echo -e ""
+echo "*** Running vehicle-client... ***"
+echo -e ""
 echo "Command: ./$BINARY_NAME -vin=\"$VIN_VALUE\" -pki_strategy=\"$PKI_STRATEGY_VALUE\" -factory-cert=\"$FACTORY_CERT\" -factory-key=\"$FACTORY_KEY\" -registration-url=\"$REGISTRATION_URL_VALUE\" -interval=$INTERVAL_VALUE"
 echo ""
 

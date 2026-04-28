@@ -144,13 +144,13 @@ The easiest way to run the vehicle client is using the provided run script, whic
 ./run-vehicle-client.sh local VEHICLE001
 
 # Full customization (VIN, registration URL, interval)
-./run-vehicle-client.sh local VEHICLE001 https://registration.sdv-lal.com:8080 10
+./run-vehicle-client.sh local VEHICLE001 https://registration.sdv-lal.com:8443 10
 ```
 
 **Script Parameters:**
 - `pki_strategy` (required): `local` or `remote`
 - `VIN` (optional): Vehicle Identification Number (default: VEHICLE001)
-- `REGISTRATION_URL` (optional): Registration server URL (default: https://registration.sdv-lal.com:8080)
+- `REGISTRATION_URL` (optional): Registration server URL (default: https://registration.sdv-lal.com:8443)
 - `INTERVAL` (optional): Telemetry interval in seconds (default: 5)
 
 ### Manual Usage
@@ -162,7 +162,7 @@ The easiest way to run the vehicle client is using the provided run script, whic
   -vin="VEHICLE001" \
   -factory-cert="vehicle001-factory-chain.pem" \
   -factory-key="vehicle001-factory-key.pem" \
-  -registration-url="https://registration.sdv-lal.com:8080"
+  -registration-url="https://registration.sdv-lal.com:8443"
 ```
 
 ### Parameters
@@ -181,7 +181,7 @@ The easiest way to run the vehicle client is using the provided run script, whic
 
 | Variable | Description | Example | Default |
 |----------|-------------|---------|---------|
-| `REGISTRATION_URL` | Registration server URL (alternative to `-registration-url` flag) | `https://34.185.214.249:8080` | - |
+| `REGISTRATION_URL` | Registration server URL (alternative to `-registration-url` flag) | `https://34.185.214.249:8443` | - |
 | `TELEMETRY_PREFIX` | Optional prefix for telemetry NATS subjects | `prod.bigtable` | - |
 
 #### TELEMETRY_PREFIX Examples
@@ -211,7 +211,7 @@ This allows the NATS-Bigtable connector to subscribe to specific environments:
 2025/11/02 12:00:00 Step 1: Generating operational key pair...
 2025/11/02 12:00:00 Step 2: Creating Certificate Signing Request (CSR)...
 2025/11/02 12:00:00 Step 3: Loading factory-issued certificate for mTLS...
-2025/11/02 12:00:00 Step 4: Sending CSR to registration server at https://registration.sdv-lal.com:8080...
+2025/11/02 12:00:00 Step 4: Sending CSR to registration server at https://registration.sdv-lal.com:8443...
 2025/11/02 12:00:01 Step 5: Parsing operational certificate...
 2025/11/02 12:00:01   Keycloak URL: https://keycloak.sdv-lal.com:8443
 2025/11/02 12:00:01   NATS URL: nats://nats.sdv-lal.com:4222

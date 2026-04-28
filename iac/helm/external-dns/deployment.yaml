@@ -54,6 +54,24 @@ spec:
         app.kubernetes.io/name: external-dns
     spec:
       serviceAccountName: external-dns
+      tolerations:
+      - key: "cloud.google.com/compute-class"
+        operator: "Equal"
+        value: "Scale-Out"
+        effect: "NoSchedule"
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: kubernetes.io/arch
+                operator: In
+                values:
+                - __ARCH__
+              - key: cloud.google.com/compute-class
+                operator: In
+                values:
+                - Scale-Out
       containers:
       - name: external-dns
         image: registry.k8s.io/external-dns/external-dns:v0.15.0

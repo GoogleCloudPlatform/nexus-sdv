@@ -10,6 +10,13 @@ on:
         type: string
         default: "local"
         description: "Passes on user decision for the platform's PKI setup"
+      arch:
+        type: choice
+        description: "Target CPU architecture for GKE nodes"
+        options:
+          - arm64
+          - amd64
+        default: "arm64"
       helmAction:
         type: choice
         description: "Sets the action for the helmfile plugin: 'sync' forces an update and 'apply' checks for differences"
@@ -28,12 +35,14 @@ on:
         type: string
         default: "local"
         description: "Passes on user decision for the platform's PKI setup"
+      arch:
+        type: string
+        default: "arm64"
       helmAction:
         type: string
         description: "Sets the action for the helmfile plugin: 'sync' forces an update and 'apply' checks for differences"
         required: false
         default: "sync"
-
 
 
 permissions:
@@ -47,7 +56,7 @@ env:
 jobs:
   deploy-nats:
     name: Deploy NATS
-    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-24.04-arm' }}
     environment: ${{ inputs.environment }}
 
     steps:
@@ -118,8 +127,9 @@ jobs:
             ${{ inputs.helmAction || 'apply' }} 
             --wait 
             --args "--timeout 10m" 
-            --state-values-set pkiStrategy=${{ inputs.pki_strategy  || 'local' }} 
+            --state-values-set pkiStrategy=${{ inputs.pki_strategy  || 'local' }}
             --state-values-set baseDomain=${{ env.BASE_DOMAIN }}
+            --state-values-set arch=${{ inputs.arch || 'arm64' }}
         env:
           BASE_DOMAIN: ${{ env.BASE_DOMAIN }}
 

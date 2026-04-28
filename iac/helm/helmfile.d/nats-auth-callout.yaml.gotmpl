@@ -9,6 +9,8 @@ releases:
     values:
       - ../nats-auth-callout/values.yaml
     set:
+      - name: arch
+        value: {{ .StateValues.arch | default "arm64" }}
       - name: jwt.accSigningKey
         value: '{{ requiredEnv "JWT_ACC_SIGNING_KEY" }}'
       - name: keycloak.jwkB64

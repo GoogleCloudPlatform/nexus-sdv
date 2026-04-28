@@ -23,12 +23,9 @@ func (ts *TestSuite) registerBigtableSteps(ctx *godog.ScenarioContext) {
 
 // Connects to the emulator and ensures the table and family exist.
 func (ts *TestSuite) theTelemetryBigtableIsAvailable(ctx context.Context) error {
-	var err error
-
-	// Create an admin client to manage tables
-	ts.BtAdminClient, err = bigtable.NewAdminClient(ctx, gcpProjectID, bigtableInstance)
-	if err != nil {
-		return err
+	// Ensure clients are initialized (should be done in Before hook)
+	if ts.BtAdminClient == nil || ts.BtClient == nil {
+		return fmt.Errorf("Bigtable clients not initialized")
 	}
 
 	// Delete any old table, create a fresh table and families
@@ -45,11 +42,7 @@ func (ts *TestSuite) theTelemetryBigtableIsAvailable(ctx context.Context) error 
 		return fmt.Errorf("failed to create column family 'static': %w", err)
 	}
 
-	// Create a data client for reading/writing data
-	ts.BtClient, err = bigtable.NewClient(ctx, gcpProjectID, bigtableInstance)
-	if err != nil {
-		return err
-	}
+	// Open the table
 	ts.BtTable = ts.BtClient.Open(bigtableTable)
 
 	return nil

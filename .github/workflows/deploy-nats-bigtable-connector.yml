@@ -6,6 +6,13 @@ on:
       environment:
         description: "Environment (sandbox, dev, ...)"
         required: true
+      arch:
+        type: choice
+        description: "Target CPU architecture for GKE nodes"
+        options:
+          - arm64
+          - amd64
+        default: "arm64"
       helmAction:
         type: choice
         description: "Sets the action for the helmfile plugin: 'sync' forces an update and 'apply' checks for differences"
@@ -20,6 +27,9 @@ on:
       environment:
         type: string
         required: true
+      arch:
+        type: string
+        default: "arm64"
       helmAction:
         type: string
         description: "Sets the action for the helmfile plugin: 'sync' forces an update and 'apply' checks for differences"
@@ -39,7 +49,7 @@ env:
 jobs:
   deploy-nats-bigtable-connector:
     name: Deploy NATS BigTable Connector
-    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-24.04-arm' }}
     environment: ${{ inputs.environment }}
 
     steps:
@@ -89,4 +99,4 @@ jobs:
         with:
           helm-version: "v3.19.0"
           helmfile-workdirectory: iac/helm/helmfile.d
-          helmfile-args: --file nats-connector.yaml.gotmpl ${{ inputs.helmAction || 'apply' }}
+          helmfile-args: --file nats-connector.yaml.gotmpl ${{ inputs.helmAction || 'apply' }} --state-values-set arch=${{ inputs.arch || 'arm64' }}

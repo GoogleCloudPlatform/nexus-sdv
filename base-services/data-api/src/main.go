@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	dataapiv1 "data-api/api/gen/dataapi/v1"
+	"data-api/src/service"
 	"log"
 	"net"
 	"os"
@@ -52,7 +53,7 @@ func main() {
 	}
 
 	grpcServer := grpc.NewServer()
-	telemetryServer := NewServer(logger, tbl, Options{
+	telemetryServer := service.NewServer(logger, tbl, service.Options{
 		MaxLookback: 365 * 24 * time.Hour,
 	})
 

@@ -13,6 +13,11 @@ releases:
     installed: true
     values:
       - ../nats/values.yaml
+      - podTemplate:
+          merge:
+            metadata:
+              annotations:
+                checksum/auth-callout-password: '{{ requiredEnv "NATS_AUTH_CALLOUT_PASSWORD" | sha256sum }}'
       # Inline values to properly structure authorization config
       - config:
           merge:
@@ -60,6 +65,10 @@ releases:
                   {{- end }}
                 account: AUTH
     set:
+      - name: "podTemplate.merge.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0].matchExpressions[0].values[0]"
+        value: {{ .StateValues.arch | default "arm64" }}
+      - name: "natsBox.podTemplate.merge.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0].matchExpressions[0].values[0]"
+        value: {{ .StateValues.arch | default "arm64" }}
       - name: pkiStrategy
         value: {{ .StateValues.pkiStrategy | default "local" }}
       {{- if eq $pki_strategy "remote" }}

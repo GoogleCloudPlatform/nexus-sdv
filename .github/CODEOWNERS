@@ -1,0 +1,27 @@
+# Nexus SDV Code Ownership
+
+# -----------------------------------------------------------------------------
+# Global Governance & Documentation
+# -----------------------------------------------------------------------------
+# Default owners for the entire repository, including documentation (/docs)
+# and project-level metadata (*.md).
+* @GoogleCloudPlatform/nexus-sdv-core-maintainers
+
+# -----------------------------------------------------------------------------
+# Infrastructure & Deployment (IaC)
+# -----------------------------------------------------------------------------
+# Responsible for Terraform, GCP Cloud Build, ARM64, and Orchestration logic.
+/iac/ @GoogleCloudPlatform/nexus-sdv-infra-maintainers
+
+# -----------------------------------------------------------------------------
+# Platform Base Services
+# -----------------------------------------------------------------------------
+# Responsible for core service logic and GKE workload configurations.
+/sample-services/ @GoogleCloudPlatform/nexus-sdv-service-maintainers
+
+# -----------------------------------------------------------------------------
+# Clients & SDKs
+# -----------------------------------------------------------------------------
+# Responsible for all client implementations, including Go, JS, and the 
+# new Python In-Vehicle SDK.
+/sample-clients/ @GoogleCloudPlatform/nexus-sdv-client-maintainers

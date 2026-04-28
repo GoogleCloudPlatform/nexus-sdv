@@ -5,13 +5,22 @@ on:
       environment:
         description: "Environment (sandbox, dev, ...)"
         required: true
+      arch:
+        type: choice
+        description: "Target CPU architecture for GKE nodes"
+        options:
+          - arm64
+          - amd64
+        default: "arm64"
 
   workflow_call:
     inputs:
       environment:
         type: string
         required: true
-
+      arch:
+        type: string
+        default: "arm64"
 
 
 permissions:
@@ -62,6 +71,7 @@ jobs:
           cat iac/helm/external-dns/deployment.yaml | \
             sed "s|__GCP_PROJECT_ID__|${{ vars.GCP_PROJECT_ID }}|g" | \
             sed "s|__BASE_DOMAIN__|${{ env.BASE_DOMAIN }}|g" | \
+            sed "s|__ARCH__|${{ inputs.arch || 'arm64' }}|g" | \
             kubectl apply -f -
 
       - name: Wait for External DNS to be ready

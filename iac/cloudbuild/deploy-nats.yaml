@@ -1,0 +1,153 @@
+steps:
+  # ============================================================================
+  # 0. SETUP & AUTHENTICATION
+  # ============================================================================
+  - id: 'get-gke-credentials'
+    name: 'gcr.io/cloud-builders/gcloud'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        gcloud container clusters get-credentials "$$GKE_CLUSTER_NAME" \
+          --region="$$GCP_REGION" \
+          --project="$PROJECT_ID"
+        
+        echo "Injecting Cloud Build Access Token into Kubeconfig..."
+        TOKEN=$$(gcloud auth print-access-token)
+
+        kubectl config set-credentials build-user --token="$${TOKEN}"
+
+        CONTEXT=$$(kubectl config current-context)
+        kubectl config set-context "$${CONTEXT}" --user=build-user
+
+        echo "Kubeconfig successfully patched for standalone usage."
+    secretEnv: ['GKE_CLUSTER_NAME', 'GCP_REGION']
+
+  - id: 'prepare-domain'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        if [ "$$PKI_STRATEGY" == "remote" ]; then 
+          echo "Fetching BASE_DOMAIN from Secret Manager..."
+          BASE_DOMAIN=$$(gcloud secrets versions access latest --secret="BASE_DOMAIN" --project="$PROJECT_ID")
+          echo "$$BASE_DOMAIN" > domain.txt
+        elif [ "$$PKI_STRATEGY" == "local" ]; then
+          echo "Local strategy selected. Setting empty domain."
+          echo "" > domain.txt
+        fi
+
+        # Debugging output
+        echo "Domain prepared in domain.txt"
+    secretEnv: [ 'PKI_STRATEGY' ]
+    waitFor: [ 'get-gke-credentials' ]
+
+  - id: 'deploy-nats'
+    name: 'ghcr.io/helmfile/helmfile:latest'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        if [ -f "domain.txt" ]; then
+            BASE_DOMAIN=$$(cat domain.txt)
+        else
+            BASE_DOMAIN=""
+        fi
+        
+        cd iac/helm/helmfile.d
+        
+        export BASE_DOMAIN="$$BASE_DOMAIN"
+        
+        helmfile --file nats.yaml.gotmpl ${_HELM_ACTION} --state-values-set pkiStrategy=$$PKI_STRATEGY --state-values-set baseDomain="$$BASE_DOMAIN" --state-values-set arch=${_ARCH}
+    secretEnv: [ 'PKI_STRATEGY', 'ENVIRONMENT', 'NATS_BASIC_AUTH_USER', 'NATS_BASIC_AUTH_PASSWORD', 'NATS_AUTH_CALLOUT_PASSWORD', 'NATS_CONNECTOR_PASSWORD', 'NATS_AUTH_CALLOUT_NKEY_PUB', 'JWT_ACC_SIGNING_KEY' ]
+    waitFor: [ 'prepare-domain' ]
+
+  - id: 'create-nats-hostname-secret'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        # REMOTE STRATEGY: use domain
+        if [[ "$$PKI_STRATEGY" == "remote" ]]; then
+           if [ -f "domain.txt" ]; then
+             BASE_DOMAIN=$$(cat domain.txt)
+             echo "Using Remote Base Domain: $$BASE_DOMAIN"
+           else
+             echo "::error::Remote strategy selected but domain.txt not found."
+             exit 1
+           fi
+           HOSTNAME="nats.$$BASE_DOMAIN"
+           echo "Using Remote Strategy. Hostname: $$HOSTNAME"
+
+           if ! gcloud secrets describe "NATS_HOSTNAME" --project="$PROJECT_ID" &> /dev/null; then
+             gcloud secrets create "NATS_HOSTNAME" --replication-policy="automatic" --project="$PROJECT_ID"
+           fi
+           echo -n "$$HOSTNAME" | gcloud secrets versions add "NATS_HOSTNAME" --data-file=- --project="$PROJECT_ID"
+           exit 0
+        fi
+
+        # LOCAL STRATEGY: use IP
+        echo "Using Local Strategy. Waiting for NATS external IP..."
+        for i in {1..30}; do
+          IP=$$(kubectl get svc nats -n base-services -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+          if [[ -n "$$IP" ]]; then
+            echo "NATS IP found: $$IP"
+            if ! gcloud secrets describe "NATS_HOSTNAME" --project="$PROJECT_ID" &> /dev/null; then
+              echo "Create secret 'NATS_HOSTNAME'..."
+              gcloud secrets create "NATS_HOSTNAME" --replication-policy="automatic" --project="$PROJECT_ID"
+            fi
+            echo "Add new version to secret 'NATS_HOSTNAME'..."
+            echo -n "$$IP" | gcloud secrets versions add "NATS_HOSTNAME" --data-file=- --project="$PROJECT_ID"
+            exit 0
+          fi
+          sleep 10
+        done
+        echo "::error::NATS LoadBalancer IP not found after 5 minutes."
+        exit 1
+    secretEnv: [ 'PKI_STRATEGY' ]
+    waitFor: [ 'deploy-nats' ]
+
+
+
+
+# ============================================================================
+# SUBSTITUTIONS & SECRETS CONFIG
+# ============================================================================
+substitutions:
+  _ENVIRONMENT: "cb-test"
+  _PKI_STRATEGY: "local"
+  _ARCH: "arm64"
+  _BASE_DOMAIN: ""
+  _CLUSTER_NAME: "cb-test-gke"
+  _REGION: "europe-west4"
+  _HELM_ACTION: "sync"
+
+availableSecrets:
+  secretManager:
+    - versionName: projects/$PROJECT_ID/secrets/ENV/versions/latest
+      env: 'ENVIRONMENT'
+    - versionName: projects/$PROJECT_ID/secrets/PKI_STRATEGY/versions/latest
+      env: 'PKI_STRATEGY'
+    - versionName: projects/$PROJECT_ID/secrets/GCP_REGION/versions/latest
+      env: 'GCP_REGION'
+    - versionName: projects/$PROJECT_ID/secrets/GKE_CLUSTER_NAME/versions/latest
+      env: 'GKE_CLUSTER_NAME'
+    - versionName: projects/$PROJECT_ID/secrets/NATS_SERVER_USER/versions/latest
+      env: 'NATS_BASIC_AUTH_USER'
+    - versionName: projects/$PROJECT_ID/secrets/NATS_SERVER_PASSWORD/versions/latest
+      env: 'NATS_BASIC_AUTH_PASSWORD'
+    - versionName: projects/$PROJECT_ID/secrets/NATS_AUTH_CALLOUT_PASSWORD/versions/latest
+      env: 'NATS_AUTH_CALLOUT_PASSWORD'
+    - versionName: projects/$PROJECT_ID/secrets/NATS_CONNECTOR_PASSWORD/versions/latest
+      env: 'NATS_CONNECTOR_PASSWORD'
+    - versionName: projects/$PROJECT_ID/secrets/NATS_AUTH_CALLOUT_NKEY_PUB/versions/latest
+      env: 'NATS_AUTH_CALLOUT_NKEY_PUB'
+    - versionName: projects/$PROJECT_ID/secrets/JWT_ACC_SIGNING_KEY/versions/latest
+      env: 'JWT_ACC_SIGNING_KEY'
+
+options:
+  machineType: 'E2_HIGHCPU_8'
+  logging: CLOUD_LOGGING_ONLY
+  substitutionOption: 'ALLOW_LOOSE'

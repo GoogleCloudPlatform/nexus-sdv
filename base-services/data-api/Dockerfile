@@ -1,4 +1,4 @@
-FROM golang:latest AS builder
+FROM --platform=$BUILDPLATFORM golang:latest AS builder
 
 WORKDIR /app
 
@@ -8,7 +8,8 @@ RUN go mod download
 COPY api ./api
 COPY src ./src
 
-RUN  CGO_ENABLED=0 go build -o /server ./src
+ARG TARGETOS TARGETARCH
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o /server ./src
 
 FROM alpine:latest
 

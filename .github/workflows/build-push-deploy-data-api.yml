@@ -6,6 +6,13 @@ on:
       environment:
         description: "Environment (sandbox, dev, ...)"
         required: true
+      arch:
+        type: choice
+        description: "Target CPU architecture for GKE nodes"
+        options:
+          - arm64
+          - amd64
+        default: "arm64"
       helmAction:
         type: choice
         description: "Sets the action for the helmfile plugin: 'sync' forces an update and 'apply' checks for differences"
@@ -20,6 +27,9 @@ on:
       environment:
         type: string
         required: true
+      arch:
+        type: string
+        default: "arm64"
 
 
 permissions:
@@ -36,7 +46,7 @@ env:
 jobs:
   deploy-data-api:
     name: Deploy the Data API
-    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-24.04-arm' }}
     environment: ${{ inputs.environment }}
 
     defaults:
@@ -87,6 +97,12 @@ jobs:
         run: |-
           gcloud auth configure-docker ${{ vars.GCP_REGION }}-docker.pkg.dev --quiet
 
+      - name: Set up QEMU for multi-arch builds
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Compile proto files
         run: make proto
 
@@ -94,6 +110,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           push: true
+          platforms: linux/amd64,linux/arm64
           tags: ${{ env.IMAGE_REPO }}/data-api:latest
           file: ./base-services/data-api/Dockerfile
           context: ./base-services/data-api
@@ -121,4 +138,4 @@ jobs:
         with:
           helm-version: "v3.19.0"
           helmfile-workdirectory: iac/helm/helmfile.d
-          helmfile-args: --file data-api.yaml.gotmpl ${{ inputs.helmAction || 'apply' }}
+          helmfile-args: --file data-api.yaml.gotmpl ${{ inputs.helmAction || 'apply' }} --state-values-set arch=${{ inputs.arch || 'arm64' }}
