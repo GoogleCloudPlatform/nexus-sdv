@@ -58,6 +58,7 @@ Then edit `include/config.h` with your settings:
 | `DEEP_SLEEP_DURATION_S` | `300`   | Deep sleep duration in seconds (5 minutes).                                                                         |
 | `GPS_WAIT_FOR_FIX`      | `false` | Wait for a GPS fix before connecting to NATS. Sends without GPS if the timeout expires.                             |
 | `GPS_FIX_TIMEOUT_S`     | `90`    | Maximum seconds to wait for a GPS fix before sending without it. Set to `0` to wait indefinitely.                   |
+| `TOKEN_CHECK_INTERVAL_MS` | `10000` | How often to re-validate the cached JWT (each check decodes/parses it). Must stay well below `TOKEN_MIN_REMAINING_S * 1000`. |
 
 ### 3. Provision certificates and runtime URLs
 
@@ -164,7 +165,6 @@ Expected output on successful run:
 [FS] Loaded /certs/ca.crt.pem (1234 bytes)
 [Main] Step 4/5: Getting JWT from Keycloak...
 [Auth] Token acquired (expires in 300 s).
-[Main] Token valid for 300 s.
 [Main] Step 5/5: Connecting to NATS...
 [NATS] Connected and authenticated.
 [Telemetry] Published 160 bytes to telemetry.prod.bigtable.DEVICE001
