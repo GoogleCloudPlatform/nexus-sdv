@@ -39,6 +39,10 @@ static NatsClient *natsClient = nullptr;
 RTC_DATA_ATTR int messageIndex = 0;
 static unsigned long lastSendTime = 0;
 
+// Throttle token-validity checks (each check decodes/parses the JWT).
+static unsigned long lastTokenCheck = 0;
+static const unsigned long TOKEN_CHECK_INTERVAL_MS = 10000;
+
 // Tracks when STATE_GPS_WAIT was entered to enforce GPS_FIX_TIMEOUT_S
 static unsigned long gpsWaitStart = 0;
 
@@ -224,13 +228,17 @@ void loop() {
         break;
 
     case STATE_SEND_TELEMETRY:
-        // Check if token is still valid for at least TOKEN_MIN_REMAINING_S
-        if (accessToken && !token_valid_for(accessToken, TOKEN_MIN_REMAINING_S)) {
-            Serial.println("[Main] Token expiring soon. Re-authenticating...");
-            nats_destroy(natsClient);
-            natsClient = nullptr;
-            currentState = STATE_AUTHENTICATE;
-            break;
+        // Periodically check if token is still valid for at least TOKEN_MIN_REMAINING_S
+        if (accessToken &&
+            (lastTokenCheck == 0 || (millis() - lastTokenCheck) >= TOKEN_CHECK_INTERVAL_MS)) {
+            lastTokenCheck = millis();
+            if (!token_valid_for(accessToken, TOKEN_MIN_REMAINING_S)) {
+                Serial.println("[Main] Token expiring soon. Re-authenticating...");
+                nats_destroy(natsClient);
+                natsClient = nullptr;
+                currentState = STATE_AUTHENTICATE;
+                break;
+            }
         }
 
         if (!nats_process(natsClient)) {
