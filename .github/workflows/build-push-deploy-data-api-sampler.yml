@@ -7,6 +7,13 @@ on:
         description: "Environment (sandbox, dev, ...)"
         required: true
         default: "e2e-local"
+      arch:
+        type: choice
+        description: "Target CPU architecture for GKE nodes"
+        options:
+          - arm64
+          - amd64
+        default: "arm64"
       helmAction:
         type: choice
         description: "Sets the action for the helmfile plugin: 'sync' forces an update and 'apply' checks for differences"
@@ -21,6 +28,9 @@ on:
       environment:
         type: string
         required: true
+      arch:
+        type: string
+        default: "arm64"
 
 
 permissions:
@@ -38,7 +48,7 @@ env:
 jobs:
   deploy-data-api-sampler:
     name: build, push and deploy the data-api sampler service
-    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-24.04-arm' }}
     environment: ${{ inputs.environment }}
 
     defaults:
@@ -71,6 +81,9 @@ jobs:
       - name: "Docker auth"
         run: |-
           gcloud auth configure-docker ${{ vars.GCP_REGION }}-docker.pkg.dev --quiet
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
       - name: Build and Push Data-API Sampler service
         uses: docker/build-push-action@v6
@@ -124,4 +137,4 @@ jobs:
         with:
           helm-version: "v3.19.0"
           helmfile-workdirectory: iac/helm/helmfile.d
-          helmfile-args: --file data-api-sampler.yaml.gotmpl ${{ inputs.helmAction || 'sync' }}
+          helmfile-args: --file data-api-sampler.yaml.gotmpl ${{ inputs.helmAction || 'sync' }} --state-values-set arch=${{ inputs.arch || 'arm64' }}

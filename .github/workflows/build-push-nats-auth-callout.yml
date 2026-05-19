@@ -27,7 +27,6 @@ on:
         default: "sync"
 
 
-
 permissions:
   id-token: write
   contents: read
@@ -42,7 +41,7 @@ env:
 jobs:
   build:
     name: Build Auth-Callout
-    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-24.04-arm' }}
     environment: ${{ inputs.environment}}
 
     steps:
@@ -72,13 +71,23 @@ jobs:
             IMAGE_REPO:${{ vars.GCP_PROJECT_ID }}/IMAGE_REPO
           export_to_environment: true
 
-      - name: Build container
-        working-directory: base-services/auth-callout
-        run: sh ./build.sh ${{ env.IMAGE_REPO }}
-
       - name: "Docker auth"
         run: |-
           gcloud auth configure-docker ${{ vars.GCP_REGION }}-docker.pkg.dev --quiet
 
-      - name: Push Image
-        run: docker push ${{ env.IMAGE_REPO }}/nats-auth-callout:${{ env.VERSION }}
+      - name: Set up QEMU for multi-arch builds
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and Push NATS Auth-Callout
+        uses: docker/build-push-action@v6
+        with:
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ env.IMAGE_REPO }}/nats-auth-callout:${{ env.VERSION }}
+          file: ./base-services/auth-callout/Dockerfile
+          context: ./base-services/auth-callout
+          provenance: false
+          sbom: false

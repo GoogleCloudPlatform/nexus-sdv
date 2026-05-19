@@ -10,6 +10,13 @@ on:
         type: string
         default: "local"
         description: "PKI Setup: 'local' (IP) or 'remote' (DNS/CAS)"
+      arch:
+        type: choice
+        description: "Target CPU architecture for GKE nodes"
+        options:
+          - arm64
+          - amd64
+        default: "arm64"
       helmAction:
         type: choice
         description: "Sets the action for the helmfile plugin: 'sync' forces an update and 'apply' checks for differences"
@@ -27,6 +34,9 @@ on:
       pki_strategy:
         type: string
         default: "local"
+      arch:
+        type: string
+        default: "arm64"
       helmAction:
         type: string
         default: "sync"
@@ -45,7 +55,7 @@ env:
 jobs:
   build-deploy:
     name: Build, Push and Deploy registration server
-    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-24.04-arm' }}
     environment: ${{ inputs.environment || 'sandbox' }}
 
     steps:
@@ -84,6 +94,9 @@ jobs:
         run: |-
           gcloud auth configure-docker ${{ vars.GCP_REGION }}-docker.pkg.dev --quiet
 
+      - name: Set up QEMU for multi-arch builds
+        uses: docker/setup-qemu-action@v3
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -92,6 +105,7 @@ jobs:
         with:
           file: ./base-services/registration/server/Dockerfile
           push: true
+          platforms: linux/amd64,linux/arm64
           tags: ${{ env.IMAGE_REPO }}/registration-server:${{ github.sha }}
           context: .
           cache-from: type=registry,ref=${{ env.IMAGE_REPO }}/registration-server:buildcache
@@ -118,7 +132,7 @@ jobs:
         with:
           helm-version: "v3.19.0"
           helmfile-workdirectory: iac/helm/helmfile.d
-          helmfile-args: --file registration.yaml.gotmpl apply --state-values-set pkiStrategy=local --state-values-set baseDomain="" --state-values-set image.tag=latest
+          helmfile-args: --file registration.yaml.gotmpl apply --state-values-set pkiStrategy=local --state-values-set baseDomain="" --state-values-set image.tag=latest --state-values-set arch=${{ inputs.arch || 'arm64' }}
 
       - name: Get External IPs (Local Only)
         if: ${{ inputs.pki_strategy == 'local' }}
@@ -386,6 +400,7 @@ jobs:
             --state-values-set pkiStrategy=${{ inputs.pki_strategy }}
             --state-values-set baseDomain=${{ env.BASE_DOMAIN }}
             --state-values-set image.tag=${{ github.sha }}
+            --state-values-set arch=${{ inputs.arch || 'arm64' }}
             ${{ inputs.pki_strategy == 'local' && format('--state-values-set keycloakExternalUrl=https://{0}:8443', steps.get_ip.outputs.keycloak_ip) || '' }}
             ${{ inputs.pki_strategy == 'local' && format('--state-values-set natsExternalUrl=nats://{0}:4222', steps.get_ip.outputs.nats_ip) || '' }}
 

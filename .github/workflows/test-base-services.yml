@@ -1,6 +1,19 @@
 name: Test base services
 
 on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "base-services/**"
+      - ".github/workflows/test-base-services.yml"
+  push:
+    branches-ignore:
+      - main
+    paths:
+      - "base-services/**"
+      - ".github/workflows/test-base-services.yml"
+      
   workflow_dispatch:
     inputs:
       environment:
@@ -8,11 +21,10 @@ on:
         required: true
         default: "sandbox"
 
-
 jobs:
   test-data-api:
     name: Test Data API Service
-    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-24.04-arm' }}
 
     defaults:
       run:
@@ -57,3 +69,75 @@ jobs:
       - name: Stop services
         if: always()
         run: docker compose down
+
+# --- Job for Auth Callout (Go) ---
+  test-auth-callout:
+    name: Test Auth Callout Service
+    runs-on: ubuntu-latest
+      
+    defaults:
+      run:
+        # This is the critical change: point to the auth-callout directory
+        working-directory: ./base-services/auth-callout 
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.0"
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: ~/go/pkg/mod
+          # Note: Caching is generic and fine as-is
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+      
+      - name: Install Dependencies
+        run: go mod download
+
+      - name: Run unit tests
+        run: go mod tidy && go test -v ./...
+
+# --- Job for Registration Server (Rust) ---
+  test-registration:
+    name: Test Registration Server (Rust)
+    runs-on: ubuntu-latest
+    
+# Temporary environment variables for testing
+    env:
+      KEYCLOAK_URL: test-keycloak-host
+      NATS_URL: nats://test-nats-host:4222
+
+    defaults:
+      run:
+        working-directory: ./base-services/registration/server
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            base-services/registration/server/target
+          # Caching on key files (Cargo.lock) for effective cache busting
+          key: ${{ runner.os }}-cargo-${{ hashFiles('base-services/registration/server/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Run Rust tests
+        # The `cargo test` command finds and executes all `#[test]` and `#[tokio::test]` functions
+        # relative to the current working directory.
+        run: cargo test

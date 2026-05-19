@@ -10,6 +10,13 @@ on:
         type: string
         default: "local"
         description: "Passes on user decision for the platform's PKI setup"
+      arch:
+        type: choice
+        description: "Target CPU architecture for GKE nodes"
+        options:
+          - arm64
+          - amd64
+        default: "arm64"
       helmAction:
         type: choice
         description: "Sets the action for the helmfile plugin: 'sync' forces an update and 'apply' checks for differences"
@@ -28,6 +35,9 @@ on:
         type: string
         default: "local"
         description: "Passes on user decision for the platform's PKI setup"
+      arch:
+        type: string
+        default: "arm64"
       helmAction:
         type: string
         description: "Sets the action for the helmfile plugin: 'sync' forces an update and 'apply' checks for differences"
@@ -46,7 +56,7 @@ env:
 jobs:
   deploy-keycloak:
     name: Deploy keycloak
-    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-24.04-arm' }}
     environment: ${{ inputs.environment || 'sandbox' }}
 
     steps:
@@ -179,7 +189,7 @@ jobs:
         with:
           helm-version: "v3.19.0"
           helmfile-workdirectory: iac/helm/helmfile.d
-          helmfile-args: --file keycloak.yaml.gotmpl ${{ inputs.helmAction || 'apply' }} --state-values-set pkiStrategy=local --state-values-set baseDomain=""
+          helmfile-args: --file keycloak.yaml.gotmpl ${{ inputs.helmAction || 'apply' }} --state-values-set pkiStrategy=local --state-values-set baseDomain="" --state-values-set arch=${{ inputs.arch || 'arm64' }}
 
       - name: Get Keycloak service IP for local PKI setup
         if: ${{ inputs.pki_strategy == 'local' }}
@@ -348,7 +358,7 @@ jobs:
         with:
           helm-version: "v3.19.0"
           helmfile-workdirectory: iac/helm/helmfile.d
-          helmfile-args: --file keycloak.yaml.gotmpl ${{ inputs.helmAction || 'apply' }} --wait --state-values-set pkiStrategy=${{ inputs.pki_strategy }} --state-values-set baseDomain=${{ env.BASE_DOMAIN }}
+          helmfile-args: --file keycloak.yaml.gotmpl ${{ inputs.helmAction || 'apply' }} --wait --state-values-set pkiStrategy=${{ inputs.pki_strategy }} --state-values-set baseDomain=${{ env.BASE_DOMAIN }} --state-values-set arch=${{ inputs.arch || 'arm64' }}
 
       - name: Force Restart Keycloak to load new Certificates
         if: ${{ inputs.pki_strategy == 'local' }}

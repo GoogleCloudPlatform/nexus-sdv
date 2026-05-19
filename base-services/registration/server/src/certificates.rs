@@ -1,12 +1,15 @@
-use anyhow::Context;
-use std::{fs::File, io::BufReader, sync::Arc};
-
-use rcgen::{Issuer, KeyPair};
-use rustls_pki_types::{CertificateDer, PrivateKeyDer};
+use anyhow::{anyhow, Context}; // provides context() and anyhow!
+use std::fs::File;            // provides File
+use std::io::BufReader;       // provides BufReader
+use std::sync::Arc;           // provides Arc
+use rcgen::{Issuer, KeyPair};  // provides Issuer and KeyPair
+use rustls_pki_types::{CertificateDer, PrivateKeyDer}; // provides types
 
 pub fn read_trusted_client_certificates_ca() -> anyhow::Result<Arc<rustls::RootCertStore>> {
-    let ca_cert_file = &mut BufReader::new(File::open("certificates/trusted-factory-ca.crt.pem")?);
+    let path = std::env::var("TEST_CA_PATH")
+        .unwrap_or_else(|_| "certificates/trusted-factory-ca.crt.pem".to_string());
 
+    let ca_cert_file = &mut BufReader::new(File::open(path)?);
     let ca_certs: Vec<CertificateDer> =
         rustls_pemfile::certs(ca_cert_file).collect::<Result<Vec<_>, _>>()?;
 
@@ -14,35 +17,38 @@ pub fn read_trusted_client_certificates_ca() -> anyhow::Result<Arc<rustls::RootC
     for cert in ca_certs {
         root_store.add(cert)?;
     }
-
-    let trusted_client_store = Arc::new(root_store);
-    Ok(trusted_client_store)
+    Ok(Arc::new(root_store))
 }
 
-pub fn read_server_certificate()
--> anyhow::Result<(Vec<CertificateDer<'static>>, PrivateKeyDer<'static>)> {
-    let server_cert_file = &mut BufReader::new(File::open("certificates/server/server.crt.pem")?);
+pub fn read_server_certificate() -> anyhow::Result<(Vec<CertificateDer<'static>>, PrivateKeyDer<'static>)> {
+    let cert_path = std::env::var("TEST_SERVER_CERT_PATH")
+        .unwrap_or_else(|_| "certificates/server/server.crt.pem".to_string());
+    let key_path = std::env::var("TEST_SERVER_KEY_PATH")
+        .unwrap_or_else(|_| "certificates/server/server.key.pem".to_string());
 
-    let server_cert_chain: Vec<CertificateDer> = rustls_pemfile::certs(server_cert_file)
+    let server_cert_chain: Vec<CertificateDer> = rustls_pemfile::certs(&mut BufReader::new(File::open(cert_path)?))
         .collect::<Result<Vec<_>, _>>()
         .with_context(|| "error reading server certificate file")?;
 
     let server_key: PrivateKeyDer =
-        rustls_pemfile::private_key(&mut BufReader::new(File::open("certificates/server/server.key.pem")?))?
+        rustls_pemfile::private_key(&mut BufReader::new(File::open(key_path)?))?
             .with_context(|| "server private key file not found")?;
 
     Ok((server_cert_chain, server_key))
 }
 
 pub fn read_signing_ca() -> anyhow::Result<Issuer<'static, KeyPair>> {
-    let signing_cert_file = &mut BufReader::new(File::open("certificates/ca/ca.crt.pem")?);
+    let cert_path = std::env::var("TEST_SIGNING_CA_PATH")
+        .unwrap_or_else(|_| "certificates/ca/ca.crt.pem".to_string());
+    let key_path = std::env::var("TEST_SIGNING_KEY_PATH")
+        .unwrap_or_else(|_| "certificates/ca/ca.key.pem".to_string());
 
-    let signing_cert_chain: Vec<CertificateDer> = rustls_pemfile::certs(signing_cert_file)
+    let signing_cert_chain: Vec<CertificateDer> = rustls_pemfile::certs(&mut BufReader::new(File::open(cert_path)?))
         .collect::<Result<Vec<_>, _>>()
         .with_context(|| "error reading signing ca file")?;
 
     let signing_key: PrivateKeyDer =
-        rustls_pemfile::private_key(&mut BufReader::new(File::open("certificates/ca/ca.key.pem")?))?
+        rustls_pemfile::private_key(&mut BufReader::new(File::open(key_path)?))?
             .with_context(|| "signing private key file not found")?;
 
     let signing_key_pair = KeyPair::try_from(&signing_key)

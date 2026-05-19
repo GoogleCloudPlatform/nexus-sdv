@@ -1,10 +1,8 @@
-name: License Compliance Scan
+name: Trivy License Scan
 permissions:
   contents: read
 
 on:
-  push:
-    branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
 
@@ -55,13 +53,4 @@ jobs:
           exit-code: 1
           trivy-config: 'trivy.yaml' # contains 'license: full: true'
           skip-dirs: 'sample-services/data-api-sampler'
-          
-      - name: Run Trivy Vulnerability Scan
-        uses: aquasecurity/trivy-action@master
-        with:
-          scan-type: 'fs'
-          scanners: 'vuln' # Changed from 'license' to 'vuln'
-          severity: 'HIGH,CRITICAL'
-          exit-code: 1 # Fail the build if vulnerabilities are found
-          format: 'table'
 

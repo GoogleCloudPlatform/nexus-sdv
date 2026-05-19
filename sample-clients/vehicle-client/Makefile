@@ -32,16 +32,18 @@ proto: deps
 	@echo "Generating protobuf code from $(PROTO_SOURCE)..."
 	@mkdir -p $(PROTO_OUT_DIR)
 	protoc --proto_path=../../proto --go_out=$(PROTO_OUT_DIR) --go_opt=paths=source_relative telemetry.proto
+	@echo ""
 
-build: proto
-	$(GO) build $(GOFLAGS) -o $(BINARY_NAME) .
-
-downloadcerts: build
+certs: proto
 	mkdir -p certificates
-	gcloud secrets versions access latest --secret="REGISTRATION_SERVER_TLS_CERT" > certificates/REGISTRATION_SERVER_TLS_CERT.pem
-	gcloud secrets versions access latest --secret="KEYCLOAK_TLS_CRT" > certificates/KEYCLOAK_TLS_CRT.pem
 
-run: downloadcerts
+build: certs
+	@echo "Building vehicle client..."
+	$(GO) build $(GOFLAGS) -o $(BINARY_NAME) .
+	@echo ""
+
+run: build
+	@echo "Build complete. Running vehicle client..."
 	./run-vehicle-client.sh
 
 test:
@@ -49,6 +51,5 @@ test:
 
 clean:
 	$(GO) clean
-	rm *.pem
-	rm *.csr
 	rm certificates/*.pem
+	rm certificates/*.csr

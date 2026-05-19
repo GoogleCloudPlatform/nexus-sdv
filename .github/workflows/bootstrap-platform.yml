@@ -13,6 +13,13 @@ on:
           - local
           - remote
         default: "local"
+      arch:
+        description: "Target CPU architecture for GKE nodes"
+        type: choice
+        options:
+          - arm64
+          - amd64
+        default: "arm64"
       base_domain:
         description: "Base Domain (required if pki_strategy is 'remote')"
         type: string
@@ -29,6 +36,7 @@ jobs:
     uses: ./.github/workflows/build-push-deploy-data-api.yml
     with:
       environment: ${{ inputs.environment }}
+      arch: ${{ inputs.arch }}
     secrets: inherit
 
   deploy-external-dns:
@@ -36,6 +44,7 @@ jobs:
     uses: ./.github/workflows/deploy-external-dns.yml
     with:
       environment: ${{ inputs.environment }}
+      arch: ${{ inputs.arch }}
     secrets: inherit
 
   deploy-keycloak:
@@ -43,6 +52,7 @@ jobs:
     with:
       environment: ${{ inputs.environment }}
       pki_strategy: ${{ inputs.pki_strategy }}
+      arch: ${{ inputs.arch }}
     secrets: inherit
 
   deploy-nats:
@@ -51,6 +61,7 @@ jobs:
     with:
       environment: ${{ inputs.environment }}
       pki_strategy: ${{ inputs.pki_strategy }}
+      arch: ${{ inputs.arch }}
     secrets: inherit
 
   deploy-registration:
@@ -59,6 +70,7 @@ jobs:
     with:
       environment: ${{ inputs.environment }}
       pki_strategy: ${{ inputs.pki_strategy }}
+      arch: ${{ inputs.arch }}
     secrets: inherit
 
   deploy-nats-auth-callout: # TODO: remove nats dependency
@@ -66,6 +78,7 @@ jobs:
     needs: [deploy-keycloak, deploy-nats]
     with:
       environment: ${{ inputs.environment }}
+      arch: ${{ inputs.arch }}
     secrets: inherit
 
   deploy-nats-bigtable-connector: # TODO: remove nats dependency
@@ -73,4 +86,5 @@ jobs:
     needs: deploy-nats
     with:
       environment: ${{ inputs.environment }}
+      arch: ${{ inputs.arch }}
     secrets: inherit

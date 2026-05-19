@@ -1,0 +1,105 @@
+{{- if .Values.mosquitto.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "data-converter.fullname" . }}-mosquitto
+  labels:
+    {{- include "data-converter.labels" . | nindent 4 }}
+data:
+  mosquitto.conf: |
+    listener {{ .Values.mosquitto.port }}
+    allow_anonymous false
+    password_file /mosquitto/auth/password_file
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "data-converter.fullname" . }}-mosquitto
+  labels:
+    {{- include "data-converter.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mosquitto
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "data-converter.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: mosquitto
+  template:
+    metadata:
+      labels:
+        {{- include "data-converter.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: mosquitto
+      annotations:
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+    spec:
+      initContainers:
+        - name: create-password-file
+          image: {{ .Values.mosquitto.image }}
+          command: ["sh", "-c"]
+          args:
+            - |
+              touch /auth/password_file
+              mosquitto_passwd -b /auth/password_file "$MQTT_USER" "$MQTT_PASS"
+              chown 1883:1883 /auth/password_file
+              chmod 0700 /auth/password_file
+          env:
+            - name: MQTT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "data-converter.fullname" . }}-credentials
+                  key: MQTT_USER
+            - name: MQTT_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "data-converter.fullname" . }}-credentials
+                  key: MQTT_PASS
+          volumeMounts:
+            - name: auth
+              mountPath: /auth
+      containers:
+        - name: mosquitto
+          image: {{ .Values.mosquitto.image }}
+          ports:
+            - name: mqtt
+              containerPort: {{ .Values.mosquitto.port }}
+              protocol: TCP
+          volumeMounts:
+            - name: config
+              mountPath: /mosquitto/config/mosquitto.conf
+              subPath: mosquitto.conf
+              readOnly: true
+            - name: auth
+              mountPath: /mosquitto/auth
+              readOnly: true
+          resources:
+            requests:
+              cpu: 50m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 64Mi
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "data-converter.fullname" . }}-mosquitto
+        - name: auth
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "data-converter.fullname" . }}-mosquitto
+  labels:
+    {{- include "data-converter.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mosquitto
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.mosquitto.port }}
+      targetPort: mqtt
+      protocol: TCP
+      name: mqtt
+  selector:
+    {{- include "data-converter.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: mosquitto
+{{- end }}

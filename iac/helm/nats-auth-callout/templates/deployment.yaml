@@ -10,7 +10,49 @@ spec:
   template:
     metadata:
       labels: {{ include "nats-callout.selectorLabels" . | nindent 8 }}
+      annotations:
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
     spec:
+      tolerations:
+      - key: "cloud.google.com/compute-class"
+        operator: "Equal"
+        value: "Scale-Out"
+        effect: "NoSchedule"
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: kubernetes.io/arch
+                operator: In
+                values:
+                - {{ .Values.arch | default "arm64" }}
+              - key: cloud.google.com/compute-class
+                operator: In
+                values:
+                - Scale-Out
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              preference:
+                matchExpressions:
+                  - key: cloud.google.com/machine-family
+                    operator: In
+                    values:
+                      - n4a
+            - weight: 90
+              preference:
+                matchExpressions:
+                  - key: cloud.google.com/machine-family
+                    operator: In
+                    values:
+                      - c4a
+            - weight: 80
+              preference:
+                matchExpressions:
+                  - key: cloud.google.com/machine-family
+                    operator: In
+                    values:
+                      - t2a
       containers:
         - name: {{ .Chart.Name }}
           image: "{{ .Values.image.repository }}/nats-auth-callout:{{ .Values.image.tag | default .Chart.AppVersion }}"

@@ -6,9 +6,12 @@ releases:
     labels:
       app: keycloak
     installed: true
+    timeout: 1800  # 30 minutes - allows for ARM64 node provisioning + image pull + Keycloak startup + DB migration
     values:
       - ../keycloak/values.yaml
     set:
+      - name: arch
+        value: {{ .StateValues.arch | default "arm64" }}
       - name: pkiStrategy
         value: {{ .StateValues.pkiStrategy | default "local" }}
       - name: baseDomain

@@ -1,7 +1,7 @@
 resource "google_compute_network" "vpc" {
   name                    = "${var.environment}-vpc"
   auto_create_subnetworks = false
-  depends_on = [google_project_service.project_apis]
+  depends_on              = [google_project_service.project_apis]
 }
 
 resource "google_compute_subnetwork" "subnet" {
@@ -26,7 +26,7 @@ resource "google_compute_global_address" "psc_range" {
   prefix_length = 16
   network       = google_compute_network.vpc.id
 
-  address       = "10.100.0.0"
+  address = "10.100.0.0"
 }
 
 resource "google_service_networking_connection" "psc_connection" {
@@ -52,6 +52,19 @@ resource "google_compute_firewall" "internet" {
   destination_ranges = ["0.0.0.0/0"]
 }
 
+resource "google_compute_firewall" "allow_loadbalancer_ingress" {
+  name    = "allow-lb-ingress"
+  network = google_compute_network.vpc.name
+
+  allow {
+    protocol = "tcp"
+    ports    = ["8080", "8443", "4222"]
+  }
+
+  direction     = "INGRESS"
+  source_ranges = ["0.0.0.0/0"]
+}
+
 resource "google_compute_router" "router" {
   name    = "router"
   region  = google_compute_subnetwork.subnet.region
@@ -73,4 +86,20 @@ resource "google_compute_router_nat" "nat" {
     enable = true
     filter = "ERRORS_ONLY"
   }
+}
+
+output "vpc_name" {
+  value = google_compute_network.vpc.name
+}
+
+output "subnet_name" {
+  value = google_compute_subnetwork.subnet.name
+}
+
+output "router_name" {
+  value = google_compute_router.router.name
+}
+
+output "nat_name" {
+  value = google_compute_router_nat.nat.name
 }

@@ -1,8 +1,3 @@
-# Get the project to access project number
-data "google_project" "current" {
-  project_id = var.project_id
-}
-
 # Construct the default Compute Engine service account email
 locals {
   default_compute_sa = "${data.google_project.current.number}-compute@developer.gserviceaccount.com"
@@ -16,16 +11,16 @@ resource "google_service_account" "gke_nodes" {
 }
 
 resource "google_project_iam_member" "gke_sa_role" {
-  project = var.project_id
-  role    = "roles/container.defaultNodeServiceAccount"
-  member  = "serviceAccount:${local.default_compute_sa}"
+  project    = var.project_id
+  role       = "roles/container.defaultNodeServiceAccount"
+  member     = "serviceAccount:${local.default_compute_sa}"
   depends_on = [google_project_service.project_apis]
 }
 
 resource "google_project_iam_member" "gke_sa_role_artifact" {
-  project = var.project_id
-  role    = "roles/artifactregistry.reader"
-  member  = "serviceAccount:${local.default_compute_sa}"
+  project    = var.project_id
+  role       = "roles/artifactregistry.reader"
+  member     = "serviceAccount:${local.default_compute_sa}"
   depends_on = [google_project_service.project_apis]
 }
 
@@ -41,7 +36,7 @@ resource "google_container_cluster" "gke_cluster" {
   subnetwork = google_compute_subnetwork.subnet.id
 
   deletion_protection = false
-  depends_on = [google_project_service.project_apis]
+  depends_on          = [google_project_service.project_apis]
 
   workload_identity_config {
     workload_pool = "${var.project_id}.svc.id.goog"
@@ -90,4 +85,12 @@ resource "google_container_cluster" "gke_cluster" {
     gcp_public_cidrs_access_enabled = true
   }
 
+}
+
+output "gke_cluster_name" {
+  value = google_container_cluster.gke_cluster.name
+}
+
+output "gke_autopilot_enabled" {
+  value = google_container_cluster.gke_cluster.enable_autopilot
 }

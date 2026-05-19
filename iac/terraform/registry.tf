@@ -6,3 +6,7 @@ resource "google_artifact_registry_repository" "artifact_registry" {
   format        = "DOCKER"
   depends_on    = [google_project_service.project_apis]
 }
+
+output "artifact_registry_id" {
+  value = google_artifact_registry_repository.artifact_registry.repository_id
+}

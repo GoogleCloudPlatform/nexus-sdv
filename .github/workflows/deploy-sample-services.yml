@@ -16,7 +16,6 @@ on:
         default: "sandbox"
 
 
-
 permissions:
   id-token: write
   contents: read
@@ -60,6 +59,9 @@ jobs:
       - name: Docker auth
         run: |-
           gcloud auth configure-docker ${{ env.GAR_LOCATION }}-docker.pkg.dev --quiet
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
       - name: Build and Push Remote Lock Service
         uses: docker/build-push-action@v6
@@ -146,6 +148,9 @@ jobs:
         run: |-
           gcloud auth configure-docker ${{ env.GAR_LOCATION }}-docker.pkg.dev --quiet
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Build and Push Predictive Maintenance service
         uses: docker/build-push-action@v6
         with:
@@ -213,6 +218,9 @@ jobs:
         run: |-
           gcloud auth configure-docker ${{ env.GAR_LOCATION }}-docker.pkg.dev --quiet
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Build and Push VHAL Simulator service
         uses: docker/build-push-action@v6
         with:
@@ -220,8 +228,6 @@ jobs:
           tags: ${{ env.IMAGE_REPO }}/vhal-simulator:latest
           file: ./sample-services/vhal-simulator/Dockerfile
           context: ./sample-services/vhal-simulator
-
-
 
       - name: 'Get Predictive Maintenance URL'
         id: get_pred_url

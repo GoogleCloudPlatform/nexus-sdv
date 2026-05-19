@@ -49,3 +49,70 @@ config:
         - nats://127.0.0.1:4248
     # Authorization configuration is set via helmfile using config.merge.authorization.users
     # This section is intentionally left minimal here and populated by helmfile set directives
+
+natsBox:
+  podTemplate:
+    merge:
+      spec:
+        tolerations:
+        - key: "cloud.google.com/compute-class"
+          operator: "Equal"
+          value: "Scale-Out"
+          effect: "NoSchedule"
+        affinity:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+              - matchExpressions:
+                - key: kubernetes.io/arch
+                  operator: In
+                  values:
+                  - arm64
+                - key: cloud.google.com/compute-class
+                  operator: In
+                  values:
+                  - Scale-Out
+
+podTemplate:
+  merge:
+    spec:
+      tolerations:
+      - key: "cloud.google.com/compute-class"
+        operator: "Equal"
+        value: "Scale-Out"
+        effect: "NoSchedule"
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: kubernetes.io/arch
+                operator: In
+                values:
+                - arm64
+              - key: cloud.google.com/compute-class
+                operator: In
+                values:
+                - Scale-Out
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              preference:
+                matchExpressions:
+                  - key: cloud.google.com/machine-family
+                    operator: In
+                    values:
+                      - n4a
+            - weight: 90
+              preference:
+                matchExpressions:
+                  - key: cloud.google.com/machine-family
+                    operator: In
+                    values:
+                      - c4a
+            - weight: 80
+              preference:
+                matchExpressions:
+                  - key: cloud.google.com/machine-family
+                    operator: In
+                    values:
+                      - t2a

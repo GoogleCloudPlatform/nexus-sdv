@@ -1,6 +1,6 @@
 # --- Stage 1: The Builder ---
 # This stage compiles the Go application into a static binary.
-FROM golang:1.24-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.24-alpine AS builder
 
 # Set the working directory inside the container
 WORKDIR /app
@@ -19,7 +19,8 @@ COPY *.go ./
 # CGO_ENABLED=0 creates a static binary without any C dependencies.
 # -a forces rebuilding of packages that are already up-to-date.
 # -ldflags="-w -s" strips debug symbols and information, reducing the binary size.
-RUN CGO_ENABLED=0 GOOS=linux go build -a -ldflags="-w -s" -o /auth-service .
+ARG TARGETOS TARGETARCH
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -a -ldflags="-w -s" -o /auth-service .
 
 
 # --- Stage 2: The Final Image ---

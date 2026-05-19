@@ -11,7 +11,7 @@ service:
   annotations:
     external-dns.alpha.kubernetes.io/hostname: registration.{{ .Values.baseDomain }}
     external-dns.alpha.kubernetes.io/ttl: "300"
-  port: 8080
+  port: 8443
   httpPort: 8080
   httpsPort: 8443
 

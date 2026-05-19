@@ -58,16 +58,39 @@ Then edit `include/config.h` with your settings:
 | `DEEP_SLEEP_DURATION_S` | `300`   | Deep sleep duration in seconds (5 minutes).                                                                         |
 | `GPS_WAIT_FOR_FIX`      | `false` | Wait for a GPS fix before connecting to NATS. Sends without GPS if the timeout expires.                             |
 | `GPS_FIX_TIMEOUT_S`     | `90`    | Maximum seconds to wait for a GPS fix before sending without it. Set to `0` to wait indefinitely.                   |
+| `TOKEN_CHECK_INTERVAL_MS` | `10000` | How often to re-validate the cached JWT (each check decodes/parses it). Must stay well below `TOKEN_MIN_REMAINING_S * 1000`. |
 
-### 3. Provision certificates
+### 3. Provision certificates and runtime URLs
 
-Place the operational certificates (obtained from the external registration program) into `data/certs/`:
+On boot the firmware loads the operational certificates and (optionally) a `urls.json` from LittleFS:
 
 ```
 data/certs/operational.crt.pem   # Operational certificate
 data/certs/operational.key.pem   # Operational private key
 data/certs/ca.crt.pem            # CA certificate (for Keycloak TLS verification)
+data/urls.json                   # Keycloak and NATS URLs (overrides config.h defaults)
 ```
+
+The `urls.json` has the form:
+
+```json
+{
+  "keycloak_url": "https://keycloak.example.com:8443",
+  "nats_url": "nats://nats.example.com:4222"
+}
+```
+
+The standard way to produce all of these is the [devices client](../devices/README.md), which registers the device against the platform and writes both the certificates (into `certs/`) and `urls.json` into its output directory.
+Point its `-output` flag at this client's `data/` directory so everything lands in the expected layout:
+
+```bash
+cd ../devices
+uv run main.py -output ../iot-client/data
+```
+
+`make uploadfs` (see next step) then flashes the whole `data/` tree to the ESP32.
+
+If `/urls.json` is missing or malformed, the firmware falls back to the `KEYCLOAK_URL` and `NATS_URL` compile-time defaults from `config.h`.
 
 ### 4. Upload filesystem and firmware
 
@@ -93,6 +116,14 @@ make nats
 This runs `docker compose up` with two services: a NATS server (port 4222) and a subscriber that auto-decodes and prints telemetry messages as JSON.
 
 Set `SKIP_KEYCLOAK_AUTH` to `true` in your `config.h` to skip certificate loading and authentication when using a local NATS server.
+
+#### NATS monitoring
+
+The NATS server exposes an HTTP monitoring endpoint:
+
+- [http://localhost:8222/connz](http://localhost:8222/connz) — active connections
+- [http://localhost:8222/subsz](http://localhost:8222/subsz) — subscriptions
+- [http://localhost:8222/varz](http://localhost:8222/varz) — server statistics
 
 ## Lifecycle
 
@@ -134,7 +165,6 @@ Expected output on successful run:
 [FS] Loaded /certs/ca.crt.pem (1234 bytes)
 [Main] Step 4/5: Getting JWT from Keycloak...
 [Auth] Token acquired (expires in 300 s).
-[Main] Token valid for 300 s.
 [Main] Step 5/5: Connecting to NATS...
 [NATS] Connected and authenticated.
 [Telemetry] Published 160 bytes to telemetry.prod.bigtable.DEVICE001

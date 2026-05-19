@@ -67,7 +67,7 @@ if [ -z "$PKI_STRATEGY_VALUE" ]; then
     echo "Examples:"
     echo "  $0 local"
     echo "  $0 remote VEHICLE001"
-    echo "  $0 local VEHICLE001 https://registration.sdv-lal.com:8080 10"
+    echo "  $0 local VEHICLE001 https://registration.sdv-lal.com:8443 10"
     exit 1
 fi
 
@@ -77,9 +77,9 @@ if [ "$PKI_STRATEGY_VALUE" != "local" ] && [ "$PKI_STRATEGY_VALUE" != "remote" ]
 fi
 
 if [ "$PKI_STRATEGY_VALUE" = "remote" ]; then
-    REGISTRATION_URL_VALUE="${REGISTRATION_URL_PARAM:-"https://${REGISTRATION_HOSTNAME}.${BASE_DOMAIN}:8080"}"
+    REGISTRATION_URL_VALUE="${REGISTRATION_URL_PARAM:-"https://${REGISTRATION_HOSTNAME}.${BASE_DOMAIN}:8443"}"
 else
-    REGISTRATION_URL_VALUE="${REGISTRATION_URL_PARAM:-"https://${REGISTRATION_HOSTNAME}:8080"}"
+    REGISTRATION_URL_VALUE="${REGISTRATION_URL_PARAM:-"https://${REGISTRATION_HOSTNAME}:8443"}"
 fi
 
 
@@ -96,7 +96,7 @@ echo ""
 echo "Step 1: Generating factory certificate..."
 
 # Define the output path for the certificates
-CERT_DIR="${SCRIPT_DIR}"
+CERT_DIR="${SCRIPT_DIR}/certificates"
 
 if [ "$PKI_STRATEGY_VALUE" = "local" ]; then
     echo "Using local PKI (generate-factory-cert.sh)..."

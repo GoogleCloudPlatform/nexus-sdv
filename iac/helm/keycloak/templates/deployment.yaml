@@ -15,6 +15,46 @@ spec:
 {{ include "keycloak.selectorLabels" . | indent 8 }}
     spec:
       serviceAccountName: keycloak-ksa
+      tolerations:
+      - key: "cloud.google.com/compute-class"
+        operator: "Equal"
+        value: "Scale-Out"
+        effect: "NoSchedule"
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: kubernetes.io/arch
+                operator: In
+                values:
+                - {{ .Values.arch | default "arm64" }}
+              - key: cloud.google.com/compute-class
+                operator: In
+                values:
+                - Scale-Out
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            preference:
+              matchExpressions:
+              - key: cloud.google.com/machine-family
+                operator: In
+                values:
+                - c4a
+          - weight: 90
+            preference:
+              matchExpressions:
+                - key: cloud.google.com/machine-family
+                  operator: In
+                  values:
+                    - c4a
+          - weight: 80
+            preference:
+              matchExpressions:
+                - key: cloud.google.com/machine-family
+                  operator: In
+                  values:
+                  - t2a
       initContainers:
         - name: import-ca-certs
           image: "eclipse-temurin:21-jre-alpine"
@@ -95,6 +135,8 @@ spec:
               value: "20"
             - name: KC_DB_URL_PROPERTIES
               value: "?tcpKeepAlive=true&socketTimeout=60&connectTimeout=10&loginTimeout=10"
+            - name: KC_HTTPS_PROTOCOLS
+              value: "TLSv1.3,TLSv1.2"
             {{- end }}
           ports:
             - name: http
@@ -109,8 +151,8 @@ spec:
               port: 9000
               scheme: HTTP
             periodSeconds: 10
-            failureThreshold: 60
-            initialDelaySeconds: 60
+            failureThreshold: 120
+            initialDelaySeconds: 30
             timeoutSeconds: 5
           livenessProbe:
             httpGet:

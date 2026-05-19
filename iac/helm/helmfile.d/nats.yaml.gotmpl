@@ -13,6 +13,11 @@ releases:
     installed: true
     values:
       - ../nats/values.yaml
+      - podTemplate:
+          merge:
+            metadata:
+              annotations:
+                checksum/auth-callout-password: '{{ requiredEnv "NATS_AUTH_CALLOUT_PASSWORD" | sha256sum }}'
       # Inline values to properly structure authorization config
       - config:
           merge:
@@ -39,6 +44,14 @@ releases:
                     subscribe:
                       - "telemetry.>"
                     publish: []
+                {{- if env "NATS_DATA_CONVERTER_PASSWORD" }}
+                - user: data-converter
+                  password: '{{ env "NATS_DATA_CONVERTER_PASSWORD" }}'
+                  permissions:
+                    subscribe: []
+                    publish:
+                      - "telemetry.>"
+                {{- end }}
               auth_callout:
                 issuer: '{{ requiredEnv "NATS_AUTH_CALLOUT_NKEY_PUB" }}'
                 # auth_users lists users who BYPASS the callout (authenticate directly)
@@ -47,8 +60,15 @@ releases:
                   - auth-callout-service                      # Auth service bypasses to respond to requests
                   - connector                                 # Connector authenticates directly with password
                   - '{{ requiredEnv "NATS_BASIC_AUTH_USER" }}' # Basic auth user bypasses callout
+                  {{- if env "NATS_DATA_CONVERTER_PASSWORD" }}
+                  - data-converter                            # Data converter authenticates directly with password
+                  {{- end }}
                 account: AUTH
     set:
+      - name: "podTemplate.merge.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0].matchExpressions[0].values[0]"
+        value: {{ .StateValues.arch | default "arm64" }}
+      - name: "natsBox.podTemplate.merge.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0].matchExpressions[0].values[0]"
+        value: {{ .StateValues.arch | default "arm64" }}
       - name: pkiStrategy
         value: {{ .StateValues.pkiStrategy | default "local" }}
       {{- if eq $pki_strategy "remote" }}
@@ -73,6 +93,12 @@ releases:
         value: 'connector'
       - name: natsUsers.connector.password
         value: '{{ requiredEnv "NATS_CONNECTOR_PASSWORD" }}'
+      {{- if env "NATS_DATA_CONVERTER_PASSWORD" }}
+      - name: natsUsers.dataConverter.username
+        value: 'data-converter'
+      - name: natsUsers.dataConverter.password
+        value: '{{ env "NATS_DATA_CONVERTER_PASSWORD" }}'
+      {{- end }}
       - name: environment
         value: '{{ env "ENVIRONMENT" | default "dev" }}'
     {{- if eq $pki_strategy "remote" }}

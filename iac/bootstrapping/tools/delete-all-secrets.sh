@@ -14,7 +14,26 @@ COLOR_YELLOW='\033[1;33m'
 COLOR_GREEN='\033[0;32m'
 COLOR_NC='\033[0m'
 
-PROJECT_ID="horizon-sdv-lal"
+# Determine project ID from .bootstrap_env, gcloud config, or command-line argument
+if [ -n "${1:-}" ]; then
+    PROJECT_ID="$1"
+elif [ -f "iac/bootstrapping/.bootstrap_env" ]; then
+    # shellcheck source=/dev/null
+    source "iac/bootstrapping/.bootstrap_env"
+    PROJECT_ID="${GCP_PROJECT_ID:-}"
+fi
+
+if [ -z "${PROJECT_ID:-}" ]; then
+    PROJECT_ID=$(gcloud config get-value project 2>/dev/null || echo "")
+fi
+
+if [ -z "${PROJECT_ID:-}" ]; then
+    echo -e "${COLOR_RED}ERROR: Could not determine project ID.${COLOR_NC}"
+    echo "Usage: $0 [PROJECT_ID]"
+    echo "Or set it via: gcloud config set project <PROJECT_ID>"
+    echo "Or ensure iac/bootstrapping/.bootstrap_env exists with GCP_PROJECT_ID set."
+    exit 1
+fi
 
 echo -e "${COLOR_RED}========================================${COLOR_NC}"
 echo -e "${COLOR_RED}  WARNING: DESTRUCTIVE OPERATION${COLOR_NC}"

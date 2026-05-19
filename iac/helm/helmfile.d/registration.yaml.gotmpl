@@ -5,6 +5,7 @@ releases:
     chart: ../registration
     values:
       - ../registration/values.yaml
+      - arch: {{ .StateValues.arch | default "arm64" }}
       - image:
           repository: '{{ requiredEnv "IMAGE_REPO" }}'
           tag: '{{ .StateValues.image.tag | default "latest" }}'

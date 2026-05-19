@@ -5,3 +5,4 @@ pub use tls::TlsConnectInfo;
 pub use tls_listener::ReloadableTlsListener;
 pub use tls_listener::TlsListenerClientCertificate;
 pub use tls_listener::VehicleInfoHolder;
+pub use tls_listener::ClientCertInfo;
