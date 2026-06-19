@@ -5,7 +5,7 @@ description = "Simple SDK with some telemetry examples"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "cryptography>=46.0.2",
+    "cryptography>=48.0.1",
     "grpcio-tools>=1.71.0",
     "fastapi>=0.129.0",
     "kuksa-client>=0.4.3",
