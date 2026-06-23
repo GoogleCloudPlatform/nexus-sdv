@@ -1,0 +1,154 @@
+# =============================================================================
+# test-environments.yaml — Sequential bootstrap → teardown cycle
+#
+# For every .bootstrap_env file found in a GCS directory, runs:
+#   1. bootstrap-platform.yaml   (spin up the environment)
+#   2. teardown-platform.yaml    (tear it down)
+#
+# Execution is strictly sequential — one environment at a time. Any child
+# build failure causes this build to stop immediately (gcloud builds submit
+# exits non-zero, which propagates through set -euo pipefail).
+#
+# Intended use: CI integration test across multiple environment configurations,
+# verifying that bootstrap and teardown work end-to-end for each.
+#
+# Run manually:
+#   gcloud builds submit . \
+#     --config=iac/cloudbuild/test-environments.yaml \
+#     --project=<PROJECT_ID> \
+#     --region=<REGION> \
+#     --substitutions=_BOOTSTRAP_ENVS_DIR=gs://<PROJECT_ID>-bootstrap-envs/
+#
+# Required substitutions:
+#   _BOOTSTRAP_ENVS_DIR  GCS path to a directory containing .bootstrap_env
+#                        files (e.g. gs://my-project-bootstrap-envs/).
+#                        Every *.bootstrap_env object in that path is processed.
+#
+# Optional substitutions:
+#   _PRESERVE_CAS        Y = keep CA pools after teardown (default: N — delete)
+#   _PRESERVE_DNS        Y = keep DNS zone after teardown (default: N — delete)
+#
+# NOTE: All shell variables inside args blocks must be written as $$VAR so
+# that Cloud Build does not try to expand them as substitution variables.
+# Only ${_SUBSTITUTION_NAME} (leading underscore) are valid Cloud Build
+# substitutions; everything else must be escaped.
+# =============================================================================
+
+steps:
+  - id: 'test-all-environments'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        set -euo pipefail
+
+        # -----------------------------------------------------------------------
+        # Resolve the GCS directory.
+        # Strip any stray whitespace / newlines that the Cloud Build trigger UI
+        # can inject when a substitution value is entered manually, then ensure
+        # a trailing slash for gsutil ls.
+        # -----------------------------------------------------------------------
+        ENVS_DIR=$$(printf '%s' "${_BOOTSTRAP_ENVS_DIR}" | tr -d '[:space:]')
+        [ -z "$$ENVS_DIR" ] && { echo "::error::_BOOTSTRAP_ENVS_DIR is empty"; exit 1; }
+        case "$$ENVS_DIR" in
+          */) ;;
+          *)  ENVS_DIR="$${ENVS_DIR}/" ;;
+        esac
+
+        # -----------------------------------------------------------------------
+        # List all .bootstrap_env files in the directory
+        # -----------------------------------------------------------------------
+        echo "Listing .bootstrap_env files in $$ENVS_DIR..."
+        # Exclude the directory entry itself (ends with /) — all other
+        # objects in the directory are treated as environment files.
+        FILES=$$(gsutil ls "$$ENVS_DIR" 2>/dev/null \
+          | grep -v '/$' \
+          || true)
+
+        if [ -z "$$FILES" ]; then
+          echo "::error::No .bootstrap_env files found in $$ENVS_DIR"
+          exit 1
+        fi
+
+        FILE_COUNT=$$(echo "$$FILES" | wc -l | tr -d ' ')
+        echo "Found $$FILE_COUNT environment file(s):"
+        echo "$$FILES"
+        echo ""
+
+        # -----------------------------------------------------------------------
+        # Process each environment file sequentially.
+        # 'set -e' propagates any child-build failure immediately.
+        # -----------------------------------------------------------------------
+        CURRENT=0
+        for ENV_PATH in $$FILES; do
+          CURRENT=$$((CURRENT + 1))
+          echo "=========================================================="
+          echo "  [$$CURRENT/$$FILE_COUNT] Environment: $$ENV_PATH"
+          echo "=========================================================="
+          echo ""
+
+          # Download and source the env file to obtain GCP_PROJECT_ID / GCP_REGION
+          mkdir -p /tmp/envs
+          gsutil cp "$$ENV_PATH" /tmp/envs/current.bootstrap_env
+          # shellcheck source=/dev/null
+          source /tmp/envs/current.bootstrap_env
+
+          echo "  Project : $$GCP_PROJECT_ID"
+          echo "  Region  : $$GCP_REGION"
+          echo ""
+
+          # ------------------------------------------------------------------
+          # Step 1 of 2: Bootstrap
+          # ------------------------------------------------------------------
+          echo "  [1/2] Submitting bootstrap-platform..."
+          gcloud builds submit . \
+            --config=iac/cloudbuild/bootstrap-platform.yaml \
+            --project="$$GCP_PROJECT_ID" \
+            --region="$$GCP_REGION" \
+            --timeout=7200 \
+            --substitutions=^::^_BOOTSTRAP_ENV_GCS_PATH=$$ENV_PATH
+          echo "  [1/2] Bootstrap complete."
+          echo ""
+
+          sleep 3600
+        
+          # ------------------------------------------------------------------
+          # Step 2 of 2: Teardown
+          # ------------------------------------------------------------------
+          echo "  [2/2] Submitting teardown-platform..."
+          gcloud builds submit . \
+            --config=iac/cloudbuild/teardown-platform.yaml \
+            --project="$$GCP_PROJECT_ID" \
+            --region="$$GCP_REGION" \
+            --timeout=7200 \
+            --substitutions=^::^_BOOTSTRAP_ENV_GCS_PATH=$$ENV_PATH::_PRESERVE_CAS=${_PRESERVE_CAS}::_PRESERVE_DNS=${_PRESERVE_DNS}
+          echo "  [2/2] Teardown complete."
+          echo ""
+
+          echo "  ✓ [$$CURRENT/$$FILE_COUNT] $$ENV_PATH: cycle successful."
+          echo ""
+        
+          sleep 3600
+      
+        done
+
+        echo "=========================================================="
+        echo "  All $$FILE_COUNT environment(s) processed successfully."
+        echo "=========================================================="
+
+# =============================================================================
+# SUBSTITUTIONS & OPTIONS
+# =============================================================================
+substitutions:
+  _BOOTSTRAP_ENVS_DIR: ''   # required — GCS directory containing .bootstrap_env files
+  _PRESERVE_CAS: 'N'        # N = delete CA pools during teardown (full clean cycle)
+  _PRESERVE_DNS: 'N'        # N = delete DNS zone during teardown (full clean cycle)
+
+# 24 h ceiling — accommodates many sequential environments, each taking ~3 h
+timeout: '86400s'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  substitutionOption: 'ALLOW_LOOSE'
+  machineType: 'E2_HIGHCPU_8'

@@ -19,6 +19,16 @@ source "$(dirname "$0")/lib/terraform.sh"
 source "$(dirname "$0")/lib/secrets.sh"
 source "$(dirname "$0")/lib/deployment.sh"
 
+# Override check_prerequisites: teardown does not use 'nk' (NATS key generation
+# is only needed during bootstrap), so we exclude it from the required tool list.
+check_prerequisites() {
+    local tools=("gcloud" "terraform" "openssl" "jq" "sed")
+    if [ "$DEPLOY_MODE" == "github" ]; then
+        tools+=("gh")
+    fi
+    check_tools "${tools[@]}"
+}
+
 # --- Parse command line arguments ---
 AUTO_APPROVE=false
 
@@ -69,31 +79,55 @@ confirm_resource_preservation() {
             log_warn "  ${FOLLOWING} DNS Zone will be deleted"
         fi
     else
-        # Auto-approve mode: use defaults (keep all)
-        PRESERVE_SERVER_CA=Y
-        PRESERVE_FACTORY_CA=Y
-        PRESERVE_REG_CA=Y
-        PRESERVE_DNS=Y
-        log_warn "Using defaults: All resources will be preserved"
-        log_info ""
+        # Auto-approve mode: respect env var overrides, default to preserve (Y)
+        PRESERVE_SERVER_CA=${PRESERVE_SERVER_CA:-Y}
+        PRESERVE_FACTORY_CA=${PRESERVE_FACTORY_CA:-Y}
+        PRESERVE_REG_CA=${PRESERVE_REG_CA:-Y}
+        PRESERVE_DNS=${PRESERVE_DNS:-Y}
+        log_info "Resource preservation (override via env vars):"
+        log_info "  PRESERVE_SERVER_CA=${PRESERVE_SERVER_CA}"
+        log_info "  PRESERVE_FACTORY_CA=${PRESERVE_FACTORY_CA}"
+        log_info "  PRESERVE_REG_CA=${PRESERVE_REG_CA}"
+        log_info "  PRESERVE_DNS=${PRESERVE_DNS}"
     fi
 }
 
 delete_gke_cluster() {
       GKE_CLUSTER_NAME="${ENV}-gke"
       add_delay_if_run_in_cloudshell
-      if gcloud container clusters describe "$GKE_CLUSTER_NAME" --region "$GCP_REGION" --project "$GCP_PROJECT_ID" &> /dev/null; then
-          log_info "GKE Cluster '$GKE_CLUSTER_NAME' found."
-          log_info "Attempting to delete cluster via GCloud API to terminate workloads..."
-
-          if ! gcloud container clusters delete "$GKE_CLUSTER_NAME" --region "$GCP_REGION" --project "$GCP_PROJECT_ID" --quiet; then
-              log_error "WARNING: Could not trigger cluster deletion."
-              log_info "This may cause issues with Terraform destroy. Consider deleting manually."
-          else
-              log_info "Cluster deletion completed successfully."
-          fi
-      else
+      if ! gcloud container clusters describe "$GKE_CLUSTER_NAME" --region "$GCP_REGION" --project "$GCP_PROJECT_ID" &> /dev/null; then
           log_info "GKE Cluster '$GKE_CLUSTER_NAME' not found. Assuming it's already gone."
+          echo ""
+          return 0
+      fi
+
+      log_info "GKE Cluster '$GKE_CLUSTER_NAME' found."
+
+      # Wait for any in-progress operations (e.g. a previous delete attempt or
+      # node-pool scaling) before issuing a new delete request. GKE returns 400
+      # if a new operation is submitted while one is already running.
+      local MAX_WAIT=300 WAITED=0
+      while true; do
+          PENDING_OPS=$(gcloud container operations list \
+              --region "$GCP_REGION" \
+              --project "$GCP_PROJECT_ID" \
+              --filter="status=RUNNING AND targetLink~$GKE_CLUSTER_NAME" \
+              --format="value(name)" 2>/dev/null || true)
+          [ -z "$PENDING_OPS" ] && break
+          if [ "$WAITED" -ge "$MAX_WAIT" ]; then
+              log_warn "Timed out waiting for in-progress operations on '$GKE_CLUSTER_NAME'. Proceeding anyway..."
+              break
+          fi
+          log_info "  Waiting for in-progress operation(s) on '$GKE_CLUSTER_NAME' to complete..."
+          sleep 15
+          WAITED=$((WAITED + 15))
+      done
+
+      log_info "Attempting to delete cluster via GCloud API to terminate workloads..."
+      if ! gcloud container clusters delete "$GKE_CLUSTER_NAME" --region "$GCP_REGION" --project "$GCP_PROJECT_ID" --quiet; then
+          log_warn "WARNING: Could not trigger cluster deletion — Terraform destroy will attempt it."
+      else
+          log_info "Cluster deletion completed successfully."
       fi
       echo ""
 }
@@ -202,12 +236,98 @@ cleanup_database() {
     echo ""
 }
 
+force_delete_ca_pool() {
+    local pool="$1"
+    echo "Checking CA pool '$pool'..."
+
+    # Check if pool exists
+    if gcloud privateca pools describe "$pool" --location="$GCP_REGION" --project="$GCP_PROJECT_ID" &>/dev/null; then
+        echo "Found CA pool '$pool'. Checking for certificates..."
+
+        # List all certificates in the pool
+        CERTS=$(gcloud privateca certificates list \
+            --issuer-pool="$pool" \
+            --issuer-location="$GCP_REGION" \
+            --project="$GCP_PROJECT_ID" \
+            --format="value(name)" 2>/dev/null || echo "")
+
+        if [ -n "$CERTS" ]; then
+            echo "Deleting certificates from pool '$pool'..."
+            for cert in $CERTS; do
+                echo "  - Deleting certificate: $cert"
+                gcloud privateca certificates delete "$cert" \
+                    --issuer-pool="$pool" \
+                    --issuer-location="$GCP_REGION" \
+                    --project="$GCP_PROJECT_ID" \
+                    --quiet || true
+            done
+        else
+            echo "No certificates found in pool '$pool'."
+        fi
+
+        # Now delete the CA itself
+        echo "Checking for CAs in pool '$pool'..."
+        CAS=$(gcloud privateca roots list \
+            --pool="$pool" \
+            --location="$GCP_REGION" \
+            --project="$GCP_PROJECT_ID" \
+            --format="value(name)" 2>/dev/null || echo "")
+
+        if [ -n "$CAS" ]; then
+            echo "Deleting CAs from pool '$pool'..."
+            for ca in $CAS; do
+                # Extract just the CA ID from the full resource name
+                CA_ID=$(basename "$ca")
+                echo "  - Disabling CA: $CA_ID"
+                gcloud privateca roots disable "$CA_ID" \
+                    --pool="$pool" \
+                    --location="$GCP_REGION" \
+                    --project="$GCP_PROJECT_ID" \
+                    --quiet 2>&1 || echo "    (already disabled or error)"
+
+                echo "  - Force deleting CA: $CA_ID"
+                if gcloud privateca roots delete "$CA_ID" \
+                    --pool="$pool" \
+                    --location="$GCP_REGION" \
+                    --project="$GCP_PROJECT_ID" \
+                    --skip-grace-period \
+                    --ignore-active-certificates \
+                    --quiet 2>&1; then
+                    echo "    ✓ CA deleted successfully"
+                else
+                    echo "    ✗ CA deletion failed - may need manual cleanup"
+                fi
+            done
+
+            # Wait longer for CA deletion to fully process
+            echo "  - Waiting 30 seconds for CA deletion to fully process..."
+            sleep 30
+        else
+            echo "No CAs found in pool '$pool'."
+        fi
+
+        # Now force delete the pool itself
+        echo "Force deleting CA pool '$pool'..."
+        if gcloud privateca pools delete "$pool" \
+            --location="$GCP_REGION" \
+            --project="$GCP_PROJECT_ID" \
+            --quiet 2>&1; then
+            echo "  ✓ Pool '$pool' deleted successfully"
+        else
+            echo "  ✗ Pool '$pool' deletion failed - may already be deleted or still processing"
+            echo "    Attempting to list remaining resources in pool..."
+            gcloud privateca roots list --pool="$pool" --location="$GCP_REGION" --project="$GCP_PROJECT_ID" 2>&1 || true
+        fi
+    else
+        echo "CA pool '$pool' not found. Skipping."
+    fi
+}
 
 main() {
     log_text "=================================================================="
     log_text "===                  Nexus SDV Platform Teardown               ==="
     log_text "=================================================================="
-    parse_arguments
+    parse_arguments "$@"
     load_bootstrap_env
     # Step 0: Environment Detection
     (( ++i ))

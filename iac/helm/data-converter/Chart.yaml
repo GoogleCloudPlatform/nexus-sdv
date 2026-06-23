@@ -1,0 +1,9 @@
+apiVersion: v2
+name: data-converter
+description: >
+  Converts telemetry data from IoT protocols (MQTT) into the Nexus Protobuf format
+  and publishes it to NATS. This is an optional service — deployed manually, not part
+  of the platform bootstrap.
+type: application
+version: 0.1.0
+appVersion: "latest"

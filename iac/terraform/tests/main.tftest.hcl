@@ -6,7 +6,7 @@ variables {
   zone                  = "europe-west3-a"
   environment           = "sandbox"
   repository            = "https://github.com/DE-Nexus-SDV/valtech-sdv-sandbox.git"
-  random_suffix         = "test-suffix"
+  deployment_suffix     = "test-suffix"
   github_org            = "DE-Nexus-SDV"
   keycloak_hostname     = "keycloak"
   nats_hostname         = "nats"

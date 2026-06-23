@@ -1,0 +1,49 @@
+image:
+  repository: ""  # e.g. europe-west1-docker.pkg.dev/my-project/artifact-registry/data-converter
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+config:
+  logLevel: "info"
+  nats:
+    url: "nats://nats:4222"
+  mqtt:
+    broker: "tcp://mqtt.customer.example.com:1883"
+    clientId: "nexus-data-converter"
+    bufferSize: 1000
+  converters:
+    - name: telemetry-sensors
+      source:
+        adapter: mqtt
+        topic: "telemetry/+/sensors/#"
+        qos: 1
+      mapping:
+        device_id: '{{ seg .topic 1 }}'
+        sensors:
+          - sensor: '{{ jsonpath .payload "name" }}'
+            value: '{{ jsonpath .payload "value" }}'
+            data_type: DYNAMIC
+      target:
+        subject_prefix: "prod.bigtable"
+        subject_pattern: 'telemetry.{{ .subject_prefix }}.{{ .device_id }}.{{ .sensor }}'
+
+secrets:
+  natsUser: ""
+  natsPassword: ""
+  mqttUser: ""
+  mqttPassword: ""
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+# Optional built-in MQTT broker for demo/testing.
+# When enabled, the data-converter connects to this broker instead of an external one.
+mosquitto:
+  enabled: false
+  image: eclipse-mosquitto:2
+  port: 1883

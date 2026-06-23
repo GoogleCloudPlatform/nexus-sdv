@@ -165,10 +165,13 @@ func parseTimestampFromRowKey(key string) (time.Time, bool) {
 	// Extract the timestamp part of the string.
 	timestampStr := key[lastHashIndex+1:]
 
-	// Parse the string using the global format.
+	// Try the canonical nanosecond format first, then RFC3339Nano (strips trailing
+	// zeros) to handle rows written with microsecond-precision timestamps.
 	ts, err := time.Parse(TimestampFormat, timestampStr)
 	if err != nil {
-		// The string after the '#' was not a valid timestamp.
+		ts, err = time.Parse(time.RFC3339Nano, timestampStr)
+	}
+	if err != nil {
 		return time.Time{}, false
 	}
 

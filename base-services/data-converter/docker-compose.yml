@@ -1,0 +1,44 @@
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./config/mosquitto.conf:/mosquitto/config/mosquitto.conf
+
+  nats:
+    image: nats:latest
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    # add --debug for Debug-Level Logging
+    # add --V for Trace-Level Logging
+    command: ["-m", "8222"]
+
+  data-converter:
+    build: .
+    restart: on-failure
+    depends_on:
+      nats:
+        condition: service_started
+      mosquitto:
+        condition: service_started
+    environment:
+      - CONFIG_PATH=/config/config.yaml
+      - MQTT_HOST=mosquitto
+      - NATS_HOST=nats
+      - MQTT_USER=${MQTT_USER:-}
+      - MQTT_PASS=${MQTT_PASS:-}
+      - NATS_TOKEN=${NATS_TOKEN:-}
+    volumes:
+      - ./config/config.yaml:/config/config.yaml:ro
+
+  nats-subscriber:
+    build:
+      context: ../../
+      dockerfile: tools/nats-subscriber/Dockerfile
+    depends_on:
+      - nats
+    environment:
+      - NATS_URL=nats://nats:4222
+      - SUBJECT=telemetry.>

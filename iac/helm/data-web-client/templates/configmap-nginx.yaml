@@ -1,0 +1,36 @@
+{{- if eq .Values.pkiStrategy "remote" }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "data-web-client.fullname" . }}-nginx
+  labels:
+    {{- include "data-web-client.labels" . | nindent 4 }}
+data:
+  nginx.conf: |
+    events {}
+    http {
+      server {
+        listen 443 ssl;
+        ssl_certificate     /etc/nginx/tls/tls.crt;
+        ssl_certificate_key /etc/nginx/tls/tls.key;
+        location /api/scoring/stream {
+          proxy_pass         http://localhost:3000;
+          proxy_set_header   Host              $host;
+          proxy_set_header   X-Real-IP         $remote_addr;
+          proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+          proxy_set_header   X-Forwarded-Proto https;
+          proxy_buffering    off;
+          proxy_cache        off;
+          proxy_read_timeout 24h;
+          chunked_transfer_encoding on;
+        }
+        location / {
+          proxy_pass         http://localhost:3000;
+          proxy_set_header   Host              $host;
+          proxy_set_header   X-Real-IP         $remote_addr;
+          proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+          proxy_set_header   X-Forwarded-Proto https;
+        }
+      }
+    }
+{{- end }}

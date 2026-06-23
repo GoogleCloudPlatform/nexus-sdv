@@ -1,0 +1,91 @@
+# =============================================================================
+# teardown-platform.yaml
+#
+# Destroys an existing Nexus SDV environment without running
+# teardown-platform.sh locally. Configuration is loaded from a .bootstrap_env
+# file stored in GCS — the same file used to bootstrap the environment.
+#
+# Trigger (example):
+#   gcloud builds submit . \
+#     --config=iac/cloudbuild/teardown-platform.yaml \
+#     --project=<PROJECT_ID> \
+#     --region=<REGION> \
+#     --substitutions=_BOOTSTRAP_ENV_GCS_PATH=gs://<PROJECT_ID>-bootstrap-envs/sandbox.bootstrap_env
+#
+# Or trigger from the GCP console via the 'teardown-platform' manual trigger
+# (created by iac/bootstrapping/tools/setup-cloudbuild-triggers.sh).
+#
+# To delete CA pools / DNS instead of preserving them (remote PKI only), add:
+#   _PRESERVE_CAS=N,_PRESERVE_DNS=N
+#
+# Required substitutions : _BOOTSTRAP_ENV_GCS_PATH
+# Optional substitutions : _PRESERVE_CAS (default Y), _PRESERVE_DNS (default Y)
+# =============================================================================
+
+steps:
+  - id: 'teardown-platform'
+    name: 'gcr.io/cloud-builders/gcloud'
+    entrypoint: 'bash'
+    env:
+      - 'PRESERVE_SERVER_CA=${_PRESERVE_CAS}'
+      - 'PRESERVE_FACTORY_CA=${_PRESERVE_CAS}'
+      - 'PRESERVE_REG_CA=${_PRESERVE_CAS}'
+      - 'PRESERVE_DNS=${_PRESERVE_DNS}'
+    args:
+      - '-c'
+      - |
+        set -euo pipefail
+
+        # -----------------------------------------------------------------------
+        # Download .bootstrap_env from GCS
+        # -----------------------------------------------------------------------
+        echo "Downloading bootstrap config from ${_BOOTSTRAP_ENV_GCS_PATH}..."
+        gsutil cp "${_BOOTSTRAP_ENV_GCS_PATH}" iac/bootstrapping/.bootstrap_env
+        echo "Config loaded."
+
+        # -----------------------------------------------------------------------
+        # Install Terraform
+        # -----------------------------------------------------------------------
+        apt-get update -q
+        apt-get install -y -q gnupg software-properties-common wget unzip lsb-release jq
+        wget -qO- https://apt.releases.hashicorp.com/gpg \
+          | gpg --dearmor \
+          | tee /usr/share/keyrings/hashicorp-archive-keyring.gpg > /dev/null
+        echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] \
+          https://apt.releases.hashicorp.com $(lsb_release -cs) main" \
+          | tee /etc/apt/sources.list.d/hashicorp.list
+        apt-get update -q && apt-get install -y -q terraform
+        echo "Terraform $(terraform version | head -1)"
+
+        # -----------------------------------------------------------------------
+        # Run teardown in non-interactive mode
+        # -----------------------------------------------------------------------
+        bash iac/bootstrapping/teardown-platform.sh --yes
+
+        # -----------------------------------------------------------------------
+        # Clear DEPLOYMENT_SUFFIX from the env file and write it back to GCS.
+        # WIF pools and CA pools have recovery/pending-deletion periods; the old
+        # names cannot be reused until those periods expire. Clearing the suffix
+        # ensures the next bootstrap generates fresh names instead of colliding
+        # with resources still in their recovery period.
+        # -----------------------------------------------------------------------
+        echo "Clearing DEPLOYMENT_SUFFIX from bootstrap config..."
+        sed -i '/^DEPLOYMENT_SUFFIX=/d' iac/bootstrapping/.bootstrap_env
+        echo "Uploading updated config back to ${_BOOTSTRAP_ENV_GCS_PATH}..."
+        gsutil cp iac/bootstrapping/.bootstrap_env "${_BOOTSTRAP_ENV_GCS_PATH}"
+        echo "Config saved."
+
+# =============================================================================
+# SUBSTITUTIONS & OPTIONS
+# =============================================================================
+substitutions:
+  _BOOTSTRAP_ENV_GCS_PATH: ''
+  _PRESERVE_CAS: 'Y'
+  _PRESERVE_DNS: 'Y'
+
+timeout: '3600s'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  substitutionOption: 'ALLOW_LOOSE'
+  machineType: 'E2_HIGHCPU_8'

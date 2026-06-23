@@ -6,8 +6,23 @@
 # ==============================================================================
 
 detect_deployment_strategy() {
-  DEPLOY_MODE=$(gcloud secrets versions access latest --secret="DEPLOY_MODE" --project="$GCP_PROJECT_ID")
-  log_info  "${CHECK} Detected DEPLOY_MODE from Secret Manager: $DEPLOY_MODE${COLOR_NC}"
+  # Prefer the value stored in Secret Manager, but fall back gracefully:
+  #   1. DEPLOY_MODE already loaded from .bootstrap_env (sourced earlier)
+  #   2. "cloudbuild" as the final default
+  # During teardown the secret may already be gone (partial/repeat teardown),
+  # so a missing secret must not abort the run under `set -e`.
+  local secret_mode
+  secret_mode=$(gcloud secrets versions access latest --secret="DEPLOY_MODE" --project="$GCP_PROJECT_ID" 2>/dev/null || true)
+
+  if [ -n "$secret_mode" ]; then
+    DEPLOY_MODE="$secret_mode"
+    log_info "${CHECK} Detected DEPLOY_MODE from Secret Manager: $DEPLOY_MODE${COLOR_NC}"
+  elif [ -n "${DEPLOY_MODE:-}" ]; then
+    log_warn "DEPLOY_MODE secret not found — using value from .bootstrap_env: $DEPLOY_MODE"
+  else
+    DEPLOY_MODE="cloudbuild"
+    log_warn "DEPLOY_MODE secret not found and not set in config — defaulting to: $DEPLOY_MODE"
+  fi
 }
 
 trigger_github_deployment() {
@@ -103,6 +118,7 @@ trigger_cloudbuild_deployment() {
         --config="iac/cloudbuild/deploy-all.yaml" \
         --project="$GCP_PROJECT_ID" \
         --region="$GCP_REGION" \
+        --timeout=7200 \
         --substitutions=^::^_ARCH=${ARCH}::_PKI_STRATEGY=${PKI_STRATEGY}::_BASE_DOMAIN=${BASE_DOMAIN:-}::_REGION=${GCP_REGION}::_COMMIT_SHA=$(git rev-parse HEAD)
 
     if [ $? -eq 0 ]; then

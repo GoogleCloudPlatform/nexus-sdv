@@ -401,7 +401,7 @@ jobs:
             --state-values-set baseDomain=${{ env.BASE_DOMAIN }}
             --state-values-set image.tag=${{ github.sha }}
             --state-values-set arch=${{ inputs.arch || 'arm64' }}
-            ${{ inputs.pki_strategy == 'local' && format('--state-values-set keycloakExternalUrl=https://{0}:8443', steps.get_ip.outputs.keycloak_ip) || '' }}
+            ${{ inputs.pki_strategy == 'local' && format('--state-values-set keycloakExternalUrl=https://{0}', steps.get_ip.outputs.keycloak_ip) || '' }}
             ${{ inputs.pki_strategy == 'local' && format('--state-values-set natsExternalUrl=nats://{0}:4222', steps.get_ip.outputs.nats_ip) || '' }}
 
       - name: Force Restart Registration Server to load new Certificates

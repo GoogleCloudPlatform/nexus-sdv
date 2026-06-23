@@ -3,6 +3,12 @@ keycloak:
   logLevel: DEBUG
   pkiStrategy: "local"
   baseDomain: ""
+  tls:
+    cert: ""
+    key: ""
+
+ingress:
+  staticIpName: ""
 
 database:
   enabled: true

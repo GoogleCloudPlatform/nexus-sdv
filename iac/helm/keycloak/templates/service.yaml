@@ -16,9 +16,19 @@ spec:
       targetPort: http
       protocol: TCP
       name: http
+    # 8443 is exposed for all PKI strategies. Keycloak enforces sslRequired=external
+    # which blocks HTTP admin/token requests from non-localhost callers — HTTPS is
+    # required regardless of whether TLS is terminated with a real cert or self-signed.
     - port: {{ .Values.service.httpsPort }}
       targetPort: https
       protocol: TCP
       name: https
+    {{- if eq .Values.pkiStrategy "remote" }}
+    # Management port 9000 is remote-only (used by create-jwk-secrets-remote health probe).
+    - port: 9000
+      targetPort: 9000
+      protocol: TCP
+      name: management
+    {{- end }}
   selector:
 {{ include "keycloak.selectorLabels" . | indent 4 }}

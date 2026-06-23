@@ -462,7 +462,7 @@ jobs:
           done
 
           # Define the JWKS URL using IP instead of domain (DNS might not be propagated yet)
-          JWKS_URL="https://${IP}:8443/realms/sdv-telemetry/protocol/openid-connect/certs"
+          JWKS_URL="https://${IP}/realms/sdv-telemetry/protocol/openid-connect/certs"
           echo "JWKS URL is: $JWKS_URL"
 
           # Create the KEYCLOAK_JWK_URI secret

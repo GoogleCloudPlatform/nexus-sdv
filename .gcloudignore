@@ -1,0 +1,33 @@
+.git
+.gitignore
+
+# Node
+node_modules/
+sample-clients/data-web-client/.next/
+sample-clients/data-web-client/out/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.env/
+
+# Rust
+target/
+
+# Go build artifacts
+vendor/
+
+# Test recordings
+sample-clients/telemetry-subscriber/recordings/
+
+# Certificates (fetched at deploy time)
+certificates/
+*.pem
+*.key
+*.crt
+
+# Terraform state
+iac/terraform/.terraform/
+iac/terraform/*.tfstate
+iac/terraform/*.tfstate.backup

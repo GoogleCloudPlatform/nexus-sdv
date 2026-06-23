@@ -1,0 +1,196 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "data-web-client.fullname" . }}
+  labels:
+    {{- include "data-web-client.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "data-web-client.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "data-web-client.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: data-web-client-ksa
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/arch
+                    operator: In
+                    values:
+                      - {{ .Values.arch | default "arm64" }}
+                  {{- if eq (.Values.arch | default "arm64") "arm64" }}
+                  # arm64 on Autopilot: request the container-optimized Arm compute
+                  # class. Autopilot requires arm64 to name a compute-class;
+                  # "autopilot-arm" is backed by C4A. amd64 omits the compute-class
+                  # and uses Autopilot's default provisioning. Autopilot auto-adds
+                  # the arm64 node toleration.
+                  - key: cloud.google.com/compute-class
+                    operator: In
+                    values:
+                      - autopilot-arm
+                  {{- end }}
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "100m"
+            limits:
+              memory: "1Gi"
+              cpu: "500m"
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          env:
+            - name: NEXTAUTH_SECRET
+              value: {{ .Values.nextauth.secret | quote }}
+            - name: NEXTAUTH_URL
+              value: {{ .Values.nextauth.url | quote }}
+            - name: KEYCLOAK_CLIENT_ID
+              value: {{ .Values.keycloak.clientId | quote }}
+            - name: KEYCLOAK_CLIENT_SECRET
+              value: {{ .Values.keycloak.clientSecret | quote }}
+            - name: KEYCLOAK_ISSUER
+              value: {{ .Values.keycloak.issuer | quote }}
+            - name: BIGTABLE_PROJECT_ID
+              value: {{ .Values.gcp.projectId | quote }}
+            - name: BIGTABLE_INSTANCE_ID
+              value: {{ .Values.bigtable.instanceId | quote }}
+            - name: DB_HOST
+              value: "localhost"
+            - name: DB_PORT
+              value: "5432"
+            - name: DB_USER
+              value: {{ .Values.database.user | quote }}
+            - name: DB_PASSWORD
+              value: {{ .Values.database.password | quote }}
+            - name: DB_NAME
+              value: {{ .Values.database.name | quote }}
+            # Keycloak uses a certificate signed by a custom CA.
+            # Node.js must skip TLS verification when talking to Keycloak
+            # (token exchange happens server-side inside the cluster).
+            - name: NODE_TLS_REJECT_UNAUTHORIZED
+              value: "0"
+            - name: NODE_OPTIONS
+              value: "--max-old-space-size=768"
+            # Google Maps — served at runtime via /api/maps-config (not baked into the JS bundle).
+            - name: GOOGLE_MAPS_API_KEY
+              value: {{ .Values.googleMaps.apiKey | quote }}
+            - name: GOOGLE_MAPS_MAP_ID
+              value: {{ .Values.googleMaps.mapId | quote }}
+            - name: NATS_URL
+              value: {{ .Values.nats.url | quote }}
+            {{- if .Values.externalSecretsEnabled }}
+            - name: NATS_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "data-web-client.fullname" . }}-nats-secret
+                  key: NATS_USER
+            - name: NATS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "data-web-client.fullname" . }}-nats-secret
+                  key: NATS_PASSWORD
+            - name: NATS_SCORING_USER
+              value: "connector"
+            - name: NATS_SCORING_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "data-web-client.fullname" . }}-nats-secret
+                  key: NATS_SCORING_PASSWORD
+            {{- end }}
+            {{- if eq .Values.pkiStrategy "remote" }}
+            # Override pod hostname so Next.js binds to 0.0.0.0 instead of the pod name only,
+            # allowing the nginx sidecar to proxy via localhost:3000.
+            - name: HOSTNAME
+              value: "0.0.0.0"
+            {{- end }}
+        {{- if .Values.database.instanceConnectionName }}
+        - name: cloud-sql-proxy
+          image: "gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.18.0"
+          args:
+            - "--structured-logs"
+            - "--health-check"
+            - "--http-address=0.0.0.0"
+            - "--http-port=9090"
+            - "{{ .Values.database.instanceConnectionName }}"
+          ports:
+            - name: health
+              containerPort: 9090
+              protocol: TCP
+          startupProbe:
+            httpGet:
+              path: /startup
+              port: 9090
+              scheme: HTTP
+            initialDelaySeconds: 5
+            periodSeconds: 2
+            failureThreshold: 30
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /liveness
+              port: 9090
+              scheme: HTTP
+            periodSeconds: 10
+            failureThreshold: 3
+            timeoutSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readiness
+              port: 9090
+              scheme: HTTP
+            periodSeconds: 10
+            failureThreshold: 6
+            initialDelaySeconds: 10
+            timeoutSeconds: 10
+          securityContext:
+            runAsNonRoot: true
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "50m"
+            limits:
+              memory: "256Mi"
+              cpu: "100m"
+        {{- end }}
+        {{- if eq .Values.pkiStrategy "remote" }}
+        - name: nginx
+          image: "nginx:stable-alpine"
+          ports:
+            - name: https
+              containerPort: 443
+              protocol: TCP
+          volumeMounts:
+            - name: nginx-conf
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
+            - name: tls
+              mountPath: /etc/nginx/tls
+              readOnly: true
+          resources:
+            requests:
+              memory: "32Mi"
+              cpu: "20m"
+            limits:
+              memory: "64Mi"
+              cpu: "100m"
+        {{- end }}
+      {{- if eq .Values.pkiStrategy "remote" }}
+      volumes:
+        - name: nginx-conf
+          configMap:
+            name: {{ include "data-web-client.fullname" . }}-nginx
+        - name: tls
+          secret:
+            secretName: {{ include "data-web-client.fullname" . }}-tls
+      {{- end }}

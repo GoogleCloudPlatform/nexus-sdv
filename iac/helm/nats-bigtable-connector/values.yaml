@@ -3,9 +3,52 @@ image:
   pullPolicy: IfNotPresent
   tag: "latest"
 
+# Resource requests/limits — explicit values prevent GKE Autopilot from
+# assigning its defaults (500m CPU / 2Gi memory per pod).
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    memory: 512Mi
+
 nats:
   # URL with embedded credentials: nats://username:password@host:port
   url: ""
+  user: "connector"
+  # NATS_PASSWORD is synced from GCP Secret Manager via external-secrets operator
+  # Do not set this value here — it will be populated by the ExternalSecret resource
+  password: ""
+  host: "nats.base-services.svc.cluster.local:4222"
 
 gcp:
-  projectId: ""
+  projectId: "horizon-sdv-lal"
+  serviceAccount: "bigtable-connector@horizon-sdv-lal.iam.gserviceaccount.com"
+
+# External Secrets Operator configuration
+# When enabled, the NATS password is synced from GCP Secret Manager instead of
+# being passed through Helm values, avoiding credential exposure in logs.
+externalSecretsEnabled: true
+
+externalSecrets:
+  # Name of the SecretStore resource that knows how to authenticate to GCP Secret Manager
+  secretStoreName: "gcpsm-secret-store"
+  secretStoreKind: "SecretStore"  # or "ClusterSecretStore" if cluster-wide
+
+  # Name of the secret in GCP Secret Manager to fetch the NATS password from
+  secretName: "NATS_CONNECTOR_PASSWORD"
+
+  # How often to refresh the secret from GCP Secret Manager
+  refreshInterval: "1h"
+
+  # GKE cluster location and name for Workload Identity
+  # These are injected during CloudBuild deployment via helmfile --state-values-set
+  # Do not change these defaults — they will be overridden at deployment time
+  clusterLocation: ""   # Injected: GCP region from environment
+  clusterName: ""       # Injected: GKE cluster name from environment
+
+  # Kubernetes service account used by the SecretStore for Workload Identity
+  serviceAccountName: "external-secrets-ksa"
+
+  # GCP service account for external-secrets (bound to the KSA via Workload Identity)
+  gcpServiceAccount: "external-secrets-gsa@horizon-sdv-lal.iam.gserviceaccount.com"

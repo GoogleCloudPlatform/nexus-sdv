@@ -40,13 +40,27 @@ openssl req -new -key "${OUTPUT_PREFIX}-key.pem" \
 
 # Sign the CSR with factory CA
 echo "3. Signing certificate with factory CA..."
+# Sign with explicit v3 extensions. The registration server validates the client
+# cert with rustls' WebPkiClientVerifier (webpki), which only accepts X.509 v3
+# certificates. Without -extfile the cert version depends on the openssl default:
+# OpenSSL 3.0.x and LibreSSL emit a bare v1 cert (rejected with: sslv3 alert
+# certificate unknown), while OpenSSL 3.2+ emit v3 — so the same script passed on
+# some machines and failed on others. Setting extensions makes the cert
+# deterministically v3 on every implementation. clientAuth/keyUsage additionally
+# match the usages the server sets on the operational certs it issues (see csr.rs).
+cat > "${OUTPUT_PREFIX}.ext" <<'EOF'
+basicConstraints = CA:FALSE
+keyUsage = critical, digitalSignature, keyEncipherment
+extendedKeyUsage = clientAuth
+EOF
 openssl x509 -req -in "${OUTPUT_PREFIX}.csr" \
   -CA "$FACTORY_CA_CERT" \
   -CAkey "$FACTORY_CA_KEY" \
   -CAcreateserial \
   -out "${OUTPUT_PREFIX}.pem" \
   -days 365 \
-  -sha256
+  -sha256 \
+  -extfile "${OUTPUT_PREFIX}.ext"
 
 # Create certificate chain (cert + CA) with proper newline separation
 echo "4. Creating certificate chain..."

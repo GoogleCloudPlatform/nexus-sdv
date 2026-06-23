@@ -5,10 +5,10 @@
   "defaultSignatureAlgorithm": "RS256",
   "revokeRefreshToken": false,
   "refreshTokenMaxReuse": 0,
-  "accessTokenLifespan": 300,
-  "accessTokenLifespanForImplicitFlow": 900,
-  "ssoSessionIdleTimeout": 1800,
-  "ssoSessionMaxLifespan": 36000,
+  "accessTokenLifespan": 1209600,
+  "accessTokenLifespanForImplicitFlow": 1209600,
+  "ssoSessionIdleTimeout": 1209600,
+  "ssoSessionMaxLifespan": 1209600,
   "ssoSessionIdleTimeoutRememberMe": 0,
   "ssoSessionMaxLifespanRememberMe": 0,
   "offlineSessionIdleTimeout": 2592000,
@@ -728,7 +728,9 @@
         "backchannel.logout.session.required": "true",
         "display.on.consent.screen": "false",
         "x509.allow.regex.pattern.comparison": "true",
-        "dpop.bound.access.tokens": "false"
+        "dpop.bound.access.tokens": "false",
+        "use.refresh.tokens": "true",
+        "client_credentials.use_refresh_token": "true"
       },
       "authenticationFlowBindingOverrides": {},
       "fullScopeAllowed": true,
@@ -736,6 +738,62 @@
       "defaultClientScopes": [
         "web-origins",
         "service_account",
+        "acr",
+        "roles",
+        "profile",
+        "basic",
+        "email"
+      ],
+      "optionalClientScopes": [
+        "address",
+        "phone",
+        "organization",
+        "offline_access",
+        "microprofile-jwt"
+      ]
+    },
+    {
+      "clientId": "data-web-client",
+      "name": "data-web-client",
+      "description": "SDV Telemetry Dashboard web client",
+      "rootUrl": "",
+      "adminUrl": "",
+      "baseUrl": "",
+      "surrogateAuthRequired": false,
+      "enabled": true,
+      "alwaysDisplayInConsole": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "PLACEHOLDER_REPLACED_BY_DEPLOY_PIPELINE",
+      "redirectUris": [
+        "/*"
+      ],
+      "webOrigins": [
+        "/*"
+      ],
+      "notBefore": 0,
+      "bearerOnly": false,
+      "consentRequired": false,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "publicClient": false,
+      "frontchannelLogout": true,
+      "protocol": "openid-connect",
+      "attributes": {
+        "backchannel.logout.session.required": "true",
+        "backchannel.logout.revoke.offline.tokens": "false",
+        "display.on.consent.screen": "false",
+        "frontchannel.logout.session.required": "true",
+        "oauth2.device.authorization.grant.enabled": "false",
+        "oidc.ciba.grant.enabled": "false",
+        "use.refresh.tokens": "true"
+      },
+      "authenticationFlowBindingOverrides": {},
+      "fullScopeAllowed": true,
+      "nodeReRegistrationTimeout": -1,
+      "defaultClientScopes": [
+        "web-origins",
         "acr",
         "roles",
         "profile",

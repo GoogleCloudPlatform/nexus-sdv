@@ -10,7 +10,14 @@ releases:
           projectId: '{{ requiredEnv "GCP_PROJECT_ID" }}'
           serviceAccount: '{{ requiredEnv "BIGTABLE_CONNECTOR_GCP_SERVICE_ACCOUNT" }}'
         nats:
-          # Credentials provided as separate values for secure secret management
           user: '{{ env "NATS_CONNECTOR_USER" | default "connector" }}'
-          password: '{{ requiredEnv "NATS_CONNECTOR_PASSWORD" }}'
+          # Password is optional here — when externalSecretsEnabled=true, the
+          # ExternalSecret resource syncs it from GCP Secret Manager directly.
+          # When externalSecretsEnabled=false, this value is used to render the secret.
+          password: '{{ env "NATS_CONNECTOR_PASSWORD" | default "" }}'
           host: '{{ env "NATS_HOST" | default "nats.base-services.svc.cluster.local:4222" }}'
+        externalSecrets:
+          # Cluster location and name injected from CloudBuild environment
+          clusterLocation: '{{ .StateValues.clusterLocation | default "" }}'
+          clusterName: '{{ .StateValues.clusterName | default "" }}'
+          gcpServiceAccount: '{{ env "EXTERNAL_SECRETS_OPERATOR_GCP_SERVICE_ACCOUNT" | default "external-secrets-gsa@horizon-sdv-lal.iam.gserviceaccount.com" }}'

@@ -1,0 +1,42 @@
+{
+  "name": "data-web-client",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "test": "jest --forceExit"
+  },
+  "dependencies": {
+    "@google-cloud/bigtable": "^6.5.0",
+    "@tanstack/react-table": "^8.21.3",
+    "@vis.gl/react-google-maps": "^1.7.1",
+    "nats": "^2.29.3",
+    "next": "16.2.7",
+    "next-auth": "^4.24.13",
+    "pg": "^8.20.0",
+    "protobufjs": "^8.6.0",
+    "react": "19.2.4",
+    "react-dom": "19.2.4"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/jest": "^29.5.0",
+    "@types/node": "^20",
+    "@types/pg": "^8.20.0",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.1",
+    "jest": "^29.7.0",
+    "jest-environment-jsdom": "^29.7.0",
+    "tailwindcss": "^4",
+    "ts-node": "^10.9.2",
+    "typescript": "^5"
+  }
+}

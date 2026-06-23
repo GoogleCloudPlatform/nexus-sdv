@@ -1,0 +1,128 @@
+name: Build, Push and Deploy the Data Web Client
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment (sandbox, dev, ...)"
+        required: true
+      arch:
+        type: choice
+        description: "Target CPU architecture for GKE nodes"
+        options:
+          - arm64
+          - amd64
+        default: "arm64"
+      helmAction:
+        type: choice
+        description: "Helmfile action: 'sync' forces an update, 'apply' checks for differences"
+        required: false
+        default: "sync"
+        options:
+          - apply
+          - sync
+
+  workflow_call:
+    inputs:
+      environment:
+        type: string
+        required: true
+      arch:
+        type: string
+        default: "arm64"
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  DOCKER_BUILD_SUMMARY: false
+  GKE_CLUSTER_NAME: "${{ inputs.environment }}-gke"
+
+jobs:
+  build-push-deploy-data-web-client:
+    name: Build, Push and Deploy Data Web Client
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-24.04-arm' }}
+    environment: ${{ inputs.environment }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure Google Cloud Auth
+        uses: google-github-actions/auth@v2
+        with:
+          token_format: access_token
+          workload_identity_provider: projects/${{ vars.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/${{ vars.GCP_WORKLOAD_IDENTITY_POOL_ID }}/providers/${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER_ID }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - name: Import secrets
+        uses: google-github-actions/get-secretmanager-secrets@v3
+        with:
+          secrets: |-
+            IMAGE_REPO:projects/${{ vars.GCP_PROJECT_ID }}/secrets/IMAGE_REPO/versions/latest
+            DATA_API_BIGTABLE_CONNECTOR_GCP_SERVICE_ACCOUNT:projects/${{ vars.GCP_PROJECT_ID }}/secrets/DATA_API_BIGTABLE_CONNECTOR_GCP_SERVICE_ACCOUNT/versions/latest
+            CLOUD_SQL_INSTANCE_CONNECTION_NAME:projects/${{ vars.GCP_PROJECT_ID }}/secrets/CLOUD_SQL_INSTANCE_CONNECTION_NAME/versions/latest
+            WEBCLIENT_DB_PASSWORD:projects/${{ vars.GCP_PROJECT_ID }}/secrets/WEBCLIENT_DB_PASSWORD/versions/latest
+            NEXTAUTH_SECRET:projects/${{ vars.GCP_PROJECT_ID }}/secrets/NEXTAUTH_SECRET/versions/latest
+            NEXTAUTH_URL:projects/${{ vars.GCP_PROJECT_ID }}/secrets/NEXTAUTH_URL/versions/latest
+            KEYCLOAK_CLIENT_ID:projects/${{ vars.GCP_PROJECT_ID }}/secrets/KEYCLOAK_CLIENT_ID/versions/latest
+            KEYCLOAK_CLIENT_SECRET:projects/${{ vars.GCP_PROJECT_ID }}/secrets/KEYCLOAK_CLIENT_SECRET/versions/latest
+            KEYCLOAK_ISSUER:projects/${{ vars.GCP_PROJECT_ID }}/secrets/KEYCLOAK_ISSUER/versions/latest
+            BIGTABLE_INSTANCE_ID:projects/${{ vars.GCP_PROJECT_ID }}/secrets/BIGTABLE_INSTANCE_ID/versions/latest
+          export_to_environment: true
+          # NOTE: NATS_SERVER_USER and NATS_SERVER_PASSWORD are NOT imported here.
+          # They are synced from GCP Secret Manager by the external-secrets operator
+          # running in the cluster, keeping credentials out of the deployment pipeline.
+
+      - name: Docker auth
+        run: |-
+          gcloud auth configure-docker ${{ vars.GCP_REGION }}-docker.pkg.dev --quiet
+
+      - name: Set up QEMU for multi-arch builds
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and Push Data Web Client
+        uses: docker/build-push-action@v6
+        with:
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ env.IMAGE_REPO }}/data-web-client:latest
+          file: ./sample-clients/data-web-client/Dockerfile
+          context: ./sample-clients/data-web-client
+          provenance: false
+          sbom: false
+
+      - name: Get GKE credentials
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ env.GKE_CLUSTER_NAME }}
+          location: ${{ vars.GCP_REGION }}
+          use_dns_based_endpoint: true
+
+      - name: Deploy Data Web Client
+        uses: helmfile/helmfile-action@v2.0.4
+        env:
+          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          IMAGE_REPO: ${{ env.IMAGE_REPO }}
+          DATA_API_BIGTABLE_CONNECTOR_GCP_SERVICE_ACCOUNT: ${{ env.DATA_API_BIGTABLE_CONNECTOR_GCP_SERVICE_ACCOUNT }}
+          CLOUD_SQL_INSTANCE_CONNECTION_NAME: ${{ env.CLOUD_SQL_INSTANCE_CONNECTION_NAME }}
+          WEBCLIENT_DB_PASSWORD: ${{ env.WEBCLIENT_DB_PASSWORD }}
+          NEXTAUTH_SECRET: ${{ env.NEXTAUTH_SECRET }}
+          NEXTAUTH_URL: ${{ env.NEXTAUTH_URL }}
+          KEYCLOAK_CLIENT_ID: ${{ env.KEYCLOAK_CLIENT_ID }}
+          KEYCLOAK_CLIENT_SECRET: ${{ env.KEYCLOAK_CLIENT_SECRET }}
+          KEYCLOAK_ISSUER: ${{ env.KEYCLOAK_ISSUER }}
+          BIGTABLE_INSTANCE_ID: ${{ env.BIGTABLE_INSTANCE_ID }}
+        with:
+          helm-version: "v3.19.0"
+          helmfile-workdirectory: iac/helm/helmfile.d
+          helmfile-args: >-
+            --file data-web-client.yaml.gotmpl
+            ${{ inputs.helmAction || 'apply' }}
+            --state-values-set arch=${{ inputs.arch || 'arm64' }}
+            --state-values-set clusterLocation=${{ vars.GCP_REGION }}
+            --state-values-set clusterName=${{ env.GKE_CLUSTER_NAME }}

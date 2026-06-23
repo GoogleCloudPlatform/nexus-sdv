@@ -6,24 +6,43 @@
 #
 # Dependency graph:
 #
-#   deploy-external-dns (remote only) ─┐
-#                                      ├─ deploy-keycloak ──┐
-#                                      │    └─ build-push-nats-auth-callout
-#                                      │         └─ deploy-nats-auth-callout ──┐
-#                                      ├─ deploy-nats ──────────────────────────┼─ build-push-deploy-registration
-#                                      │    └─ deploy-nats-bigtable-connector
-#                                      └─ build-push-deploy-data-api
-#                                           └─ build-push-deploy-data-api-sampler
+#   deploy-external-secrets ────────────────┐
+#                                           ├─ deploy-external-dns (remote only) ─┐
+#                                           │                                     ├─ deploy-keycloak ──┐
+#                                           │                                     │    └─ build-push-nats-auth-callout
+#                                           │                                     │         └─ deploy-nats-auth-callout ──┐
+#                                           │                                     ├─ deploy-nats ──────────────────────────┼─ build-push-deploy-registration
+#                                           │                                     │    └─ deploy-nats-bigtable-connector
+#                                           │                                     └─ build-push-deploy-data-api
+#                                           │                                          └─ build-push-deploy-data-api-sampler
+#                                           └─ (all services depend on external-secrets for secret syncing)
 # =============================================================================
 
 steps:
+  # ===========================================================================
+  # WAVE 0a — External Secrets Operator (blocks all other deployments)
+  # ===========================================================================
+  - id: 'deploy-external-secrets'
+    name: 'gcr.io/cloud-builders/gcloud'
+    entrypoint: 'bash'
+    waitFor: ['-']
+    args:
+      - '-c'
+      - |
+        echo "Deploying external-secrets operator..."
+        gcloud builds submit . \
+          --config=iac/cloudbuild/deploy-external-secrets.yaml \
+          --project=$PROJECT_ID \
+          --region=${_REGION} \
+          --substitutions=^::^_ARCH=${_ARCH}::_HELM_ACTION=${_HELM_ACTION}
+
   # ===========================================================================
   # WAVE 0 — External DNS (remote PKI only, blocks all other deployments)
   # ===========================================================================
   - id: 'deploy-external-dns'
     name: 'gcr.io/cloud-builders/gcloud'
     entrypoint: 'bash'
-    waitFor: ['-']
+    waitFor: ['deploy-external-secrets']
     args:
       - '-c'
       - |
@@ -44,7 +63,7 @@ steps:
   - id: 'deploy-keycloak'
     name: 'gcr.io/cloud-builders/gcloud'
     entrypoint: 'bash'
-    waitFor: ['deploy-external-dns']
+    waitFor: ['deploy-external-secrets', 'deploy-external-dns']
     args:
       - '-c'
       - |
@@ -86,7 +105,7 @@ steps:
   - id: 'deploy-nats'
     name: 'gcr.io/cloud-builders/gcloud'
     entrypoint: 'bash'
-    waitFor: ['deploy-external-dns']
+    waitFor: ['deploy-external-secrets', 'deploy-external-dns']
     args:
       - '-c'
       - |
@@ -100,7 +119,7 @@ steps:
   - id: 'build-push-deploy-data-api'
     name: 'gcr.io/cloud-builders/gcloud'
     entrypoint: 'bash'
-    waitFor: ['deploy-external-dns']
+    waitFor: ['deploy-external-secrets', 'deploy-external-dns']
     args:
       - '-c'
       - |
@@ -164,6 +183,22 @@ steps:
           --region=${_REGION} \
           --substitutions=^::^_ARCH=${_ARCH}::_HELM_ACTION=${_HELM_ACTION}
 
+  - id: 'build-push-deploy-web-client'
+    name: 'gcr.io/cloud-builders/gcloud'
+    entrypoint: 'bash'
+    waitFor: ['build-push-deploy-data-api']
+    args:
+      - '-c'
+      - |
+        echo "Building and deploying Data API Sampler..."
+        gcloud builds submit . \
+          --config=iac/cloudbuild/build-push-deploy-data-web-client.yaml \
+          --project=$PROJECT_ID \
+          --region=${_REGION} \
+          --substitutions=^::^_ARCH=${_ARCH}::_HELM_ACTION=${_HELM_ACTION}        
+        
+        
+
 # =============================================================================
 # SUBSTITUTIONS & OPTIONS
 # =============================================================================
@@ -174,6 +209,8 @@ substitutions:
   _REGION: "europe-west1"
   _HELM_ACTION: "sync"
   _COMMIT_SHA: "manual"
+
+timeout: '7200s'
 
 options:
   logging: CLOUD_LOGGING_ONLY

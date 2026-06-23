@@ -1,0 +1,128 @@
+# =============================================================================
+# bootstrap-platform.yaml
+#
+# Spins up a new Nexus SDV environment without running bootstrap-platform.sh
+# locally. Configuration is loaded from a .bootstrap_env file stored in GCS.
+#
+# Trigger (example):
+#   gcloud builds submit . \
+#     --config=iac/cloudbuild/bootstrap-platform.yaml \
+#     --project=<PROJECT_ID> \
+#     --region=<REGION> \
+#     --substitutions=_BOOTSTRAP_ENV_GCS_PATH=gs://<PROJECT_ID>-bootstrap-envs/sandbox.bootstrap_env
+#
+# Or trigger from the GCP console via the 'bootstrap-platform' manual trigger
+# (created by iac/bootstrapping/tools/setup-cloudbuild-triggers.sh).
+#
+# Required substitutions : _BOOTSTRAP_ENV_GCS_PATH
+# Optional substitutions : _PRESERVE_CAS, _PRESERVE_DNS (teardown only — ignored here)
+# =============================================================================
+
+steps:
+  - id: 'bootstrap-platform'
+    name: 'gcr.io/cloud-builders/gcloud'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        set -euo pipefail
+
+        # -----------------------------------------------------------------------
+        # Validate required substitution. Without _BOOTSTRAP_ENV_GCS_PATH the
+        # gsutil cp below silently fails ("No URLs matched"), .bootstrap_env is
+        # never downloaded, and Terraform later fails with a confusing
+        # "bucket doesn't exist" 404. Fail fast with a clear message instead.
+        # -----------------------------------------------------------------------
+        if [ -z "${_BOOTSTRAP_ENV_GCS_PATH}" ]; then
+          echo "::error::_BOOTSTRAP_ENV_GCS_PATH is empty. Set it when running the"
+          echo "::error::trigger, e.g. gs://<PROJECT_ID>-bootstrap-envs/sandbox.bootstrap_env"
+          exit 1
+        fi
+
+        # -----------------------------------------------------------------------
+        # Download .bootstrap_env from GCS
+        # -----------------------------------------------------------------------
+        echo "Downloading bootstrap config from ${_BOOTSTRAP_ENV_GCS_PATH}..."
+        gsutil cp "${_BOOTSTRAP_ENV_GCS_PATH}" iac/bootstrapping/.bootstrap_env
+        echo "Config loaded."
+
+        # -----------------------------------------------------------------------
+        # Install Terraform
+        # -----------------------------------------------------------------------
+        apt-get update -q
+        apt-get install -y -q gnupg software-properties-common wget unzip lsb-release jq
+        wget -qO- https://apt.releases.hashicorp.com/gpg \
+          | gpg --dearmor \
+          | tee /usr/share/keyrings/hashicorp-archive-keyring.gpg > /dev/null
+        echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] \
+          https://apt.releases.hashicorp.com $(lsb_release -cs) main" \
+          | tee /etc/apt/sources.list.d/hashicorp.list
+        apt-get update -q && apt-get install -y -q terraform
+        echo "Terraform $(terraform version | head -1)"
+
+        # -----------------------------------------------------------------------
+        # Install nk (NATS NKey tool — used by configure_secrets in bootstrap)
+        # Release asset naming: nkeys-{version}-amd64.deb  (changed in v0.4.x)
+        # -----------------------------------------------------------------------
+        NK_VERSION=$$(curl -s https://api.github.com/repos/nats-io/nkeys/releases/latest \
+          | jq -r '.tag_name')
+        curl -fsSL "https://github.com/nats-io/nkeys/releases/download/$${NK_VERSION}/nkeys-$${NK_VERSION}-amd64.deb" \
+          -o /tmp/nkeys.deb
+        dpkg -i /tmp/nkeys.deb
+        echo "nk installed ($${NK_VERSION})"
+
+        # -----------------------------------------------------------------------
+        # Run bootstrap in non-interactive mode.
+        # _SKIP_TERRAFORM=true skips the Terraform stage and only re-runs the
+        # post-Terraform steps (secrets, PKI, deployment pipeline) — useful for
+        # iterating on the deploy pipeline against already-provisioned infra.
+        # -----------------------------------------------------------------------
+        SKIP_FLAG=""
+        if [ "${_SKIP_TERRAFORM}" == "true" ]; then
+          SKIP_FLAG="--skip-terraform"
+        fi
+        bash iac/bootstrapping/bootstrap-platform.sh --yes $$SKIP_FLAG
+
+        # -----------------------------------------------------------------------
+        # Upload updated .bootstrap_env back to GCS
+        # (bootstrap rewrites the file with generated values like DEPLOYMENT_SUFFIX)
+        # -----------------------------------------------------------------------
+        echo "Uploading updated config back to ${_BOOTSTRAP_ENV_GCS_PATH}..."
+        gsutil cp iac/bootstrapping/.bootstrap_env "${_BOOTSTRAP_ENV_GCS_PATH}"
+        echo "Config saved."
+
+  # ===========================================================================
+  # STEP 2 — Sample client smoke test (runs after bootstrap completes)
+  # ===========================================================================
+  - id: 'run-sample-clients'
+    name: 'gcr.io/cloud-builders/gcloud'
+    entrypoint: 'bash'
+    waitFor: ['bootstrap-platform']
+    args:
+      - '-c'
+      - |
+        # GCP_PROJECT_ID and GCP_REGION come from the .bootstrap_env written by step 1.
+        # Use $$ so Cloud Build does not try to expand these as substitution variables
+        # (user-defined substitutions must start with _).
+        source iac/bootstrapping/.bootstrap_env
+        echo "Triggering sample client smoke test..."
+        gcloud builds submit . \
+          --config=iac/cloudbuild/run-sample-clients.yaml \
+          --project="$$GCP_PROJECT_ID" \
+          --region="$$GCP_REGION" \
+          --timeout=1800 \
+          --substitutions=^::^_BOOTSTRAP_ENV_GCS_PATH=${_BOOTSTRAP_ENV_GCS_PATH}
+
+# =============================================================================
+# SUBSTITUTIONS & OPTIONS
+# =============================================================================
+substitutions:
+  _BOOTSTRAP_ENV_GCS_PATH: ''
+  _SKIP_TERRAFORM: 'false'   # set to 'true' to skip the Terraform stage and only re-run post-Terraform steps
+
+timeout: '7200s'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  substitutionOption: 'ALLOW_LOOSE'
+  machineType: 'E2_HIGHCPU_8'

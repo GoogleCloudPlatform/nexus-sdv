@@ -1,0 +1,913 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Nexus SDV Demo - Driving Score</title>
+  <style>
+    :root {
+      --bg-1: #090312;
+      --bg-2: #120425;
+      --panel: rgba(20, 8, 38, 0.94);
+      --panel-strong: rgba(16, 6, 31, 0.98);
+      --border: rgba(177, 132, 255, 0.18);
+      --text: #f6f1ff;
+      --muted: #b9abd2;
+      --violet: #7b2cff;
+      --violet-bright: #9b5cff;
+      --violet-soft: #caa8ff;
+      --magenta: #d46bff;
+      --blue-glow: #5b6dff;
+      --green: #7ce38b;
+      --yellow: #f4cf63;
+      --orange: #ff9b55;
+      --red: #ff6179;
+      --shadow: 0 24px 56px rgba(0, 0, 0, 0.34);
+      --radius-xl: 30px;
+      --radius-lg: 22px;
+      --radius-md: 18px;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      min-height: 100%;
+      background:
+        radial-gradient(circle at 16% 18%, rgba(123, 44, 255, 0.26), transparent 26%),
+        radial-gradient(circle at 82% 14%, rgba(212, 107, 255, 0.16), transparent 22%),
+        radial-gradient(circle at 70% 72%, rgba(91, 109, 255, 0.12), transparent 24%),
+        linear-gradient(180deg, var(--bg-1) 0%, var(--bg-2) 48%, #07020d 100%);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      overflow-x: hidden;
+    }
+
+    body {
+      display: flex;
+      justify-content: center;
+      padding: 18px;
+    }
+
+    .app {
+      width: min(1320px, 100%);
+      min-height: calc(100vh - 36px);
+      padding: 18px;
+      display: grid;
+      grid-template-rows: auto 1fr;
+      gap: 16px;
+      border-radius: 34px;
+      border: 1px solid var(--border);
+      background: rgba(10, 4, 20, 0.76);
+      backdrop-filter: blur(18px);
+      box-shadow: var(--shadow);
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+      padding: 4px 4px 0;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .brand-mark {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, var(--violet-bright), var(--magenta));
+      box-shadow: 0 0 30px rgba(155, 92, 255, 0.55);
+      flex: 0 0 auto;
+    }
+
+    .brand-copy {
+      display: grid;
+      gap: 4px;
+    }
+
+    .brand-copy h1 {
+      margin: 0;
+      font-size: clamp(1.2rem, 2vw, 2rem);
+      line-height: 1.02;
+      letter-spacing: -0.04em;
+    }
+
+    .brand-copy p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.96rem;
+    }
+
+    .actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .pill, .scenario-btn, .control-btn {
+      background: linear-gradient(180deg, rgba(123, 44, 255, 0.24), rgba(212, 107, 255, 0.08));
+      border-color: rgba(177, 132, 255, 0.32);
+      color: #ffffff;
+      font-weight: 600;
+    }
+
+    .pill.live::before {
+      content: "";
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--violet-soft);
+      box-shadow: 0 0 18px rgba(202, 168, 255, 0.85);
+    }
+
+    .scenario-group {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .scenario-btn, .control-btn {
+      cursor: pointer;
+      transition: transform 0.16s ease, border-color 0.16s ease, background 0.16s ease, box-shadow 0.16s ease;
+      user-select: none;
+    }
+
+    .scenario-btn.active {
+      background: linear-gradient(180deg, rgba(123, 44, 255, 0.22), rgba(212, 107, 255, 0.1));
+      border-color: rgba(177, 132, 255, 0.34);
+      box-shadow: inset 0 0 0 1px rgba(202, 168, 255, 0.16), 0 0 20px rgba(123, 44, 255, 0.12);
+    }
+
+    .scenario-btn:active, .control-btn:active {
+      transform: scale(0.98);
+    }
+
+    .control-btn {
+      background: linear-gradient(180deg, rgba(39, 215, 196, 0.18), rgba(50, 199, 255, 0.06));
+      border-color: rgba(39, 215, 196, 0.3);
+    }
+
+    /* VIN filter input — styled to match the pill/button family */
+    .vin-input {
+      background: rgba(20, 8, 38, 0.70);
+      border: 1px solid rgba(177, 132, 255, 0.32);
+      border-radius: 9999px;
+      color: var(--text);
+      font-family: inherit;
+      font-size: 0.82rem;
+      font-weight: 500;
+      padding: 6px 14px;
+      outline: none;
+      width: 160px;
+      transition: border-color 0.16s ease, box-shadow 0.16s ease;
+    }
+
+    .vin-input::placeholder {
+      color: var(--muted);
+    }
+
+    .vin-input:focus {
+      border-color: rgba(155, 92, 255, 0.7);
+      box-shadow: 0 0 0 2px rgba(123, 44, 255, 0.18);
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 1.05fr 0.95fr;
+      gap: 16px;
+      min-height: 0;
+      align-items: stretch;
+    }
+
+    .card {
+      position: relative;
+      overflow: hidden;
+      border-radius: var(--radius-xl);
+      border: 1px solid var(--border);
+      background: linear-gradient(180deg, rgba(24, 10, 45, 0.96), rgba(13, 5, 26, 0.95));
+      box-shadow: var(--shadow);
+      padding: 22px;
+    }
+
+    .card::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background: linear-gradient(180deg, rgba(155, 92, 255, 0.08), transparent 22%);
+    }
+
+    .score-card {
+      display: grid;
+      grid-template-columns: minmax(250px, 360px) 1fr;
+      gap: 22px;
+      align-items: center;
+      min-height: 100%;
+    }
+
+    .gauge-wrap {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 320px;
+    }
+
+    .gauge {
+      width: min(34vw, 320px);
+      height: min(34vw, 320px);
+      min-width: 240px;
+      min-height: 240px;
+      border-radius: 50%;
+      position: relative;
+      display: grid;
+      place-items: center;
+      background:
+        radial-gradient(circle at 50% 50%, rgba(9, 3, 18, 0.62) 47%, transparent 48%),
+        conic-gradient(
+          from 220deg,
+          var(--green) 0deg,
+          var(--violet-bright) 120deg,
+          var(--yellow) 195deg,
+          var(--orange) 255deg,
+          var(--red) 315deg,
+          rgba(255,255,255,0.08) 315deg,
+          rgba(255,255,255,0.08) 360deg
+        );
+      box-shadow: inset 0 0 44px rgba(0, 0, 0, 0.32), 0 14px 38px rgba(0, 0, 0, 0.28);
+    }
+
+    .gauge::before {
+      content: "";
+      position: absolute;
+      inset: 16px;
+      border-radius: 50%;
+      border: 1px solid rgba(255,255,255,0.06);
+      background:
+        radial-gradient(circle at 30% 18%, rgba(155, 92, 255, 0.24), transparent 34%),
+        linear-gradient(180deg, rgba(21, 8, 40, 0.98), rgba(12, 5, 24, 0.94));
+    }
+
+    .gauge-fill {
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      background: conic-gradient(from 220deg, var(--green) 0deg, var(--teal) 120deg, var(--yellow) 190deg, var(--orange) 250deg, var(--red) 290deg, rgba(255,255,255,0.08) 0deg);
+      mask: radial-gradient(circle at center, transparent 58%, black 59%);
+      -webkit-mask: radial-gradient(circle at center, transparent 58%, black 59%);
+      opacity: 0.95;
+    }
+
+    .gauge-inner {
+      position: relative;
+      z-index: 2;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      text-align: center;
+    }
+
+    .score-kicker {
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    .score-number {
+      font-size: clamp(4rem, 7vw, 5.8rem);
+      font-weight: 850;
+      line-height: 0.92;
+      letter-spacing: -0.06em;
+    }
+
+    .score-band {
+      padding: 7px 12px;
+      border-radius: 999px;
+      border: 1px solid rgba(177, 132, 255, 0.22);
+      background: rgba(123, 44, 255, 0.16);
+      color: #f0e5ff;
+      font-size: 0.92rem;
+      font-weight: 650;
+    }
+
+    .score-copy {
+      display: grid;
+      gap: 16px;
+      align-content: center;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      border: 1px solid rgba(177, 132, 255, 0.22);
+      background: rgba(123, 44, 255, 0.14);
+      color: #efe1ff;
+      font-size: 0.95rem;
+      width: fit-content;
+    }
+
+    .score-copy h2 {
+      margin: 0;
+      font-size: clamp(2rem, 3vw, 3.2rem);
+      line-height: 1;
+      letter-spacing: -0.05em;
+      max-width: 10ch;
+    }
+
+    .score-copy p {
+      margin: 0;
+      font-size: 1.03rem;
+      line-height: 1.48;
+      color: var(--muted);
+      max-width: 56ch;
+    }
+
+    .hint-summary {
+      display: grid;
+      gap: 6px;
+      padding: 16px 18px;
+      border-radius: var(--radius-md);
+      border: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.04);
+    }
+
+    .hint-summary-label {
+      color: var(--text);
+      font-size: 0.98rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+
+    .hint-summary-text {
+      color: var(--muted);
+      font-size: 0.95rem;
+      line-height: 1.4;
+    }
+
+    .section-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 16px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .section-head h3 {
+      margin: 0;
+      font-size: 1.2rem;
+      letter-spacing: -0.03em;
+    }
+
+    .section-head p {
+      margin: 4px 0 0;
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+
+    .priority-card {
+      background: linear-gradient(180deg, rgba(30, 12, 56, 0.94), rgba(15, 6, 29, 0.96));
+      min-height: 100%;
+    }
+
+    .priority-list {
+      display: grid;
+      gap: 12px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .priority-item {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      align-items: center;
+      gap: 12px;
+      padding: 16px;
+      border-radius: 18px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,0.04);
+      transition: background 0.2s ease, border-color 0.2s ease;
+    }
+
+    .priority-item.active {
+      border-color: rgba(212, 107, 255, 0.34);
+      background: linear-gradient(180deg, rgba(123, 44, 255, 0.18), rgba(212, 107, 255, 0.08));
+      box-shadow: inset 0 0 0 1px rgba(202, 168, 255, 0.08);
+    }
+
+    .priority-item.inactive {
+      border-color: rgba(177, 132, 255, 0.16);
+      background: rgba(255,255,255,0.025);
+    }
+
+    .priority-rank {
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      font-size: 0.92rem;
+      font-weight: 800;
+      transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+      border: 1px solid rgba(177, 132, 255, 0.2);
+    }
+
+    .priority-item.active .priority-rank {
+      background: linear-gradient(180deg, rgba(123, 44, 255, 0.28), rgba(212, 107, 255, 0.18));
+      border-color: rgba(212, 107, 255, 0.3);
+      color: #f6e9ff;
+    }
+
+    .priority-item.inactive .priority-rank {
+      background: rgba(123, 44, 255, 0.08);
+      border-color: rgba(177, 132, 255, 0.16);
+      color: #b9abd2;
+    }
+
+    .priority-copy strong {
+      display: block;
+      font-size: 1rem;
+      letter-spacing: -0.02em;
+    }
+
+    .priority-copy span {
+      display: block;
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 0.92rem;
+      line-height: 1.35;
+    }
+
+    .priority-count {
+      font-size: 1rem;
+      font-weight: 800;
+      color: #f2e8ff;
+      min-width: 72px;
+      text-align: right;
+    }
+
+    .priority-item.inactive .priority-count {
+      color: #8ea9c1;
+    }
+
+    @media (max-width: 1120px) {
+      .layout, .score-card {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 760px) {
+      body {
+        padding: 10px;
+      }
+
+      .app {
+        min-height: calc(100vh - 20px);
+        padding: 12px;
+        border-radius: 24px;
+      }
+
+      .actions, .scenario-group {
+        width: 100%;
+      }
+
+      .pill, .scenario-btn, .control-btn {
+        width: 100%;
+        justify-content: center;
+      }
+
+      .score-copy h2 {
+        max-width: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="topbar">
+      <div class="brand">
+        <div class="brand-mark"></div>
+        <div class="brand-copy">
+          <h1>Nexus SDV Driving Score</h1>
+          <p>Tablet-first live scoring demo for Google Automotive Partner Bootcamp 2026</p>
+        </div>
+      </div>
+
+      <div class="actions">
+        <div class="pill live">CARLA simulation live</div>
+        <div class="scenario-group">
+          <button class="scenario-btn active" data-scenario="smooth">Smooth Driver</button>
+          <button class="scenario-btn" data-scenario="balanced">Balanced Driver</button>
+          <button class="scenario-btn" data-scenario="risky">Risky Driver</button>
+        </div>
+        <button id="toggleFeed" class="control-btn">Pause live feed</button>
+        <input id="vinFilter" type="text" placeholder="Filter by VIN…" class="vin-input" />
+        <button id="clearVin" class="control-btn">Clear</button>
+      </div>
+    </div>
+
+    <div class="layout">
+      <section class="card score-card">
+        <div class="gauge-wrap">
+          <div class="gauge">
+            <div class="gauge-fill" id="gaugeFill"></div>
+            <div class="gauge-inner">
+              <div class="score-kicker">Drive Score</div>
+              <div class="score-number" id="scoreValue">82</div>
+              <div class="score-band" id="scoreTrend">+3 stable and positive</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="score-copy">
+          <div class="eyebrow">Nexus + CARLA live demo</div>
+          <h2 id="verdictTitle">Very good driving quality</h2>
+          <p id="verdictText">This screen is intentionally simple for a tablet demo: one overall score from 0 to 100, plus four fixed hint states that can be active or inactive.</p>
+
+          <div class="hint-summary">
+            <div class="hint-summary-label">Hint status</div>
+            <div class="hint-summary-text">Only these four hints can occur in this demo: too fast driving, too fast accelerations, too fast brakes, and too aggressive driving.</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card priority-card">
+        <div class="section-head">
+          <div>
+            <h3>Hint Status</h3>
+            <p>These are the only four hint categories in the experience</p>
+          </div>
+          <div class="pill" id="activeCount">2 active</div>
+        </div>
+
+        <div class="priority-list">
+          <div class="priority-item active" id="item-tooFastDriving">
+            <div class="priority-rank" id="badge-tooFastDriving">!</div>
+            <div class="priority-copy">
+              <strong>Speeding</strong>
+              <span>Average speed is above the configured soft limit.</span>
+            </div>
+            <div class="priority-count" id="state-tooFastDriving">Active</div>
+          </div>
+
+          <div class="priority-item inactive" id="item-tooFastAccelerations">
+            <div class="priority-rank" id="badge-tooFastAccelerations">-</div>
+            <div class="priority-copy">
+              <strong>Hard acceleration</strong>
+              <span>Positive acceleration is above the configured soft limit.</span>
+            </div>
+            <div class="priority-count" id="state-tooFastAccelerations">Inactive</div>
+          </div>
+
+          <div class="priority-item inactive" id="item-tooFastBrakes">
+            <div class="priority-rank" id="badge-tooFastBrakes">-</div>
+            <div class="priority-copy">
+              <strong>Hard braking</strong>
+              <span>Braking strength is above the configured soft limit.</span>
+            </div>
+            <div class="priority-count" id="state-tooFastBrakes">Inactive</div>
+          </div>
+
+          <div class="priority-item active" id="item-tooAggressiveDriving">
+            <div class="priority-rank" id="badge-tooAggressiveDriving">!</div>
+            <div class="priority-copy">
+              <strong>Aggressive driving</strong>
+              <span>Aggressive penalty is at or above the configured threshold.</span>
+            </div>
+            <div class="priority-count" id="state-tooAggressiveDriving">Active</div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <script>
+    const state = {
+      // Page boots with the SSE feed already open (see openScoringStream()
+      // call at the bottom of this script) and the button labelled
+      // "Pause live feed". `running: true` keeps the in-memory state in
+      // sync with both, so the very first click correctly flips to
+      // "Resume live feed" and tears down the stream.
+      running: true,
+      score: 82,
+      trend: 3,
+      scenario: 'smooth',
+      hints: {
+        tooFastDriving: false,
+        tooFastAccelerations: false,
+        tooFastBrakes: false,
+        tooAggressiveDriving: false
+      }
+    };
+
+    const scenarios = {
+      smooth: {
+        baseScore: 82,
+        hintWeights: {
+          tooFastDriving: 0.12,
+          tooFastAccelerations: 0.18,
+          tooFastBrakes: 0.12,
+          tooAggressiveDriving: 0.1
+        }
+      },
+      balanced: {
+        baseScore: 69,
+        hintWeights: {
+          tooFastDriving: 0.42,
+          tooFastAccelerations: 0.5,
+          tooFastBrakes: 0.36,
+          tooAggressiveDriving: 0.34
+        }
+      },
+      risky: {
+        baseScore: 51,
+        hintWeights: {
+          tooFastDriving: 0.66,
+          tooFastAccelerations: 0.78,
+          tooFastBrakes: 0.72,
+          tooAggressiveDriving: 0.74
+        }
+      }
+    };
+
+    const el = {
+      scoreValue: document.getElementById('scoreValue'),
+      scoreTrend: document.getElementById('scoreTrend'),
+      verdictTitle: document.getElementById('verdictTitle'),
+      verdictText: document.getElementById('verdictText'),
+      activeCount: document.getElementById('activeCount'),
+      toggleFeed: document.getElementById('toggleFeed'),
+      vinFilter: document.getElementById('vinFilter'),
+      clearVin: document.getElementById('clearVin'),
+      gaugeFill: document.getElementById('gaugeFill')
+    };
+
+    const hintKeys = ['tooFastDriving', 'tooFastAccelerations', 'tooFastBrakes', 'tooAggressiveDriving'];
+
+    function clamp(n, min, max) {
+      return Math.max(min, Math.min(max, n));
+    }
+
+    function randomInt(min, max) {
+      return Math.floor(Math.random() * (max - min + 1)) + min;
+    }
+
+    function verdictFromScore(score) {
+      if (score >= 88) {
+        return {
+          title: 'Excellent driving quality',
+          text: 'The drive looks controlled, anticipatory, and comfortable. This is the best-case story for a premium live demo.',
+          trend: 'strong positive'
+        };
+      }
+      if (score >= 74) {
+        return {
+          title: 'Very good driving quality',
+          text: 'The vehicle behavior is stable overall. The score stays in the good range and the four fixed hint categories remain easy to explain on a tablet.',
+          trend: 'stable and positive'
+        };
+      }
+      if (score >= 58) {
+        return {
+          title: 'Average driving quality',
+          text: 'Several issues are affecting the drive. This is a useful demo state because the active hint categories explain the score immediately.',
+          trend: 'slightly volatile'
+        };
+      }
+      return {
+        title: 'Critical driving quality',
+        text: 'Multiple risky behaviors are active. This makes the value of real-time assessment very clear and directly tied to the four configured hint categories.',
+        trend: 'critical'
+      };
+    }
+
+    function updateGauge(score) {
+      const degrees = 315 * (score / 100);
+      el.gaugeFill.style.background = `conic-gradient(from 220deg,
+        var(--green) 0deg,
+        var(--violet-bright) ${Math.max(118, degrees * 0.66)}deg,
+        var(--yellow) ${Math.max(188, degrees * 0.82)}deg,
+        var(--orange) ${Math.max(240, degrees * 0.92)}deg,
+        var(--red) ${degrees}deg,
+        rgba(255,255,255,0.08) ${degrees}deg,
+        rgba(255,255,255,0.08) 360deg)`;
+    }
+
+    function renderHints() {
+      let active = 0;
+      hintKeys.forEach((key) => {
+        const isActive = !!state.hints[key];
+        const item = document.getElementById(`item-${key}`);
+        const badge = document.getElementById(`badge-${key}`);
+        const label = document.getElementById(`state-${key}`);
+
+        item.classList.toggle('active', isActive);
+        item.classList.toggle('inactive', !isActive);
+        badge.textContent = isActive ? '!' : '-';
+        label.textContent = isActive ? 'Active' : 'Inactive';
+
+        if (isActive) active += 1;
+      });
+
+      el.activeCount.textContent = `${active} active`;
+    }
+
+    function render() {
+      const verdict = verdictFromScore(state.score);
+      el.scoreValue.textContent = state.score;
+      el.scoreTrend.textContent = `${state.trend >= 0 ? '+' : ''}${state.trend} ${verdict.trend}`;
+      el.verdictTitle.textContent = verdict.title;
+      el.verdictText.textContent = verdict.text;
+      renderHints();
+      updateGauge(state.score);
+    }
+
+    function randomizeHints() {
+      const weights = scenarios[state.scenario].hintWeights;
+      state.hints.tooFastDriving = Math.random() < weights.tooFastDriving;
+      state.hints.tooFastAccelerations = Math.random() < weights.tooFastAccelerations;
+      state.hints.tooFastBrakes = Math.random() < weights.tooFastBrakes;
+      state.hints.tooAggressiveDriving = Math.random() < weights.tooAggressiveDriving;
+    }
+
+    function tick() {
+      // Whether the tick should run is now decided by start/stopTick(),
+      // which manage the setInterval handle. No internal guard needed —
+      // if this function is called, it should produce a new score.
+      const config = scenarios[state.scenario];
+      randomizeHints();
+
+      let modifier = 0;
+      if (state.hints.tooFastDriving) modifier -= 5;
+      if (state.hints.tooFastAccelerations) modifier -= 6;
+      if (state.hints.tooFastBrakes) modifier -= 7;
+      if (state.hints.tooAggressiveDriving) modifier -= 9;
+
+      const nextScore = clamp(config.baseScore + modifier + randomInt(-3, 3), 18, 98);
+      state.trend = clamp(nextScore - state.score, -9, 9);
+      state.score = nextScore;
+      render();
+    }
+
+    document.querySelectorAll('.scenario-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.scenario-btn').forEach((b) => b.classList.remove('active'));
+        btn.classList.add('active');
+        state.scenario = btn.dataset.scenario;
+        state.score = scenarios[state.scenario].baseScore;
+        state.trend = 0;
+        randomizeHints();
+
+        // Picking a scenario means the user wants the local simulator,
+        // not the live SSE feed. Tear down the stream, flip the toggle
+        // label to "Resume live feed", and (re)start the random tick so
+        // the chosen scenario actually plays out.
+        closeScoringStream();
+        state.running = false;
+        el.toggleFeed.textContent = 'Resume live feed';
+        startTick();
+
+        render();
+      });
+    });
+
+    // ----------------------------------------------------------------
+    // Live scoring feed via Server-Sent Events
+    // ----------------------------------------------------------------
+    // The Next.js route /api/scoring/stream emits one SSE event per NATS
+    // ScoringMessage. Each event's `data` field has the form:
+    //   "<vehicleId> - <score> - <comma-separated suggestions>"
+    // We open the EventSource when the user clicks "Resume live feed",
+    // close it when they click "Pause live feed", and on every incoming
+    // message we parse out the score and write it into #scoreValue.
+    //
+    // NOTE: /api/scoring/stream is protected by NextAuth (Keycloak session
+    // cookie). For this static page to receive events the user must already
+    // be signed in to fleetview.nexus-sdv.io on the same browser session.
+    let scoringStream = null;
+
+    function openScoringStream() {
+      if (scoringStream) return;
+      scoringStream = new EventSource('/api/scoring/stream');
+      scoringStream.onmessage = (e) => {
+        // Format: "vehicleId - score - suggestion1, suggestion2, ..."
+        const parts = (e.data || '').split(' - ');
+        if (parts.length < 2) return;
+
+        // If a VIN is entered in the filter field, skip messages from other
+        // vehicles. An empty filter means "show all".
+        const vinFilter = el.vinFilter.value.trim();
+        if (vinFilter && parts[0].trim() !== vinFilter) return;
+
+        const raw = parts[1].trim();
+        el.scoreValue.textContent = raw;
+
+        // Trend = current score − previous score. We persist the previous
+        // value in state.score so it survives across messages (and across
+        // pause/resume cycles, since closeScoringStream() does not reset it).
+        const numericScore = Number(raw);
+        if (!Number.isFinite(numericScore)) return;
+        const trend = numericScore - state.score;
+        el.scoreTrend.textContent = `${trend >= 0 ? '+' : ''}${trend}`;
+        state.score = numericScore;
+        render();
+      };
+      scoringStream.onerror = () => closeScoringStream();
+    }
+
+    function closeScoringStream() {
+      if (scoringStream) {
+        scoringStream.close();
+        scoringStream = null;
+      }
+    }
+
+    el.toggleFeed.addEventListener('click', () => {
+      // Capture the textContent BEFORE we toggle it: the spec says
+      // "open the live feed when the click happens while the button reads
+      // 'Resume live feed'", so we look at the pre-click label.
+      const wasResume = el.toggleFeed.textContent.trim() === 'Resume live feed';
+
+      state.running = !state.running;
+      el.toggleFeed.textContent = state.running ? 'Pause live feed' : 'Resume live feed';
+
+      if (wasResume) {
+        // Button just transitioned to "Pause live feed" → live feed runs:
+        // open SSE and stop the random tick simulator so it doesn't fight
+        // with the real scores arriving from the stream.
+        openScoringStream();
+        stopTick();
+      } else {
+        // Button just transitioned to "Resume live feed" → live feed paused:
+        // close SSE and (re)start the random tick simulator so the demo
+        // keeps showing fresh scores while the live feed is off.
+        closeScoringStream();
+        startTick();
+      }
+
+      render();
+    });
+
+    // Clear the VIN filter field when the "Clear" button is clicked.
+    el.clearVin.addEventListener('click', () => {
+      el.vinFilter.value = '';
+    });
+
+    window.receiveDriveUpdate = function(payload) {
+      if (typeof payload.score === 'number') state.score = clamp(Math.round(payload.score), 0, 100);
+      if (typeof payload.trend === 'number') state.trend = clamp(Math.round(payload.trend), -20, 20);
+      if (payload.hints && typeof payload.hints === 'object') {
+        state.hints = {
+          tooFastDriving: !!payload.hints.tooFastDriving,
+          tooFastAccelerations: !!payload.hints.tooFastAccelerations,
+          tooFastBrakes: !!payload.hints.tooFastBrakes,
+          tooAggressiveDriving: !!payload.hints.tooAggressiveDriving
+        };
+      }
+      render();
+    };
+
+    // Manage the random `tick` simulator as a startable/stoppable interval
+    // so we can pause it whenever the live feed is paused (button label
+    // "Resume live feed") and resume it again when the live feed runs
+    // (button label "Pause live feed").
+    let tickInterval = null;
+
+    function startTick() {
+      if (tickInterval !== null) return;
+      tickInterval = setInterval(tick, 2200);
+    }
+
+    function stopTick() {
+      if (tickInterval !== null) {
+        clearInterval(tickInterval);
+        tickInterval = null;
+      }
+    }
+
+    render();
+    // The page boots in the "live feed running" state (button label
+    // "Pause live feed", state.running=true). In that state the random
+    // tick simulator must NOT run — the SSE stream is the sole source of
+    // score updates. We only call openScoringStream() here; startTick()
+    // is left to the toggleFeed click handler, which fires it when the
+    // user transitions to "Resume live feed".
+    openScoringStream();
+  </script>
+</body>
+</html>
