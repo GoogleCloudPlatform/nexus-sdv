@@ -6,10 +6,6 @@ terraform {
       source  = "hashicorp/google"
       version = "6.31.0"
     }
-    google-beta = {
-      source  = "hashicorp/google-beta"
-      version = "6.31.0"
-    }
     time = {
       source  = "hashicorp/time"
       version = "0.13.1"
@@ -49,10 +45,9 @@ locals {
 }
 
 resource "google_project_service" "project_apis" {
-  for_each                   = toset(local.project_apis)
-  service                    = each.value
-  disable_dependent_services = true
-  disable_on_destroy         = true
+  for_each           = toset(local.project_apis)
+  service            = each.value
+  disable_on_destroy = true
 }
 
 data "google_project" "project" {
@@ -70,5 +65,5 @@ resource "google_project_service" "remote_apis" {
   for_each           = local.remote_apis
   project            = var.project_id
   service            = each.key
-  disable_on_destroy = true
+  disable_on_destroy = false
 }

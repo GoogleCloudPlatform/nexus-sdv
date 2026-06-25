@@ -69,10 +69,13 @@ jobs:
           secrets: |-
             NATS_BASIC_AUTH_USER:${{ vars.GCP_PROJECT_ID }}/NATS_SERVER_USER
             NATS_BASIC_AUTH_PASSWORD:${{ vars.GCP_PROJECT_ID }}/NATS_SERVER_PASSWORD
-            NATS_CONNECTOR_PASSWORD:${{ vars.GCP_PROJECT_ID }}/NATS_CONNECTOR_PASSWORD
             BIGTABLE_CONNECTOR_GCP_SERVICE_ACCOUNT:${{ vars.GCP_PROJECT_ID }}/BIGTABLE_CONNECTOR_GCP_SERVICE_ACCOUNT
+            EXTERNAL_SECRETS_OPERATOR_GCP_SERVICE_ACCOUNT:${{ vars.GCP_PROJECT_ID }}/EXTERNAL_SECRETS_OPERATOR_GCP_SERVICE_ACCOUNT
             IMAGE_REPO:${{ vars.GCP_PROJECT_ID }}/IMAGE_REPO
           export_to_environment: true
+        # NOTE: NATS_CONNECTOR_PASSWORD is NOT imported here. Instead, it is synced
+        # from GCP Secret Manager by the external-secrets operator running in the cluster.
+        # This keeps the password out of the GitHub Actions deployment pipeline.
 
       - name: Set up Google Cloud CLI
         uses: google-github-actions/setup-gcloud@v2
@@ -88,14 +91,15 @@ jobs:
         run: |
           mkdir -p iac/helm/nats-bigtable-connector/files
           cp proto/telemetry.proto iac/helm/nats-bigtable-connector/files/
+          cp proto/metrics_report.proto iac/helm/nats-bigtable-connector/files/
+          cp proto/vehicle_telemetry.proto iac/helm/nats-bigtable-connector/files/
 
       - name: Deploy nats-bigtable-connector
         uses: helmfile/helmfile-action@v2.0.4
         env:
           GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
           BIGTABLE_CONNECTOR_GCP_SERVICE_ACCOUNT: ${{ env.BIGTABLE_CONNECTOR_GCP_SERVICE_ACCOUNT }}
-          # NATS URL with embedded connector credentials (read-only access to telemetry.>)
-          NATS_URL: "nats://connector:${{ env.NATS_CONNECTOR_PASSWORD }}@nats:4222"
+          EXTERNAL_SECRETS_OPERATOR_GCP_SERVICE_ACCOUNT: ${{ env.EXTERNAL_SECRETS_OPERATOR_GCP_SERVICE_ACCOUNT }}
         with:
           helm-version: "v3.19.0"
           helmfile-workdirectory: iac/helm/helmfile.d

@@ -13,12 +13,15 @@ spec:
       labels:
         app: nats-bigtable-connector
     spec:
+      # GKE Workload Identity — binds this pod to a GCP service account that
+      # has roles/bigtable.user, so no GCP key files are needed in the container.
       serviceAccountName: nats-bigtable-connector-ksa
       tolerations:
       - key: "cloud.google.com/compute-class"
         operator: "Equal"
         value: "Scale-Out"
         effect: "NoSchedule"
+      # Schedule on ARM64 C4A (Axion) nodes.
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -28,38 +31,44 @@ spec:
                 operator: In
                 values:
                 - {{ .Values.arch | default "arm64" }}
+              {{- if eq (.Values.arch | default "arm64") "arm64" }}
+              # arm64 on Autopilot: request the container-optimized Arm compute class.
+              # Autopilot requires arm64 to name a compute-class; "autopilot-arm" is
+              # the general-purpose Arm class (backed by C4A, available in us-east4;
+              # Scale-Out/T2A is not). Autopilot auto-adds the arm64 node toleration.
               - key: cloud.google.com/compute-class
                 operator: In
                 values:
-                - Scale-Out
-          preferredDuringSchedulingIgnoredDuringExecution:
-            - weight: 100
-              preference:
-                matchExpressions:
-                  - key: cloud.google.com/machine-family
-                    operator: In
-                    values:
-                      - n4a
-            - weight: 90
-              preference:
-                matchExpressions:
-                  - key: cloud.google.com/machine-family
-                    operator: In
-                    values:
-                      - c4a
-            - weight: 80
-              preference:
-                matchExpressions:
-                  - key: cloud.google.com/machine-family
-                    operator: In
-                    values:
-                      - t2a
+                - autopilot-arm
+              {{- end }}
+
+      initContainers:
+        # Copy proto files from ConfigMap to emptyDir to avoid Kubernetes
+        # ConfigMap symlink duplication that causes protobuf to see files twice
+        - name: copy-protos
+          image: busybox:1.28
+          command:
+            - sh
+            - -c
+            - cp /config-protos/* /proto/ && ls -la /proto/
+          volumeMounts:
+            - name: proto-config-volume
+              mountPath: /config-protos
+            - name: proto-volume
+              mountPath: /proto
       containers:
         - name: connector
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args: ["-c", "/config/config.yaml"]
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           env:
+            # NATS credentials are stored in a Kubernetes Secret and injected
+            # as environment variables. The wombat config references them as
+            # ${NATS_USER}, ${NATS_PASSWORD}, and ${NATS_HOST}.
             - name: NATS_USER
               valueFrom:
                 secretKeyRef:
@@ -76,15 +85,22 @@ spec:
                   name: nats-bigtable-connector-secret
                   key: NATS_HOST
           volumeMounts:
+            # Wombat pipeline config (config.yaml) from configmap-template.yaml
             - name: connector-config-volume
               mountPath: /config
-            - name: connector-proto-volume
-              mountPath: /proto/telemetry.proto
-              subPath: telemetry.proto
+            # Proto schema files copied from ConfigMap to emptyDir by init container
+            # This avoids Kubernetes ConfigMap symlink duplication issues
+            - name: proto-volume
+              mountPath: /proto
       volumes:
         - name: connector-config-volume
           configMap:
             name: nats-bigtable-connector-config
-        - name: connector-proto-volume
+        # ConfigMap with proto files — copied to emptyDir by init container
+        - name: proto-config-volume
           configMap:
             name: nats-bigtable-connector-proto
+        # emptyDir for proto files (copied from ConfigMap by init container)
+        # This avoids Kubernetes ConfigMap symlink duplication
+        - name: proto-volume
+          emptyDir: {}

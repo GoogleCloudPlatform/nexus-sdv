@@ -59,6 +59,7 @@ terraform.rc
 !**/src/test/**/target/
 **/.gemini
 **/.specify
+**/.claude
 
 # Zed specific
 .zed/
@@ -151,3 +152,4 @@ sample-clients/telemetry-subscriber/telemetry-subscriber
 
 # gh token for release
 set-gh-token-for-release-dae.sh
+tmp/**

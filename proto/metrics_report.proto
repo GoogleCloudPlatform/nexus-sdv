@@ -1,0 +1,51 @@
+syntax = "proto3";
+
+package google.sdv.telemetry;
+
+option go_package = "github.com/valtech-sdv/vehicle-client/telemetry";
+
+import "google/protobuf/any.proto";
+import "google/protobuf/timestamp.proto";
+
+// Outer report envelope emitted by the Android SDV Telemetry Service.
+// Field numbers sourced from:
+// tmp/GAPB 2026 Demo/telemetry_sample_files/metrics_configuration.proto
+message MetricsReport {
+  // Monotonously increasing report number within a Metrics Configuration.
+  int32 report_number = 1;
+
+  // When the report was generated on the vehicle (vehicle-side clock).
+  google.protobuf.Timestamp report_timestamp = 2;
+
+  enum ReportReason {
+    REPORT_TYPE_UNSPECIFIED  = 0;
+    REGULAR                  = 1;
+    INCOMPLETE_SHUTDOWN      = 2;
+    INCOMPLETE_STOPPED       = 3;
+    INCOMPLETE_DEACTIVATED   = 4;
+    INITIAL                  = 5;
+  }
+
+  ReportReason report_reason = 3;
+
+  // UUID of the Metrics Configuration that produced this report.
+  string metrics_config_uuid = 4;
+
+  uint32 metrics_config_version = 5;
+
+  // Name of the MetricsReportConfig that produced this report.
+  string report_config_name = 6;
+
+  // The actual report payload — type URL identifies the inner message.
+  // e.g. type.googleapis.com/com.android.sdv.telemetry.VehicleTelemetryData
+  google.protobuf.Any report_data = 7;
+
+  // When the Metrics Configuration was activated on the vehicle.
+  google.protobuf.Timestamp config_activation_timestamp = 8;
+
+  // Error IDs from report generation (empty on clean reports).
+  repeated int64 error_ids = 9;
+
+  // Unique identifier for this report instance.
+  string report_uuid = 10;
+}

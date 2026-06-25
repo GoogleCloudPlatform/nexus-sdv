@@ -1,0 +1,848 @@
+# Copyright 2024 Google LLC
+
+uuid: "aa27583c-96a5-4a67-adad-d15e00c0f12a"
+version: 1
+
+descriptor_protos {
+  name: "config_files/metrics_configs/vehicle_telemetry.proto"
+  package: "com.android.sdv.someip"
+  dependency: "config_files/metrics_configs/display_safety.proto"
+  message_type {
+    name: "VehicleTelemetryData"
+    field {
+      name: "ENGINE_POWER"
+      number: 1
+      label: LABEL_OPTIONAL
+      type: TYPE_FLOAT
+      json_name: "ENGINEPOWER"
+    }
+    field {
+      name: "ENGINE_RPM"
+      number: 2
+      label: LABEL_OPTIONAL
+      type: TYPE_FLOAT
+      json_name: "ENGINERPM"
+    }
+    field {
+      name: "FUEL_CAPACITY"
+      number: 3
+      label: LABEL_OPTIONAL
+      type: TYPE_FLOAT
+      json_name: "FUELCAPACITY"
+    }
+    field {
+      name: "FUEL_LEVEL"
+      number: 4
+      label: LABEL_OPTIONAL
+      type: TYPE_FLOAT
+      json_name: "FUELLEVEL"
+    }
+    field {
+      name: "GPS_LATITUDE"
+      number: 5
+      label: LABEL_OPTIONAL
+      type: TYPE_FLOAT
+      json_name: "GPSLATITUDE"
+    }
+    field {
+      name: "GPS_LONGITUDE"
+      number: 6
+      label: LABEL_OPTIONAL
+      type: TYPE_FLOAT
+      json_name: "GPSLONGITUDE"
+    }
+    field {
+      name: "IGNITION_STATE"
+      number: 7
+      label: LABEL_OPTIONAL
+      type: TYPE_BOOL
+      json_name: "IGNITIONSTATE"
+    }
+    field {
+      name: "TIRE_PRESSURE"
+      number: 8
+      label: LABEL_OPTIONAL
+      type: TYPE_FLOAT
+      json_name: "TIREPRESSURE"
+    }
+    field {
+      name: "VELOCITY"
+      number: 9
+      label: LABEL_OPTIONAL
+      type: TYPE_FLOAT
+      json_name: "VELOCITY"
+    }
+    field {
+      name: "LOCKED"
+      number: 10
+      label: LABEL_OPTIONAL
+      type: TYPE_BOOL
+      json_name: "LOCKED"
+    }
+    field {
+      name: "acceleration_modulus_m_s2"
+      number: 11
+      label: LABEL_OPTIONAL
+      type: TYPE_DOUBLE
+      json_name: "accelerationModulusMS2"
+    }
+    field {
+      name: "distance_meters"
+      number: 12
+      label: LABEL_OPTIONAL
+      type: TYPE_UINT64
+      json_name: "distanceMeters"
+    }
+    field {
+      name: "vehicle_dynamics"
+      number: 13
+      type: TYPE_MESSAGE
+      type_name: ".com.android.sdv.someip.CarlaVehicleDynamics"
+    }
+    field {
+      name: "gear_status"
+      number: 14
+      label: LABEL_OPTIONAL
+      type: TYPE_MESSAGE
+      type_name: ".com.sdv.google.display_safety.CurrentGear"
+      json_name: "currentGear"
+    }
+    field {
+      name: "max_speed"
+      number: 15
+      label: LABEL_OPTIONAL
+      type: TYPE_FLOAT
+      json_name: "maxSpeed"
+    }
+    field {
+      name: "speedlimit"
+      number: 16
+      label: LABEL_OPTIONAL
+      type: TYPE_FLOAT
+      json_name: "speedlimit"
+    }
+    field {
+      name: "speed_limit_displayed"
+      number: 17
+      label: LABEL_OPTIONAL
+      type: TYPE_BOOL
+      json_name: "speedLimitDisplayed"
+    }
+    field {
+      name: "trunk_open"
+      number: 18
+      label: LABEL_OPTIONAL
+      type: TYPE_BOOL
+      json_name: "trunkOpen"
+    }
+    field {
+      name: "fog_lights"
+      number: 19
+      label: LABEL_OPTIONAL
+      type: TYPE_BOOL
+      json_name: "fogLights"
+    }
+    field {
+      name: "park_lights"
+      number: 20
+      label: LABEL_OPTIONAL
+      type: TYPE_BOOL
+      json_name: "parkLights"
+    }
+    field {
+      name: "hibeam"
+      number: 21
+      label: LABEL_OPTIONAL
+      type: TYPE_BOOL
+      json_name: "hibeam"
+    }
+    field {
+      name: "lowbeam"
+      number: 22
+      label: LABEL_OPTIONAL
+      type: TYPE_BOOL
+      json_name: "lowbeam"
+    }
+    field {
+      name: "turn_signal_left"
+      number: 23
+      label: LABEL_OPTIONAL
+      type: TYPE_BOOL
+      json_name: "turnSignalLeft"
+    }
+    field {
+      name: "turn_signal_right"
+      number: 24
+      label: LABEL_OPTIONAL
+      type: TYPE_BOOL
+      json_name: "turnSignalRight"
+    }
+    field {
+      name: "carla_vehicle_ambient_light"
+      number: 25
+      label: LABEL_OPTIONAL
+      type: TYPE_BOOL
+      json_name: "carlaVehicleAmbientLight"
+    }
+    field {
+      name: "carla_vehicle_ambient_fog"
+      number: 26
+      label: LABEL_OPTIONAL
+      type: TYPE_BOOL
+      json_name: "carlaVehicleAmbientFog"
+    }
+    field {
+      name: "trip_status"
+      number: 27
+      label: LABEL_OPTIONAL
+      type: TYPE_MESSAGE
+      type_name: ".com.android.sdv.someip.CarlaVehicleTripStatus"
+      json_name: "tripStatus"
+    }
+  }
+  message_type {
+    name: "CarlaVehicleDynamics"
+    field {
+      name: "steering_angle_deg"
+      number: 1
+      label: LABEL_OPTIONAL
+      type: TYPE_DOUBLE
+      json_name: "steeringAngleDeg"
+    }
+    field {
+      name: "accelerator_pedal_pct"
+      number: 2
+      label: LABEL_OPTIONAL
+      type: TYPE_DOUBLE
+      json_name: "acceleratorPedalPct"
+    }
+    field {
+      name: "brake_pedal_pct"
+      number: 3
+      label: LABEL_OPTIONAL
+      type: TYPE_DOUBLE
+      json_name: "brakePedalPct"
+    }
+  }
+      message_type {
+        name: "CarlaVehicleTripStatus"
+        field {
+            name: "start_timestamp_ms"
+            number: 1
+            label: LABEL_OPTIONAL
+            type: TYPE_UINT64
+            json_name: "startTimestampMs"
+        }
+        field {
+            name: "end_timestamp_ms"
+            number: 2
+            label: LABEL_OPTIONAL
+            type: TYPE_UINT64
+            json_name: "endTimestampMs"
+        }
+        field {
+            name: "is_active"
+            number: 3
+            label: LABEL_OPTIONAL
+            type: TYPE_BOOL
+            json_name: "isActive"
+        }
+    }
+    message_type {
+        name: "VehicleLockStatusData"
+        field {
+            type: TYPE_BOOL
+            name: "LOCKED"
+            number: 1
+        }
+    }
+    syntax: "proto2"
+}
+descriptor_protos {
+  name: "config_files/metrics_configs/display_safety.proto"
+  package: "com.sdv.google.display_safety"
+
+  message_type {
+    name: "CurrentGear"
+    field {
+      name: "gear"
+      number: 1
+      label: LABEL_OPTIONAL
+      type: TYPE_ENUM
+      type_name: ".com.sdv.google.display_safety.CurrentGear.Gear"
+      json_name: "gear"
+    }
+    enum_type {
+        name: "Gear"
+        value {
+          name: "P"
+          number: 0
+        }
+        value {
+          name: "R"
+          number: 1
+        }
+        value {
+          name: "N"
+          number: 2
+        }
+        value {
+          name: "D"
+          number: 3
+        }
+      }
+  }
+  syntax: "proto2"
+
+}
+
+triggers {
+    name: "new_vehicle_telemetry_data"
+    data_trigger {
+        source_name: "vehicle_telemetry_publisher"
+    }
+}
+
+triggers {
+    name: "new_vehicle_lock_status"
+    data_trigger {
+        source_name: "vehicle_lock_status_publisher"
+    }
+}
+
+triggers {
+  name: "report_trigger"
+  periodic_trigger { interval { nanos: 2000000000 } }
+}
+
+sources {
+    name: "vehicle_telemetry_publisher"
+    data_source {
+        source_identifier: "VehicleTelemetryPublisher"
+    }
+}
+
+sources {
+    name: "vehicle_lock_status_publisher"
+    data_source {
+        source_identifier: "com.sdv.refarch.RemoteLock#LockStatus"
+    }
+}
+
+sources {
+    name: "vehicle_gnss_publisher"
+    data_source {
+        source_identifier: "com.android.sdv.someip.CarlaVehicleGnssData"
+    }
+}
+
+sources {
+    name: "vehicle_dynamics_publisher"
+    data_source {
+        source_identifier: "com.android.sdv.someip.CarlaVehicleDynamics"
+    }
+}
+
+sources {
+    name: "vehicle_gear_status"
+    data_source {
+        source_identifier: "com.sdv.google.display_safety.CurrentGear|com-sdv-google-display-safety-current-gear-current-gear"
+    }
+}
+
+sources {
+    name: "engine_rpm"
+    data_source {
+        source_identifier: "com.sdv.google.display_safety.EngineRpm"
+    }
+}
+
+sources {
+    name: "vehicle_speed"
+    data_source {
+        source_identifier: "com.sdv.google.display_safety.VehicleSpeed|com-sdv-google-display-safety-vehicle-speed-vehicle-speed"
+    }
+}
+
+sources {
+    name: "max_speed"
+    data_source {
+        source_identifier: "com.sdv.google.display_safety.VehicleSpeed|com-sdv-google-display-safety-vehicle-speed-max-speed"
+    }
+}
+
+sources {
+    name: "speedlimit"
+    data_source {
+        source_identifier: "com.sdv.google.display_safety.VehicleSpeed|com-sdv-google-display-safety-vehicle-speed-speedlimit"
+    }
+}
+
+sources {
+    name: "speed_limit_displayed"
+    data_source {
+        source_identifier: "com.sdv.google.display_safety.TellTaleStatus|com-sdv-google-display-safety-tell-tale-status-speed-limit-displayed"
+    }
+}
+
+sources {
+    name: "trunk_open"
+    data_source {
+        source_identifier: "com.sdv.google.display_safety.TellTaleStatus|com-sdv-google-display-safety-tell-tale-status-trunk-open"
+    }
+}
+
+sources {
+    name: "fog_lights"
+    data_source {
+        source_identifier: "com.sdv.google.display_safety.TellTaleStatus|com-sdv-google-display-safety-tell-tale-status-fog-lights"
+    }
+}
+
+sources {
+    name: "park_lights"
+    data_source {
+        source_identifier: "com.sdv.google.display_safety.TellTaleStatus|com-sdv-google-display-safety-tell-tale-status-park-lights"
+    }
+}
+
+sources {
+    name: "hibeam"
+    data_source {
+        source_identifier: "com.sdv.google.display_safety.TellTaleStatus|com-sdv-google-display-safety-tell-tale-status-hibeam"
+    }
+}
+
+sources {
+    name: "lowbeam"
+    data_source {
+        source_identifier: "com.sdv.google.display_safety.TellTaleStatus|com-sdv-google-display-safety-tell-tale-status-lowbeam"
+    }
+}
+
+sources {
+    name: "turn_signal_left"
+    data_source {
+        source_identifier: "com.sdv.google.display_safety.TellTaleStatus|com-sdv-google-display-safety-tell-tale-status-turn-signal-left"
+    }
+}
+
+sources {
+    name: "turn_signal_right"
+    data_source {
+        source_identifier: "com.sdv.google.display_safety.TellTaleStatus|com-sdv-google-display-safety-tell-tale-status-turn-signal-right"
+    }
+}
+
+sources {
+    name: "carla_vehicle_ambient_light"
+    data_source {
+        source_identifier: "com.android.sdv.someip.CarlaAmbientLight"
+    }
+}
+
+sources {
+    name: "carla_vehicle_ambient_fog"
+    data_source {
+        source_identifier: "com.android.sdv.someip.CarlaAmbientFog"
+    }
+}
+
+sources {
+    name: "carla_vehicle_acceleration"
+    data_source {
+        source_identifier: "com.android.sdv.someip.CarlaVehicleAcceleration"
+    }
+}
+
+sources {
+    name: "carla_vehicle_odometer"
+    data_source {
+        source_identifier: "com.android.sdv.someip.CarlaVehicleOdometer"
+    }
+}
+
+sources {
+    name: "carla_vehicle_trip_status"
+    data_source {
+        source_identifier: "com.android.sdv.someip.CarlaVehicleTripStatus"
+    }
+}
+
+
+# index 0
+expression_nodes {
+    field_leaf_node {
+        source_name: "vehicle_telemetry_publisher"
+        field_names: "ENGINE_POWER"
+    }
+}
+# index 1
+expression_nodes {
+    field_leaf_node {
+        source_name: "engine_rpm"
+        field_names: "rpm"
+    }
+}
+# index 2
+expression_nodes {
+    field_leaf_node {
+        source_name: "vehicle_telemetry_publisher"
+        field_names: "FUEL_CAPACITY"
+    }
+}
+# index 3
+expression_nodes {
+    field_leaf_node {
+        source_name: "vehicle_telemetry_publisher"
+        field_names: "FUEL_LEVEL"
+    }
+}
+# index 4
+expression_nodes {
+    field_leaf_node {
+        source_name: "vehicle_gnss_publisher"
+        field_names: "latitude"
+    }
+}
+# index 5
+expression_nodes {
+    field_leaf_node {
+        source_name: "vehicle_gnss_publisher"
+        field_names: "longitude"
+    }
+}
+# index 6
+expression_nodes {
+    field_leaf_node {
+        source_name: "vehicle_telemetry_publisher"
+        field_names: "IGNITION_STATE"
+    }
+}
+# index 7
+expression_nodes {
+    field_leaf_node {
+        source_name: "vehicle_telemetry_publisher"
+        field_names: "TIRE_PRESSURE"
+    }
+}
+# index 8
+expression_nodes {
+    field_leaf_node {
+        source_name: "vehicle_speed"
+        field_names: "precise_speed"
+    }
+}
+# index 9
+expression_nodes {
+    field_leaf_node {
+        source_name: "vehicle_lock_status_publisher"
+        field_names: "LOCKED"
+    }
+}
+
+# index 10
+expression_nodes {
+    field_leaf_node {
+        source_name: "vehicle_dynamics_publisher"
+    }
+}
+
+# index 11
+expression_nodes {
+    field_leaf_node {
+        source_name: "vehicle_gear_status"
+    }
+}
+
+# index 12
+expression_nodes {
+    field_leaf_node {
+        source_name: "max_speed"
+        field_names: "precise_speed"
+    }
+}
+
+# index 13
+expression_nodes {
+    field_leaf_node {
+        source_name: "speedlimit"
+        field_names: "precise_speed"
+    }
+}
+
+# index 14
+expression_nodes {
+    field_leaf_node {
+        source_name: "speed_limit_displayed"
+        field_names: "alert"
+    }
+}
+
+# index 15
+expression_nodes {
+    field_leaf_node {
+        source_name: "trunk_open"
+        field_names: "alert"
+    }
+}
+
+# index 16
+expression_nodes {
+    field_leaf_node {
+        source_name: "fog_lights"
+        field_names: "alert"
+    }
+}
+
+# index 17
+expression_nodes {
+    field_leaf_node {
+        source_name: "park_lights"
+        field_names: "alert"
+    }
+}
+
+# index 18
+expression_nodes {
+    field_leaf_node {
+        source_name: "hibeam"
+        field_names: "alert"
+    }
+}
+
+# index 19
+expression_nodes {
+    field_leaf_node {
+        source_name: "lowbeam"
+        field_names: "alert"
+    }
+}
+
+# index 20
+expression_nodes {
+    field_leaf_node {
+        source_name: "turn_signal_left"
+        field_names: "alert"
+    }
+}
+
+# index 21
+expression_nodes {
+    field_leaf_node {
+        source_name: "turn_signal_right"
+        field_names: "alert"
+    }
+}
+
+# index 22
+expression_nodes {
+    field_leaf_node {
+        source_name: "carla_vehicle_ambient_light"
+        field_names: "is_night"
+    }
+}
+
+# index 23
+expression_nodes {
+    field_leaf_node {
+        source_name: "carla_vehicle_ambient_fog"
+        field_names: "is_foggy"
+    }
+}
+
+# index 24
+expression_nodes {
+    field_leaf_node {
+        source_name: "carla_vehicle_trip_status"
+    }
+}
+
+# index 25
+expression_nodes {
+    field_leaf_node {
+        source_name: "carla_vehicle_acceleration"
+        field_names: "acceleration_modulus_m_s2"
+    }
+}
+
+# index 26
+expression_nodes {
+    field_leaf_node {
+        source_name: "carla_vehicle_odometer"
+        field_names: "distance_meters"
+    }
+}
+
+metrics_report_configs {
+    name: "vehicle_telemetry_data"
+    trigger_names: "report_trigger"
+    trigger_names: "new_vehicle_lock_status"
+    report_incomplete: false
+
+    message_builder {
+        message_type: "com.android.sdv.someip.VehicleTelemetryData"
+        field_assignments {
+            field_name: "ENGINE_POWER"
+            no_aggregation {
+                expression_node_index: 0
+            }
+        }
+        field_assignments {
+            field_name: "ENGINE_RPM"
+            no_aggregation {
+                expression_node_index: 1
+            }
+        }
+        field_assignments {
+            field_name: "FUEL_CAPACITY"
+            no_aggregation {
+                expression_node_index: 2
+            }
+        }
+        field_assignments {
+            field_name: "FUEL_LEVEL"
+            no_aggregation {
+                expression_node_index: 3
+            }
+        }
+        field_assignments {
+            field_name: "GPS_LATITUDE"
+            no_aggregation {
+                expression_node_index: 4
+            }
+        }
+        field_assignments {
+            field_name: "GPS_LONGITUDE"
+            no_aggregation {
+                expression_node_index: 5
+            }
+        }
+        field_assignments {
+            field_name: "IGNITION_STATE"
+            no_aggregation {
+                expression_node_index: 6
+            }
+        }
+        field_assignments {
+            field_name: "TIRE_PRESSURE"
+            no_aggregation {
+                expression_node_index: 7
+            }
+        }
+        field_assignments {
+            field_name: "VELOCITY"
+            no_aggregation {
+                expression_node_index: 8
+            }
+        }
+        field_assignments {
+            field_name: "LOCKED"
+            no_aggregation {
+                expression_node_index: 9
+            }
+        }
+        field_assignments {
+            field_name: "vehicle_dynamics"
+            no_aggregation {
+                expression_node_index: 10
+            }
+        }
+        field_assignments {
+            field_name: "gear_status"
+            no_aggregation {
+                expression_node_index: 11
+            }
+        }
+        field_assignments {
+            field_name: "max_speed"
+            no_aggregation {
+                expression_node_index: 12
+            }
+        }
+        field_assignments {
+            field_name: "speedlimit"
+            no_aggregation {
+                expression_node_index: 13
+            }
+        }
+        field_assignments {
+            field_name: "speed_limit_displayed"
+            no_aggregation {
+                expression_node_index: 14
+            }
+        }
+        field_assignments {
+            field_name: "trunk_open"
+            no_aggregation {
+                expression_node_index: 15
+            }
+        }
+        field_assignments {
+            field_name: "fog_lights"
+            no_aggregation {
+                expression_node_index: 16
+            }
+        }
+        field_assignments {
+            field_name: "park_lights"
+            no_aggregation {
+                expression_node_index: 17
+            }
+        }
+        field_assignments {
+            field_name: "hibeam"
+            no_aggregation {
+                expression_node_index: 18
+            }
+        }
+        field_assignments {
+            field_name: "lowbeam"
+            no_aggregation {
+                expression_node_index: 19
+            }
+        }
+        field_assignments {
+            field_name: "turn_signal_left"
+            no_aggregation {
+                expression_node_index: 20
+            }
+        }
+        field_assignments {
+            field_name: "turn_signal_right"
+            no_aggregation {
+                expression_node_index: 21
+            }
+        }
+        field_assignments {
+            field_name: "carla_vehicle_ambient_light"
+            no_aggregation {
+                expression_node_index: 22
+            }
+        }
+        field_assignments {
+            field_name: "carla_vehicle_ambient_fog"
+            no_aggregation {
+                expression_node_index: 23
+            }
+        }
+        field_assignments {
+            field_name: "trip_status"
+            no_aggregation {
+                expression_node_index: 24
+            }
+        }
+        field_assignments {
+            field_name: "acceleration_modulus_m_s2"
+            no_aggregation {
+                expression_node_index: 25
+            }
+        }
+        field_assignments {
+            field_name: "distance_meters"
+            no_aggregation {
+                expression_node_index: 26
+            }
+        }
+    }
+}

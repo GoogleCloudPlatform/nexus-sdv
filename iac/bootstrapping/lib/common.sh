@@ -78,6 +78,12 @@ while [[ $# -gt 0 ]]; do
             log_info ""
             shift
             ;;
+        --skip-terraform)
+            SKIP_TERRAFORM=true
+            log_warn "Skip-Terraform mode: the Terraform stage will be skipped; infrastructure is assumed to already exist."
+            log_info ""
+            shift
+            ;;
         -h|--help)
             show_usage
             exit 0

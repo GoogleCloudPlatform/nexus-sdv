@@ -78,7 +78,7 @@ enable_gcp_apis() {    # List of APIs required before Terraform runs
     # Check which APIs are disabled and enable them
     APIS_TO_ENABLE=()
     for api in "${REQUIRED_APIS[@]}"; do
-        if ! gcloud services list --enabled --filter="name:$api" --format="value(name)" 2>/dev/null | grep -q "$api"; then
+        if ! gcloud services list --enabled --filter="name:$api" --format="value(name)" --project="$GCP_PROJECT_ID" 2>/dev/null | grep -q "$api"; then
             log_info "  ${NOTSET} $api (disabled, will enable)"
             APIS_TO_ENABLE+=("$api")
         else
@@ -103,7 +103,7 @@ enable_gcp_apis() {    # List of APIs required before Terraform runs
 setup_initial_github_vars () {
     if [ "$DEPLOY_MODE" != "github" ]; then return; fi
     GCP_PROJECT_NUMBER=$(gcloud projects describe "$GCP_PROJECT_ID" --format="value(projectNumber)")
-    GCP_WORKLOAD_IDENTITY_POOL_ID="${ENV}-github-wif-${RANDOM_SUFFIX}"
+    GCP_WORKLOAD_IDENTITY_POOL_ID="${ENV}-github-wif-${DEPLOYMENT_SUFFIX}"
     GCP_WORKLOAD_IDENTITY_PROVIDER_ID="github"
 
     log_info "Creating GitHub variables for authentication with GCP"
@@ -198,8 +198,8 @@ cleanup_github_variables() {
         log_info "Deleting GCP_PROJECT_NUMBER..."
         gh variable delete GCP_PROJECT_NUMBER --env "$ENV" --repo "$GITHUB_REPO" 2>/dev/null || log_info "  (already deleted or doesn't exist)"
 
-        log_info "Deleting RANDOM_SUFFIX..."
-        gh variable delete RANDOM_SUFFIX --env "$ENV" --repo "$GITHUB_REPO" 2>/dev/null || log_info "  (already deleted or doesn't exist)"
+        log_info "Deleting DEPLOYMENT_SUFFIX..."
+        gh variable delete DEPLOYMENT_SUFFIX --env "$ENV" --repo "$GITHUB_REPO" 2>/dev/null || log_info "  (already deleted or doesn't exist)"
 
         log_info "Non-required variables cleaned. Required variables preserved for future bootstrap runs."
         log_text ""
@@ -228,11 +228,15 @@ cleanup_local_files() {
 
     # Remove bootstrap configuration file
     if [ -f "iac/bootstrapping/.bootstrap_env" ]; then
-      read -rp "Are you sure you want to delete the bootstrap configuration file? (type 'yes' to confirm): " CONFIRM
-      if [ "$CONFIRM" == "yes" ]; then
-        log_info "Removing bootstrap configuration file..."
-        rm -f iac/bootstrapping/.bootstrap_env
-        log_info "Bootstrap configuration removed."
+      if [ "$AUTO_APPROVE" = true ]; then
+        log_info "Auto-approve mode: keeping .bootstrap_env for reference."
+      else
+        read -rp "Are you sure you want to delete the bootstrap configuration file? (type 'yes' to confirm): " CONFIRM
+        if [ "$CONFIRM" == "yes" ]; then
+          log_info "Removing bootstrap configuration file..."
+          rm -f iac/bootstrapping/.bootstrap_env
+          log_info "Bootstrap configuration removed."
+        fi
       fi
     fi
 

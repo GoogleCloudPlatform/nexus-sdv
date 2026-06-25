@@ -6,6 +6,14 @@ metadata:
 {{ include "keycloak.labels" . | indent 4 }}
 spec:
   replicas: 1
+  # GKE Autopilot provisions nodes on demand. During a fresh bootstrap many
+  # services deploy at once, so the Keycloak pod can sit Pending for several
+  # minutes (Insufficient cpu/memory) while Autopilot scales up. The default
+  # progressDeadlineSeconds of 600 fires before scale-up completes and makes
+  # `helm upgrade --wait` report "Progress deadline exceeded" even though
+  # Keycloak itself starts fine. Raise it to 1800s to tolerate scale-up.
+  # The helmfile --wait --timeout 1800s matches this value.
+  progressDeadlineSeconds: 1800
   selector:
     matchLabels:
 {{ include "keycloak.selectorLabels" . | indent 6 }}
@@ -29,32 +37,16 @@ spec:
                 operator: In
                 values:
                 - {{ .Values.arch | default "arm64" }}
+              {{- if eq (.Values.arch | default "arm64") "arm64" }}
+              # arm64 on Autopilot: request the container-optimized Arm compute class.
+              # Autopilot requires arm64 to name a compute-class; "autopilot-arm" is
+              # the general-purpose Arm class (backed by C4A, available in us-east4;
+              # Scale-Out/T2A is not). Autopilot auto-adds the arm64 node toleration.
               - key: cloud.google.com/compute-class
                 operator: In
                 values:
-                - Scale-Out
-          preferredDuringSchedulingIgnoredDuringExecution:
-          - weight: 100
-            preference:
-              matchExpressions:
-              - key: cloud.google.com/machine-family
-                operator: In
-                values:
-                - c4a
-          - weight: 90
-            preference:
-              matchExpressions:
-                - key: cloud.google.com/machine-family
-                  operator: In
-                  values:
-                    - c4a
-          - weight: 80
-            preference:
-              matchExpressions:
-                - key: cloud.google.com/machine-family
-                  operator: In
-                  values:
-                  - t2a
+                - autopilot-arm
+              {{- end }}
       initContainers:
         - name: import-ca-certs
           image: "eclipse-temurin:21-jre-alpine"
@@ -102,7 +94,11 @@ spec:
             - name: KC_HTTP_MANAGEMENT_PORT
               value: "9000"
             - name: KC_HOSTNAME
+              {{- if and (eq .Values.pkiStrategy "remote") .Values.baseDomain }}
+              value: "keycloak.{{ .Values.baseDomain }}"
+              {{- else }}
               value: "keycloak"
+              {{- end }}
             - name: KC_HTTPS_PORT
               value: "8443"
             - name: KC_HTTPS_CLIENT_AUTH

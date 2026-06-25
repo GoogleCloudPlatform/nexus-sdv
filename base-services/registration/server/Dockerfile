@@ -1,10 +1,12 @@
-FROM --platform=$BUILDPLATFORM rust:bookworm AS builder
+ARG DOCKER_HUB_MIRROR=europe-west4-docker.pkg.dev/horizon-sdv-lal/docker-hub
+FROM --platform=$BUILDPLATFORM ${DOCKER_HUB_MIRROR}/rust:bookworm AS builder
 
 # Install cross-compilation toolchains for both target architectures
 # cmake is required by aws-lc-sys (rustls dependency)
 RUN apt-get update && apt-get install -y \
     musl-tools \
     cmake \
+    protobuf-compiler \
     gcc-aarch64-linux-gnu \
     gcc-x86-64-linux-gnu \
     && rm -rf /var/lib/apt/lists/*

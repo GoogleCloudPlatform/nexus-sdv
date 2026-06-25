@@ -52,8 +52,10 @@ resource "google_secret_manager_secret" "secrets" {
 
 # Add a version with the secret data to each created secret
 resource "google_secret_manager_secret_version" "secret_versions" {
-  for_each = google_secret_manager_secret.secrets
-  secret   = each.value.id
+  # Use the same static key set as the secrets resource so Terraform can resolve
+  # the for_each keys at plan time without needing apply-time resource attributes.
+  for_each       = local.secret_keys
+  secret         = google_secret_manager_secret.secrets[each.key].id
   # NOTE: Using the write-only attribute to prevent the secret value from being
   # stored in the Terraform state file, resolving the validation warning.
   secret_data_wo = var.platform_secrets[each.key]
@@ -94,6 +96,42 @@ resource "google_secret_manager_secret" "nats_hostname" {
 resource "google_secret_manager_secret_version" "nats_hostname_version" {
   secret      = google_secret_manager_secret.nats_hostname.id
   secret_data = var.nats_hostname
+}
+
+resource "google_secret_manager_secret" "bigtable_instance_id" {
+  project   = var.project_id
+  secret_id = "BIGTABLE_INSTANCE_ID"
+
+  replication {
+    auto {}
+  }
+
+  labels = {
+    "managed-by" = "terraform"
+  }
+}
+
+resource "google_secret_manager_secret_version" "bigtable_instance_id_version" {
+  secret      = google_secret_manager_secret.bigtable_instance_id.id
+  secret_data = google_bigtable_instance.production_instance.name
+}
+
+resource "google_secret_manager_secret" "cloud_sql_instance_connection_name" {
+  project   = var.project_id
+  secret_id = "CLOUD_SQL_INSTANCE_CONNECTION_NAME"
+
+  replication {
+    auto {}
+  }
+
+  labels = {
+    "managed-by" = "terraform"
+  }
+}
+
+resource "google_secret_manager_secret_version" "cloud_sql_instance_connection_name_version" {
+  secret      = google_secret_manager_secret.cloud_sql_instance_connection_name.id
+  secret_data = "${var.project_id}:${var.region}:${google_sql_database_instance.sql_db.name}"
 }
 
 resource "google_secret_manager_secret" "registration_hostname" {

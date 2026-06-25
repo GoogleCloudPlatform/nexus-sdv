@@ -6,9 +6,10 @@
 # Grant DNS admin permissions directly to the Kubernetes service account
 # using the new principal:// format recommended by Google
 resource "google_project_iam_member" "external_dns_admin" {
-  project = var.project_id
-  role    = "roles/dns.admin"
-  member  = "principal://iam.googleapis.com/projects/${data.google_project.project.number}/locations/global/workloadIdentityPools/${var.project_id}.svc.id.goog/subject/ns/external-dns/sa/external-dns"
+  project    = var.project_id
+  role       = "roles/dns.admin"
+  member     = "principal://iam.googleapis.com/projects/${data.google_project.project.number}/locations/global/workloadIdentityPools/${var.project_id}.svc.id.goog/subject/ns/external-dns/sa/external-dns"
+  depends_on = [google_container_cluster.gke_cluster]
 }
 
 # Output for reference

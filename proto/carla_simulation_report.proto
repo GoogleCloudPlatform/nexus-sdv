@@ -1,0 +1,69 @@
+// Reconstructed from binary recordings on local.telemetry.> NATS subjects.
+// Type URL: type.googleapis.com/com.google.sdv.carla.CarlaSimulationReport
+//
+// The outer envelope is google.sdv.telemetry.MetricsReport; the report_data
+// Any field carries this message type when published by a Carla-backed vehicle.
+//
+// Field numbers and wire types were derived by decoding captured .bin files
+// (see sample-clients/telemetry-subscriber/recordings/).  Fields 1-15 are
+// metric wrappers (CarlaMetricValue) that carry both an integer and a float
+// representation of the reading.  Field 16 is the GNSS sub-message.
+
+syntax = "proto2";
+
+package com.google.sdv.carla;
+
+option go_package = "telemetry-subscriber/carla";
+
+// A sensor reading carrying both a quantised integer and a float value.
+message CarlaMetricValue {
+  optional int64 int_value   = 1;
+  optional float float_value = 2;
+}
+
+// GPS / GNSS fix published by the Carla simulation.
+message CarlaGnssData {
+  optional double latitude     = 1;
+  optional double longitude    = 2;
+  optional double altitude     = 3;
+  optional double speed        = 4;   // m/s
+  optional double heading      = 5;   // degrees, 0 = north
+  optional int64  timestamp_ms = 6;   // Unix epoch milliseconds
+}
+
+// Scalar acceleration magnitude.
+message CarlaAccelerationData {
+  optional double modulus_m_s2 = 1;
+}
+
+// Odometer reading.
+message CarlaOdometerData {
+  optional uint64 distance_meters = 1;
+}
+
+// Speed-related limits / capabilities.
+message CarlaSpeedData {
+  optional double speed_limit_m_s = 1;
+  optional double max_speed_m_s   = 2;
+}
+
+// Full Carla simulation report.  Each metric field wraps a single sensor
+// reading; GNSS data is in the nested CarlaGnssData sub-message.
+message CarlaSimulationReport {
+  optional CarlaMetricValue    velocity      = 1;   // m/s
+  optional CarlaMetricValue    engine_rpm    = 2;   // rpm
+  optional CarlaMetricValue    fuel_capacity = 3;   // L
+  optional CarlaMetricValue    fuel_level    = 4;   // L
+  optional CarlaMetricValue    ignition      = 7;
+  optional CarlaMetricValue    tire_pressure = 8;
+  optional CarlaMetricValue    velocity_v2   = 9;
+  optional CarlaMetricValue    locked        = 10;
+  optional CarlaMetricValue    accel_mod     = 11;
+  optional CarlaMetricValue    distance_v2   = 12;
+  optional CarlaMetricValue    gear          = 14;
+  optional CarlaMetricValue    max_speed     = 15;
+  optional CarlaGnssData       gnss          = 16;
+  optional CarlaAccelerationData acceleration = 17;
+  optional CarlaOdometerData   odometer      = 18;
+  optional CarlaSpeedData      speed_info    = 20;
+}

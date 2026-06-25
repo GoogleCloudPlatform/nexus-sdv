@@ -8,6 +8,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/asn1"
+	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
 	"flag"
@@ -17,14 +18,18 @@ import (
 	mathrand "math/rand"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	pb "github.com/valtech-sdv/vehicle-client/telemetry"
+	pbMetrics "github.com/valtech-sdv/vehicle-client/telemetry"
+	pbVehicle "github.com/valtech-sdv/vehicle-client/telemetry"
 )
 
 // RegistrationResponse is returned by the registration server
@@ -37,6 +42,8 @@ type RegistrationResponse struct {
 // KeycloakTokenResponse contains the JWT token from Keycloak
 type KeycloakTokenResponse struct {
 	AccessToken      string `json:"access_token"`
+	IDToken          string `json:"id_token,omitempty"`
+	RefreshToken     string `json:"refresh_token,omitempty"`
 	ExpiresIn        int    `json:"expires_in"`
 	RefreshExpiresIn int    `json:"refresh_expires_in"`
 	TokenType        string `json:"token_type"`
@@ -49,6 +56,7 @@ type VehicleClient struct {
 	FactoryCertFile       string
 	FactoryKeyFile        string
 	RegistrationServerURL string
+	MessageType           string // "telemetry" or "metrics_report"
 
 	// Generated during registration
 	operationalCert    *x509.Certificate
@@ -59,65 +67,166 @@ type VehicleClient struct {
 }
 
 func main() {
-	// Get registration URL from environment variable (optional default)
 	defaultRegistrationURL := os.Getenv("REGISTRATION_URL")
 
 	vin := flag.String("vin", "1HGBH41JXMN109186", "Vehicle Identification Number")
 	pkiStrategy := flag.String("pki_strategy", "local", "PKI Strategy")
-	factoryCert := flag.String("factory-cert", "factory-cert.pem", "Path to factory-issued certificate")
-	factoryKey := flag.String("factory-key", "factory-key.pem", "Path to factory-issued private key")
-	registrationURL := flag.String("registration-url", defaultRegistrationURL, "Registration server URL")
+	factoryCert := flag.String("factory-cert", "", "Path to factory-issued certificate (required when registration is needed)")
+	factoryKey := flag.String("factory-key", "", "Path to factory-issued private key (required when registration is needed)")
+	registrationURL := flag.String("registration-url", defaultRegistrationURL, "Registration server URL (required when registration is needed)")
+	keycloakURL := flag.String("keycloak-url", "", "Keycloak URL (used when reusing existing certificates)")
+	natsURL := flag.String("nats-url", "", "NATS URL (used when reusing existing certificates)")
 	interval := flag.Int("interval", 5, "Interval in seconds between telemetry messages")
+	messageType := flag.String("message-type", "telemetry", "Message type to send: 'telemetry' (TelemetryMessage) or 'metrics_report' (MetricsReport)")
 	flag.Parse()
 
-	// Validate that registration URL is provided (either via flag or environment variable)
-	if *registrationURL == "" {
-		log.Fatal("Registration URL must be provided via -registration-url flag or REGISTRATION_URL environment variable")
+	if *messageType != "telemetry" && *messageType != "metrics_report" {
+		log.Fatal("Message type must be either 'telemetry' or 'metrics_report'")
 	}
 
-	// Initialize random seed for telemetry variations
 	mathrand.Seed(time.Now().UnixNano())
 
 	client := &VehicleClient{
-		VIN:                   *vin,
-		pkiStrategy:           *pkiStrategy,
-		FactoryCertFile:       *factoryCert,
-		FactoryKeyFile:        *factoryKey,
-		RegistrationServerURL: *registrationURL,
+		VIN:         *vin,
+		pkiStrategy: *pkiStrategy,
+		MessageType: *messageType,
 	}
 
 	log.Printf("================================================")
 	log.Printf("Starting vehicle client for VIN: %s", client.VIN)
+	log.Printf("Message Type: %s", client.MessageType)
 	log.Printf("================================================")
 	log.Printf("Telemetry interval: %d seconds", *interval)
 
-	// Step 1: Register with the registration server
-	if err := client.Register(); err != nil {
-		log.Fatalf("Registration failed: %v", err)
-	}
-	log.Println("✓ Successfully registered and obtained operational certificate")
-	log.Println("")
-	log.Println("")
+	var jwt string
 
-	// Step 2: Authenticate with Keycloak to get JWT
-	jwt, err := client.AuthenticateWithKeycloak()
-	if err != nil {
-		log.Fatalf("Keycloak authentication failed: %v", err)
-	}
-	log.Println("✓ Successfully authenticated with Keycloak and obtained JWT")
+	// Try to reuse existing certificates and token
+	if existingJWT, ok := client.loadExistingCertsAndToken(); ok {
+		log.Println("✓ Existing certificates and token are valid — skipping registration")
+		if *keycloakURL == "" || *natsURL == "" {
+			log.Fatal("-keycloak-url and -nats-url are required when reusing existing certificates")
+		}
+		client.keycloakURL = *keycloakURL
+		client.natsURL = *natsURL
+		jwt = existingJWT
+	} else {
+		// Full registration + auth flow
+		log.Println("No valid existing certificates found — starting registration flow")
+		if *factoryCert == "" || *factoryKey == "" {
+			log.Fatal("-factory-cert and -factory-key are required for registration")
+		}
+		if *registrationURL == "" {
+			log.Fatal("-registration-url is required for registration")
+		}
+		client.FactoryCertFile = *factoryCert
+		client.FactoryKeyFile = *factoryKey
+		client.RegistrationServerURL = *registrationURL
 
-	// Step 3: Smoke test NATS connectivity with JWT
-	log.Println("Smoke testing NATS connectivity (connection will be closed after verification)...")
+		if err := client.Register(); err != nil {
+			log.Fatalf("Registration failed: %v", err)
+		}
+		log.Println("✓ Registered and obtained operational certificate")
+
+		var err error
+		jwt, err = client.AuthenticateWithKeycloak()
+		if err != nil {
+			log.Fatalf("Keycloak authentication failed: %v", err)
+		}
+		log.Println("✓ Authenticated with Keycloak")
+	}
+
+	// Smoke test NATS connectivity
+	log.Println("Smoke testing NATS connectivity...")
 	if err := client.ConnectToNATS(jwt); err != nil {
 		log.Fatalf("NATS smoke test failed: %v", err)
 	}
-	log.Println("✓ NATS smoke test passed (connection closed)")
+	log.Println("✓ NATS smoke test passed")
 
-	// Step 4: Publish telemetry data continuously
 	log.Println("Starting continuous telemetry publishing...")
 	if err := client.PublishTelemetryContinuously(*interval); err != nil {
 		log.Fatalf("Failed to publish telemetry: %v", err)
 	}
+}
+
+// loadExistingCertsAndToken checks whether a valid operational certificate and
+// unexpired JWT token already exist on disk. If both are valid it loads them
+// into the client and returns (token, true); otherwise it returns ("", false).
+func (v *VehicleClient) loadExistingCertsAndToken() (string, bool) {
+	certPEM, err := os.ReadFile("certificates/operational-cert.pem")
+	if err != nil {
+		log.Printf("No existing operational certificate: %v", err)
+		return "", false
+	}
+	block, _ := pem.Decode(certPEM)
+	if block == nil {
+		log.Println("Could not decode existing operational certificate PEM")
+		return "", false
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		log.Printf("Could not parse existing operational certificate: %v", err)
+		return "", false
+	}
+	if time.Until(cert.NotAfter) < 60*time.Second {
+		log.Printf("Operational certificate expired at %s", cert.NotAfter.Format(time.RFC3339))
+		return "", false
+	}
+
+	keyPEM, err := os.ReadFile("certificates/operational-key.pem")
+	if err != nil {
+		log.Printf("No existing operational key: %v", err)
+		return "", false
+	}
+	keyBlock, _ := pem.Decode(keyPEM)
+	if keyBlock == nil {
+		log.Println("Could not decode existing operational key PEM")
+		return "", false
+	}
+	key, err := x509.ParsePKCS1PrivateKey(keyBlock.Bytes)
+	if err != nil {
+		log.Printf("Could not parse existing operational key: %v", err)
+		return "", false
+	}
+
+	tokenBytes, err := os.ReadFile("certificates/oidc-access-token")
+	if err != nil {
+		log.Printf("No existing access token: %v", err)
+		return "", false
+	}
+	token := strings.TrimSpace(string(tokenBytes))
+	expiry := jwtExpiry(token)
+	if time.Until(expiry) < 60*time.Second {
+		log.Printf("Access token expired at %s", expiry.Format(time.RFC3339))
+		return "", false
+	}
+
+	v.operationalCert = cert
+	v.operationalCertPEM = certPEM
+	v.operationalKey = key
+	log.Printf("  Certificate valid until: %s", cert.NotAfter.Format(time.RFC3339))
+	log.Printf("  Token valid until:       %s", expiry.Format(time.RFC3339))
+	return token, true
+}
+
+// jwtExpiry decodes the exp claim from a JWT without verifying the signature.
+func jwtExpiry(token string) time.Time {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return time.Time{}
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return time.Time{}
+	}
+	var claims map[string]interface{}
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		return time.Time{}
+	}
+	exp, ok := claims["exp"].(float64)
+	if !ok {
+		return time.Time{}
+	}
+	return time.Unix(int64(exp), 0)
 }
 
 // Register performs the vehicle registration flow
@@ -339,7 +448,8 @@ func (v *VehicleClient) AuthenticateWithKeycloak() (string, error) {
 
 	// For client certificate authentication, we use grant_type=client_credentials
 	// The client_id should match the clientId configured in Keycloak (configured as "car")
-	data := "grant_type=client_credentials&client_id=car"
+	// Request openid scope to get an ID token, and offline_access for a refresh token
+	data := "grant_type=client_credentials&client_id=car&scope=openid+offline_access"
 
 	req, err := http.NewRequest("POST", tokenURL, bytes.NewBufferString(data))
 	if err != nil {
@@ -364,6 +474,36 @@ func (v *VehicleClient) AuthenticateWithKeycloak() (string, error) {
 	}
 
 	log.Printf("  Token expires in: %d seconds", tokenResp.ExpiresIn)
+
+	// Write the full token response as JSON to disk
+	tokenJSON, err := json.MarshalIndent(tokenResp, "", "  ")
+	if err != nil {
+		log.Printf("  Warning: failed to marshal token response: %v", err)
+	} else {
+		if err := os.WriteFile("certificates/oidc-token.json", tokenJSON, 0600); err != nil {
+			log.Printf("  Warning: failed to write OIDC token JSON to disk: %v", err)
+		} else {
+			log.Println("  OIDC token response written to certificates/oidc-token.json")
+		}
+	}
+
+	// Write individual tokens to separate files for easy consumption
+	tokenFiles := map[string]string{
+		"certificates/oidc-access-token":  tokenResp.AccessToken,
+		"certificates/oidc-id-token":      tokenResp.IDToken,
+		"certificates/oidc-refresh-token": tokenResp.RefreshToken,
+	}
+	for path, token := range tokenFiles {
+		if token == "" {
+			continue
+		}
+		if err := os.WriteFile(path, []byte(token), 0600); err != nil {
+			log.Printf("  Warning: failed to write %s: %v", path, err)
+		} else {
+			log.Printf("  Token written to %s", path)
+		}
+	}
+
 	return tokenResp.AccessToken, nil
 }
 
@@ -392,17 +532,23 @@ func (v *VehicleClient) ConnectToNATS(jwt string) error {
 	return nil
 }
 
-// buildTelemetrySubject constructs the NATS subject for telemetry publishing
+// buildTelemetrySubject constructs the NATS subject for generic TelemetryMessage publishing
 // Supports configurable prefix via TELEMETRY_PREFIX environment variable
 // Examples:
-//   - Without prefix: telemetry.{VIN}.{sensor}
-//   - With prefix "prod.bigtable": telemetry.prod.bigtable.{VIN}.{sensor}
+//   - Without prefix: telemetry-generic.{VIN}.{sensor}
+//   - With prefix "prod.bigtable": telemetry-generic.prod.bigtable.{VIN}.{sensor}
 func (v *VehicleClient) buildTelemetrySubject(sensor string) string {
 	prefix := os.Getenv("TELEMETRY_PREFIX")
 	if prefix != "" {
-		return fmt.Sprintf("telemetry.%s.%s.%s", prefix, v.VIN, sensor)
+		return fmt.Sprintf("telemetry-generic.%s.%s.%s", prefix, v.VIN, sensor)
 	}
-	return fmt.Sprintf("telemetry.%s.%s", v.VIN, sensor)
+	return fmt.Sprintf("telemetry-generic.%s.%s", v.VIN, sensor)
+}
+
+// buildMetricsReportSubject constructs the NATS subject for MetricsReport publishing
+// Format: telemetry.{VIN}
+func (v *VehicleClient) buildMetricsReportSubject() string {
+	return fmt.Sprintf("telemetry.%s", v.VIN)
 }
 
 // PublishTelemetry sends sample telemetry data to NATS
@@ -455,12 +601,22 @@ func (v *VehicleClient) PublishTelemetry() error {
 }
 
 // PublishTelemetryContinuously sends telemetry data to NATS continuously
+// Supports two message types: "telemetry" (TelemetryMessage) and "metrics_report" (MetricsReport)
 func (v *VehicleClient) PublishTelemetryContinuously(intervalSeconds int) error {
 	// Initial battery state
 	batteryVoltage := 12.6
 	batteryCurrent := 45.2
 	batterySoC := 85.5
 	batteryTemp := 25.3
+
+	// Engine state (for metrics reports)
+	enginePower := 50.0
+	engineRPM := 1000.0
+	fuelLevel := 50.0
+	velocity := 0.0
+	steeringAngle := 0.0
+	acceleratorPct := 0.0
+	brakePct := 0.0
 
 	// JWT refresh parameters
 	var nc *nats.Conn
@@ -479,8 +635,8 @@ func (v *VehicleClient) PublishTelemetryContinuously(intervalSeconds int) error 
 			return fmt.Errorf("failed to get JWT: %w", err)
 		}
 
-		// JWT expires in 900 seconds (from Keycloak response)
-		jwtExpiry = time.Now().Add(900 * time.Second)
+		// JWT expires in 2 weeks (1209600 seconds, matching Keycloak realm config)
+		jwtExpiry = time.Now().Add(1209600 * time.Second)
 		log.Printf("JWT refreshed, expires at: %s", jwtExpiry.Format(time.RFC3339))
 
 		nc, err = nats.Connect(v.natsURL, nats.Token(jwt))
@@ -520,7 +676,16 @@ func (v *VehicleClient) PublishTelemetryContinuously(intervalSeconds int) error 
 		batterySoC -= mathrand.Float64() * 0.1             // Slowly discharge
 		batteryTemp += (mathrand.Float64() - 0.5) * 1.0    // ±0.5°C
 
-		// Keep values in realistic ranges
+		// Simulate engine variations (for metrics reports)
+		enginePower += (mathrand.Float64() - 0.5) * 10.0
+		engineRPM += (mathrand.Float64() - 0.5) * 100.0
+		fuelLevel -= mathrand.Float64() * 0.05 // Slowly consume fuel
+		velocity += (mathrand.Float64() - 0.5) * 5.0
+		steeringAngle += (mathrand.Float64() - 0.5) * 2.0
+		acceleratorPct += (mathrand.Float64() - 0.5) * 5.0
+		brakePct += (mathrand.Float64() - 0.5) * 5.0
+
+		// Keep battery values in realistic ranges
 		if batteryVoltage < 11.0 {
 			batteryVoltage = 11.0
 		}
@@ -543,51 +708,157 @@ func (v *VehicleClient) PublishTelemetryContinuously(intervalSeconds int) error 
 			batteryTemp = 45
 		}
 
-		subject := v.buildTelemetrySubject("battery")
-		now := time.Now()
-
-		// Create protobuf telemetry message
-		msg := &pb.TelemetryMessage{
-			MessageId:     uuid.New().String(),
-			SchemaVersion: 1,
-			DeviceId:      v.VIN,
-			SensorData: []*pb.SensorReading{
-				{
-					Timestamp: timestamppb.New(now),
-					Value:     fmt.Sprintf("%.2f", batteryVoltage),
-					DataType:  pb.DataType_DYNAMIC,
-					Sensor:    "battery.voltage",
-				},
-				{
-					Timestamp: timestamppb.New(now),
-					Value:     fmt.Sprintf("%.2f", batteryCurrent),
-					DataType:  pb.DataType_DYNAMIC,
-					Sensor:    "battery.current",
-				},
-				{
-					Timestamp: timestamppb.New(now),
-					Value:     fmt.Sprintf("%.2f", batterySoC),
-					DataType:  pb.DataType_DYNAMIC,
-					Sensor:    "battery.soc",
-				},
-				{
-					Timestamp: timestamppb.New(now),
-					Value:     fmt.Sprintf("%.2f", batteryTemp),
-					DataType:  pb.DataType_DYNAMIC,
-					Sensor:    "battery.temp",
-				},
-			},
+		// Keep engine values in realistic ranges
+		if enginePower < 0 {
+			enginePower = 0
+		}
+		if enginePower > 150 {
+			enginePower = 150
+		}
+		if engineRPM < 0 {
+			engineRPM = 0
+		}
+		if engineRPM > 6000 {
+			engineRPM = 6000
+		}
+		if fuelLevel < 5 {
+			fuelLevel = 60 // Reset fuel
+		}
+		if velocity < 0 {
+			velocity = 0
+		}
+		if velocity > 200 {
+			velocity = 200
+		}
+		if steeringAngle < -45 {
+			steeringAngle = -45
+		}
+		if steeringAngle > 45 {
+			steeringAngle = 45
+		}
+		if acceleratorPct < 0 {
+			acceleratorPct = 0
+		}
+		if acceleratorPct > 100 {
+			acceleratorPct = 100
+		}
+		if brakePct < 0 {
+			brakePct = 0
+		}
+		if brakePct > 100 {
+			brakePct = 100
 		}
 
-		// Marshal to protobuf
-		payload, err := proto.Marshal(msg)
-		if err != nil {
-			log.Printf("Failed to marshal protobuf: %v", err)
+		now := time.Now()
+
+		// Build and publish message based on message type
+		var subject string
+		var payload []byte
+		var err error
+
+		if v.MessageType == "telemetry" {
+			// Publish TelemetryMessage
+			subject = v.buildTelemetrySubject("battery")
+
+			msg := &pb.TelemetryMessage{
+				MessageId:     uuid.New().String(),
+				SchemaVersion: 1,
+				DeviceId:      v.VIN,
+				SensorData: []*pb.SensorReading{
+					{
+						Timestamp: timestamppb.New(now),
+						Value:     fmt.Sprintf("%.2f", batteryVoltage),
+						DataType:  pb.DataType_DYNAMIC,
+						Sensor:    "battery.voltage",
+					},
+					{
+						Timestamp: timestamppb.New(now),
+						Value:     fmt.Sprintf("%.2f", batteryCurrent),
+						DataType:  pb.DataType_DYNAMIC,
+						Sensor:    "battery.current",
+					},
+					{
+						Timestamp: timestamppb.New(now),
+						Value:     fmt.Sprintf("%.2f", batterySoC),
+						DataType:  pb.DataType_DYNAMIC,
+						Sensor:    "battery.soc",
+					},
+					{
+						Timestamp: timestamppb.New(now),
+						Value:     fmt.Sprintf("%.2f", batteryTemp),
+						DataType:  pb.DataType_DYNAMIC,
+						Sensor:    "battery.temp",
+					},
+				},
+			}
+
+			payload, err = proto.Marshal(msg)
+			if err != nil {
+				log.Printf("Failed to marshal TelemetryMessage: %v", err)
+				continue
+			}
+
+		} else if v.MessageType == "metrics_report" {
+			// Publish MetricsReport with VehicleTelemetryData
+			subject = v.buildMetricsReportSubject()
+
+			// Build the inner VehicleTelemetryData payload
+			ignitionState := engineRPM > 0
+			gpsLat := float32(0.0)
+			gpsLon := float32(0.0)
+
+			vehicleData := &pbVehicle.VehicleTelemetryData{
+				ENGINE_POWER:   float32(enginePower),
+				ENGINE_RPM:     float32(engineRPM),
+				FUEL_CAPACITY:  50.0, // Static value
+				FUEL_LEVEL:     float32(fuelLevel),
+				TIRE_PRESSURE:  2.2, // Static value
+				VELOCITY:       float32(velocity),
+				IGNITION_STATE: &ignitionState,
+				GPS_LATITUDE:   &gpsLat,
+				GPS_LONGITUDE:  &gpsLon,
+				VehicleDynamics: &pbVehicle.CarlaVehicleDynamics{
+					SteeringAngleDeg:    steeringAngle,
+					AcceleratorPedalPct: acceleratorPct,
+					BrakePedalPct:       brakePct,
+				},
+				GearStatus: &pbVehicle.CarlaVehicleGearStatus{
+					Gear: pbVehicle.CarlaVehicleGearStatus_NEUTRAL,
+				},
+			}
+
+			// Marshal inner payload to Any
+			anyPayload, err := anypb.New(vehicleData)
+			if err != nil {
+				log.Printf("Failed to create Any payload: %v", err)
+				continue
+			}
+
+			// Build the outer MetricsReport
+			report := &pbMetrics.MetricsReport{
+				ReportNumber:         int32(messageCount) + 1,
+				ReportTimestamp:      timestamppb.New(now),
+				ReportReason:         pbMetrics.MetricsReport_REGULAR,
+				MetricsConfigUuid:    uuid.New().String(),
+				MetricsConfigVersion: 1,
+				ReportConfigName:     "default",
+				ReportData:           anyPayload,
+				ReportUuid:           uuid.New().String(),
+			}
+
+			payload, err = proto.Marshal(report)
+			if err != nil {
+				log.Printf("Failed to marshal MetricsReport: %v", err)
+				continue
+			}
+		} else {
+			log.Printf("Unknown message type: %s", v.MessageType)
 			continue
 		}
 
+		// Publish to NATS
 		if err := nc.Publish(subject, payload); err != nil {
-			log.Printf("Failed to publish telemetry: %v", err)
+			log.Printf("Failed to publish: %v", err)
 			// Try to reconnect on publish error
 			if err := refreshConnection(); err != nil {
 				log.Printf("Failed to reconnect: %v", err)
@@ -596,8 +867,13 @@ func (v *VehicleClient) PublishTelemetryContinuously(intervalSeconds int) error 
 		}
 
 		messageCount++
-		log.Printf("[%d] Published protobuf to %s: SoC=%.1f%%, Voltage=%.2fV, Current=%.2fA, Temp=%.1f°C",
-			messageCount, subject, batterySoC, batteryVoltage, batteryCurrent, batteryTemp)
+		if v.MessageType == "telemetry" {
+			log.Printf("[%d] Published TelemetryMessage to %s: SoC=%.1f%%, Voltage=%.2fV, Current=%.2fA, Temp=%.1f°C",
+				messageCount, subject, batterySoC, batteryVoltage, batteryCurrent, batteryTemp)
+		} else {
+			log.Printf("[%d] Published MetricsReport to %s: Power=%.1fW, RPM=%.0f, Speed=%.1fkm/h, Fuel=%.1f%%",
+				messageCount, subject, enginePower, engineRPM, velocity, fuelLevel)
+		}
 	}
 
 	return nil

@@ -1,0 +1,58 @@
+releases:
+  - name: data-web-client
+    namespace: sample-services
+    createNamespace: true
+    chart: '../data-web-client'
+    labels:
+      app: data-web-client
+    installed: true
+    forceConflicts: true
+    set:
+      - name: arch
+        value: {{ .StateValues.arch | default "arm64" }}
+      - name: image.repository
+        value: '{{ requiredEnv "IMAGE_REPO" }}/data-web-client'
+      - name: gcp.projectId
+        value: '{{ requiredEnv "GCP_PROJECT_ID" }}'
+      - name: gcp.serviceAccountEmail
+        value: '{{ requiredEnv "DATA_API_BIGTABLE_CONNECTOR_GCP_SERVICE_ACCOUNT" }}'
+      - name: database.instanceConnectionName
+        value: '{{ requiredEnv "CLOUD_SQL_INSTANCE_CONNECTION_NAME" }}'
+      - name: database.password
+        value: '{{ requiredEnv "WEBCLIENT_DB_PASSWORD" }}'
+      - name: nextauth.secret
+        value: '{{ requiredEnv "NEXTAUTH_SECRET" }}'
+      - name: nextauth.url
+        value: '{{ requiredEnv "NEXTAUTH_URL" }}'
+      - name: keycloak.clientId
+        value: '{{ requiredEnv "KEYCLOAK_CLIENT_ID" }}'
+      - name: keycloak.clientSecret
+        value: '{{ requiredEnv "KEYCLOAK_CLIENT_SECRET" }}'
+      - name: keycloak.issuer
+        value: '{{ requiredEnv "KEYCLOAK_ISSUER" }}'
+      - name: bigtable.instanceId
+        value: '{{ requiredEnv "BIGTABLE_INSTANCE_ID" }}'
+      - name: googleMaps.apiKey
+        value: '{{ env "GOOGLE_MAPS_API_KEY" | default "" }}'
+      - name: googleMaps.mapId
+        value: '{{ env "GOOGLE_MAPS_MAP_ID" | default "DEMO_MAP_ID" }}'
+      - name: pkiStrategy
+        value: '{{ env "PKI_STRATEGY" | default "local" }}'
+      - name: baseDomain
+        value: '{{ env "BASE_DOMAIN" | default "" }}'
+      - name: fleetviewHostname
+        value: '{{ env "FLEETVIEW_HOSTNAME" | default "fleetview" }}'
+      # Values are base64-pre-encoded (one-line) so helm --set doesn't mangle newlines.
+      # secret.yaml puts these directly into data: (no b64enc needed).
+      - name: tls.cert
+        value: '{{ env "FLEETVIEW_TLS_CRT" | default "" }}'
+      - name: tls.key
+        value: '{{ env "FLEETVIEW_TLS_KEY" | default "" }}'
+      - name: externalSecretsEnabled
+        value: 'true'
+      - name: externalSecrets.clusterLocation
+        value: '{{ .StateValues.clusterLocation | default "" }}'
+      - name: externalSecrets.clusterName
+        value: '{{ .StateValues.clusterName | default "" }}'
+      - name: externalSecrets.gcpServiceAccount
+        value: '{{ requiredEnv "EXTERNAL_SECRETS_OPERATOR_GCP_SERVICE_ACCOUNT" }}'

@@ -84,6 +84,12 @@ func TestParseTimestampFromRowKey(t *testing.T) {
 			wantOk:   true,
 		},
 		{
+			name:     "Microsecond precision (wombat strips trailing zeros)",
+			key:      "vin1#2026-04-24T12:50:23.812507Z",
+			wantTime: time.Date(2026, 4, 24, 12, 50, 23, 812507000, time.UTC),
+			wantOk:   true,
+		},
+		{
 			name:   "Invalid Timestamp",
 			key:    "vin#invalid-time",
 			wantOk: false,

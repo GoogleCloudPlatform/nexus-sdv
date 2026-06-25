@@ -1,0 +1,12 @@
+{{- if eq .Values.pkiStrategy "remote" }}
+apiVersion: networking.gke.io/v1
+kind: ManagedCertificate
+metadata:
+  name: {{ include "keycloak.fullname" . | trim }}-cert
+  namespace: {{ .Release.Namespace }}
+  labels:
+{{ include "keycloak.labels" . | indent 4 }}
+spec:
+  domains:
+    - keycloak.{{ .Values.baseDomain }}
+{{- end }}

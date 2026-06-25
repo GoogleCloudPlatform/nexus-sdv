@@ -13,6 +13,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+## [1.2.0] - 2026-06-23
+
+### Added
+- **Telemetry Web Client**: Renders a fleet overview and per-device time-series view, with built-in support for GPS track maps. Pre-integrated with the new Trip Analyzer Sample Service.
+- **Platform Deployment Test Automation**: Enables full GCP-based Nexus SDV platform deployment leveraging Cloud Build Triggers and Repositories, eliminating the requirement for local workstation execution.
+- **Trip Analyzer Sample Service**: Reference business service built on top of Nexus SDV Core. Calculates driving scores based on live telemetry data received from the vehicle platform and publishes results to the Telemetry Web Client.
+- **ESP32 IoT-Client**: Fully functional reference hardware implementation covering the complete edge-to-cloud data path, including deep-sleep power management and native GPS integration.
+- **MQTT-NATS Data Converter**: Service that converts inbound edge telemetry from MQTT into the native Nexus Protobuf format (`TelemetryMessage`) and publishes it directly to NATS.
+
+### Changed
+- **`bootstrap-platform.sh`**: Extended to support Cloud Build test automation pipelines and updated the interactive routine to include configuration prompts for the Telemetry Web Client.
+- **`teardown-platform.sh`**: Updated resource cleanup logic to cover components and artifacts provisioned by the new Cloud Build automation layer.
+
 ## [1.1.0] - 2026-03-31
 
 ### Added
@@ -35,5 +48,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+[1.2.0]: https://github.com/GoogleCloudPlatform/nexus-sdv/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/GoogleCloudPlatform/nexus-sdv/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/GoogleCloudPlatform/nexus-sdv/releases/tag/v1.0.0

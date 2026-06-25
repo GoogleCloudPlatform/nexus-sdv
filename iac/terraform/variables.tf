@@ -29,9 +29,9 @@ variable "repository" {
   description = "The URL of your (forked) repository"
 }
 
-variable "random_suffix" {
+variable "deployment_suffix" {
   type        = string
-  description = "A random suffix to ensure resource uniqueness"
+  description = "Unique suffix per deployment instance; prevents name collisions with WIF pools and CA pools still in GCP recovery periods after teardown"
 }
 
 variable "github_org" {

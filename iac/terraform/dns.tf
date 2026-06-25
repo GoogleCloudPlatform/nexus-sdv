@@ -26,7 +26,7 @@ data "google_dns_managed_zone" "existing_zone" {
 # Output nameservers from whichever zone we're using
 output "name_servers" {
   description = "Nameservers to configure at your registrar"
-  value = local.use_existing_dns_zone ? data.google_dns_managed_zone.existing_zone[0].name_servers : (
-    local.create_dns_zone ? google_dns_managed_zone.sdv_zone[0].name_servers : []
+  value = local.use_existing_dns_zone ? try(data.google_dns_managed_zone.existing_zone[0].name_servers, []) : (
+    local.create_dns_zone ? try(google_dns_managed_zone.sdv_zone[0].name_servers, []) : []
   )
 }

@@ -40,11 +40,13 @@ echo -e "${COLOR_RED}  WARNING: DESTRUCTIVE OPERATION${COLOR_NC}"
 echo -e "${COLOR_RED}========================================${COLOR_NC}"
 echo ""
 echo "This script will delete ALL secrets from project: ${PROJECT_ID}"
+echo "Secrets whose name contains 'github-oauthtoken' will be preserved."
 echo ""
 
-# List all secrets
+# List all secrets, excluding any that contain 'github-oauthtoken'
 echo -e "${COLOR_YELLOW}Fetching list of secrets...${COLOR_NC}"
-SECRETS=$(gcloud secrets list --project="$PROJECT_ID" --format="value(name)")
+SECRETS=$(gcloud secrets list --project="$PROJECT_ID" --format="value(name)" \
+    | grep -v 'github-oauthtoken' || true)
 
 if [ -z "$SECRETS" ]; then
     echo -e "${COLOR_GREEN}No secrets found in project.${COLOR_NC}"
