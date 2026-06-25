@@ -5,7 +5,7 @@ description = "Registers devices and creates JWT tokens for them. Could be used 
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "cryptography>=46.0.5",
+    "cryptography>=48.0.1",
     "grpcio-tools>=1.78.0",
     "nats-py>=2.13.1",
     "protobuf>=6.33.5",
