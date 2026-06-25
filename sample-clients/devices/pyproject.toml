@@ -10,5 +10,5 @@ dependencies = [
     "nats-py>=2.13.1",
     "protobuf>=6.33.5",
     "python-keycloak>=7.1.1",
-    "requests>=2.32.5",
+    "requests>=2.33.0",
 ]
