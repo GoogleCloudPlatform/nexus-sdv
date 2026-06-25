@@ -26,6 +26,20 @@ steps:
   # ============================================================================
   # 1. BUILD & PUSH REGISTRATION SERVER (Docker Buildx)
   # ============================================================================
+  - id: 'configure-ar'
+    name: 'gcr.io/cloud-builders/gcloud'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        TOKEN=$$(gcloud auth print-access-token)
+        AUTH=$$(printf '%s' "oauth2accesstoken:$$TOKEN" | base64 -w0)
+        mkdir -p /root/.docker
+        echo '{"auths":{"europe-west4-docker.pkg.dev":{"auth":"'$$AUTH'"}}}' \
+          > /root/.docker/config.json
+        echo "Artifact Registry auth configured (token-based, no credential helper)."
+    waitFor: ['-']
+
   - id: 'build-push-registration'
     name: 'gcr.io/cloud-builders/docker'
     entrypoint: 'bash'
@@ -57,6 +71,7 @@ steps:
 
         docker buildx build \
           --platform linux/${_ARCH} \
+          --build-arg DOCKER_HUB_MIRROR="$${IMAGE_REPO%/artifact-registry}/docker-hub" \
           --file ./base-services/registration/server/Dockerfile \
           --tag "$$TAG_SHA" \
           --tag "$$TAG_LATEST" \
@@ -65,6 +80,7 @@ steps:
           --push \
           .
     secretEnv: [ 'IMAGE_REPO' ]
+    waitFor: ['configure-ar']
 
   # ============================================================================
   # 2. DEPLOY EMPTY REGISTRATION SERVER IMAGE (to get IP for local PKI Strategy)
@@ -158,8 +174,10 @@ steps:
         gcloud secrets versions access latest --secret="REGISTRATION_CA_CERT" --project="$PROJECT_ID" > temp-pki/registration-ca-cert.pem
         gcloud secrets versions access latest --secret="REGISTRATION_CA_KEY" --project="$PROJECT_ID" > temp-pki/registration-ca-key.pem
 
-        # Download Factory CA (for reference)
+        # Download Factory CA cert and key (key is needed by update-cert-config-local
+        # to store REGISTRATION_FACTORY_CA_KEY in Secret Manager for the smoke test)
         gcloud secrets versions access latest --secret="REGISTRATION_FACTORY_CA_CERT" --project="$PROJECT_ID" > temp-pki/factory-ca-cert.pem
+        gcloud secrets versions access latest --secret="REGISTRATION_FACTORY_CA_KEY"  --project="$PROJECT_ID" > temp-pki/factory-ca-key.pem
 
         # Copy to PKI directory structure (config files from git, certs/keys from Secret Manager)
         mkdir -p base-services/registration/pki/server-ca
@@ -171,8 +189,9 @@ steps:
         cp temp-pki/registration-ca-cert.pem base-services/registration/pki/registration-ca/ca.crt.pem
         cp temp-pki/registration-ca-key.pem base-services/registration/pki/registration-ca/ca.key.pem
         cp temp-pki/factory-ca-cert.pem base-services/registration/pki/factory-ca/ca.crt.pem
+        cp temp-pki/factory-ca-key.pem  base-services/registration/pki/factory-ca/ca.key.pem
 
-        echo "✓ CA certificates downloaded and placed in PKI structure"
+        echo "✓ CA certificates and keys downloaded and placed in PKI structure"
     secretEnv: [ 'PKI_STRATEGY' ]
     waitFor: [ 'get-external-ips' ]
 
@@ -270,6 +289,7 @@ steps:
         add_secret_version "REGISTRATION_CA_CERT" "$$BASE_DIR/registration-ca/ca.crt.pem"
         add_secret_version "REGISTRATION_CA_KEY" "$$BASE_DIR/registration-ca/ca.key.pem"
         add_secret_version "REGISTRATION_FACTORY_CA_CERT" "$$BASE_DIR/factory-ca/ca.crt.pem"
+        add_secret_version "REGISTRATION_FACTORY_CA_KEY"  "$$BASE_DIR/factory-ca/ca.key.pem"
 
         echo "✓ Certificates uploaded successfully"
     secretEnv: [ 'PKI_STRATEGY' ]
@@ -419,6 +439,10 @@ steps:
         
         REGISTRATION_FACTORY_CA_CERT=$$(gcloud secrets versions access latest --secret="REGISTRATION_FACTORY_CA_CERT" --project="$PROJECT_ID")
         echo "$$REGISTRATION_FACTORY_CA_CERT" > registration_server_factory_ca_cert.txt
+
+        # Fetch KEYCLOAK_HOSTNAME prefix for remote PKI mode (no gcloud in helmfile container)
+        KEYCLOAK_HOSTNAME=$$(gcloud secrets versions access latest --secret="KEYCLOAK_HOSTNAME" --project="$PROJECT_ID" | tr -d '\n')
+        echo "$$KEYCLOAK_HOSTNAME" > keycloak_hostname.txt
     waitFor: [ 'update-gcp-secrets-remote', 'update-cert-config-local' ]
 
   - id: 'deploy-registration-server-final'
@@ -458,16 +482,18 @@ steps:
                 exit 1
              fi
         elif [ "$$PKI_STRATEGY" == "remote" ]; then
-             if [ -f "domain.txt" ]; then
+             if [ -f "domain.txt" ] && [ -f "keycloak_hostname.txt" ]; then
                 export BASE_DOMAIN=$$(cat domain.txt)
                 export KEYCLOAK_IP=""
                 export NATS_IP=""
+                KEYCLOAK_HOSTNAME=$$(cat keycloak_hostname.txt)
+                EXTRA_ARGS="--state-values-set keycloakHostname=$${KEYCLOAK_HOSTNAME}-client"
              else
-                echo "::error::Remote strategy selected but domain.txt not found."
+                echo "::error::Remote strategy selected but domain.txt or keycloak_hostname.txt not found."
                 exit 1
              fi
         fi
-        
+
         cd iac/helm/helmfile.d
         if ! helmfile --file registration.yaml.gotmpl ${_HELM_ACTION} --wait \
             --args "--timeout 4m0s" \
@@ -548,11 +574,11 @@ steps:
 # SUBSTITUTIONS & SECRETS CONFIG
 # ============================================================================
 substitutions:
-  _ENVIRONMENT: "cb-test"
+  _ENVIRONMENT: "sandbox"
   _PKI_STRATEGY: "local"
   _ARCH: "arm64"
   _BASE_DOMAIN: ""
-  _CLUSTER_NAME: "cb-test-gke"
+  _CLUSTER_NAME: "sandbox-gke"
   _REGION: "europe-west4"
   _COMMIT_SHA: "manual"
   _HELM_ACTION: "sync"

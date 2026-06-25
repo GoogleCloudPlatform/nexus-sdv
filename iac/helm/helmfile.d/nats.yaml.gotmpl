@@ -21,6 +21,8 @@ releases:
       # Inline values to properly structure authorization config
       - config:
           merge:
+            leafnodes:
+              listen: 0.0.0.0:7422
             # Define accounts for proper auth_callout isolation
             accounts:
               AUTH:
@@ -41,9 +43,8 @@ releases:
                 - user: connector
                   password: '{{ requiredEnv "NATS_CONNECTOR_PASSWORD" }}'
                   permissions:
-                    subscribe:
-                      - "telemetry.>"
-                    publish: []
+                    subscribe: ["telemetry.>", "telemetry-generic.>", "local.telemetry.>", "scoring.>"]
+                    publish: ["telemetry.>", "telemetry-generic.>", "local.telemetry.>", "scoring.>"]
               auth_callout:
                 issuer: '{{ requiredEnv "NATS_AUTH_CALLOUT_NKEY_PUB" }}'
                 # auth_users lists users who BYPASS the callout (authenticate directly)
@@ -58,6 +59,25 @@ releases:
         value: {{ .StateValues.arch | default "arm64" }}
       - name: "natsBox.podTemplate.merge.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0].matchExpressions[0].values[0]"
         value: {{ .StateValues.arch | default "arm64" }}
+      {{- if eq (.StateValues.arch | default "arm64") "arm64" }}
+      # arm64 on Autopilot must name a compute-class; autopilot-arm is the
+      # container-optimized Arm class (backed by C4A). Appended only for arm64 so
+      # amd64 deployments use default provisioning (no compute-class). Added here
+      # rather than in values.yaml because values.yaml is arch-agnostic and the
+      # arch is only known per-deploy.
+      - name: "podTemplate.merge.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0].matchExpressions[1].key"
+        value: cloud.google.com/compute-class
+      - name: "podTemplate.merge.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0].matchExpressions[1].operator"
+        value: In
+      - name: "podTemplate.merge.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0].matchExpressions[1].values[0]"
+        value: autopilot-arm
+      - name: "natsBox.podTemplate.merge.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0].matchExpressions[1].key"
+        value: cloud.google.com/compute-class
+      - name: "natsBox.podTemplate.merge.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0].matchExpressions[1].operator"
+        value: In
+      - name: "natsBox.podTemplate.merge.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0].matchExpressions[1].values[0]"
+        value: autopilot-arm
+      {{- end }}
       - name: pkiStrategy
         value: {{ .StateValues.pkiStrategy | default "local" }}
       {{- if eq $pki_strategy "remote" }}

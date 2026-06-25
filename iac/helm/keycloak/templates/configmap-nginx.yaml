@@ -1,0 +1,54 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "keycloak.fullname" . | trim }}-nginx
+  labels:
+{{ include "keycloak.labels" . | indent 4 }}
+data:
+  nginx.conf: |
+    worker_processes auto;
+    error_log /dev/stderr warn;
+    pid /tmp/nginx.pid;
+
+    events {
+        worker_connections 1024;
+    }
+
+    http {
+        client_body_temp_path /tmp/nginx_client_body;
+        proxy_temp_path       /tmp/nginx_proxy;
+
+        log_format debug '$remote_addr - [$time_local] "$request" $status '
+                        'xfcc_truncated="$http_x_forwarded_client_cert" '
+                        'cert_extracted="$xfcc_cert"';
+        access_log /dev/stdout debug;
+
+        # Extract URL-encoded client cert PEM from Istio's x-forwarded-client-cert (XFCC) header.
+        # Traffic Director sets forward_client_cert_details=SANITIZE_SET with cert=true, which
+        # puts the full URL-encoded PEM in Cert=<value>. Keycloak's nginx x509 lookup reads
+        # the ssl-client-cert header, so we bridge the two here.
+        # Named capture ($certpem) is used instead of positional $1 for clear nginx map support.
+        map $http_x_forwarded_client_cert $xfcc_cert {
+            default                          "";
+            "~Cert=\x22(?<certpem>[^\x22]+)" $certpem;
+        }
+
+        # URL-encoded PEM certs are typically 3-5 KB; increase header buffers accordingly.
+        large_client_header_buffers 8 32k;
+        proxy_buffer_size           16k;
+        proxy_buffers               4 32k;
+
+        server {
+            listen 8080;
+            server_name _;
+
+            location / {
+                proxy_pass         http://127.0.0.1:8888;
+                proxy_set_header   Host              $host;
+                proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+                proxy_set_header   X-Forwarded-Proto $http_x_forwarded_proto;
+                proxy_set_header   ssl-client-cert   $xfcc_cert;
+                proxy_read_timeout 120s;
+            }
+        }
+    }

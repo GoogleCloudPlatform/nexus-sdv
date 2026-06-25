@@ -1,0 +1,18 @@
+// Copyright 2024 Google LLC
+// Reconstructed from descriptor_protos in vehicle_telemetry.textproto.
+
+syntax = "proto2";
+
+package com.sdv.google.display_safety;
+
+option go_package = "telemetry-subscriber/aaos_telemetry";
+
+message CurrentGear {
+  enum Gear {
+    P = 0;
+    R = 1;
+    N = 2;
+    D = 3;
+  }
+  optional Gear gear = 1;
+}

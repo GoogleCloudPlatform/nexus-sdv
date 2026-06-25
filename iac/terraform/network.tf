@@ -58,7 +58,7 @@ resource "google_compute_firewall" "allow_loadbalancer_ingress" {
 
   allow {
     protocol = "tcp"
-    ports    = ["8080", "8443", "4222"]
+    ports    = ["8080", "8443", "4222", "7422"]
   }
 
   direction     = "INGRESS"

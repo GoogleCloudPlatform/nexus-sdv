@@ -1,0 +1,438 @@
+steps:
+  # ============================================================================
+  # 1. SETUP & AUTHENTICATION
+  # ============================================================================
+  - id: 'get-gke-credentials'
+    name: 'gcr.io/cloud-builders/gcloud'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        gcloud container clusters get-credentials "$$GKE_CLUSTER_NAME" \
+          --region="$$GCP_REGION" \
+          --project="$PROJECT_ID"
+
+        echo "Injecting Cloud Build Access Token into Kubeconfig..."
+        TOKEN=$$(gcloud auth print-access-token)
+
+        kubectl config set-credentials build-user --token="$${TOKEN}"
+
+        CONTEXT=$$(kubectl config current-context)
+        kubectl config set-context "$${CONTEXT}" --user=build-user
+
+        echo "Kubeconfig successfully patched for standalone usage."
+    secretEnv: ['GKE_CLUSTER_NAME', 'GCP_REGION']
+
+  # ============================================================================
+  # 2. BUILD & PUSH DOCKER IMAGE
+  #
+  # GOOGLE_MAPS_API_KEY is NOT baked into the image at build time.
+  # It is injected at runtime as an env var by the Helm deployment (sourced from
+  # Secret Manager) and exposed to the browser via the /api/maps-config route.
+  # ============================================================================
+  - id: 'configure-ar'
+    name: 'gcr.io/cloud-builders/gcloud'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        TOKEN=$$(gcloud auth print-access-token)
+        AUTH=$$(printf '%s' "oauth2accesstoken:$$TOKEN" | base64 -w0)
+        mkdir -p /root/.docker
+        echo '{"auths":{"europe-west4-docker.pkg.dev":{"auth":"'$$AUTH'"}}}' \
+          > /root/.docker/config.json
+        echo "Artifact Registry auth configured (token-based, no credential helper)."
+    waitFor: ['-']
+
+  - id: 'build-push-data-web-client'
+    name: 'gcr.io/cloud-builders/docker'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        echo "Initializing Docker Buildx..."
+        docker buildx create --name builder --use
+
+        echo "Starting Docker Build for linux/${_ARCH}..."
+        docker buildx build \
+          --platform linux/${_ARCH} \
+          --build-arg DOCKER_HUB_MIRROR="$${IMAGE_REPO%/artifact-registry}/docker-hub" \
+          --tag "$${IMAGE_REPO}/data-web-client:latest" \
+          --file sample-clients/data-web-client/Dockerfile \
+          --push \
+          sample-clients/data-web-client
+    secretEnv: ['IMAGE_REPO']
+    waitFor: ['configure-ar']
+
+  # ============================================================================
+  # 3. INITIALISE WEB CLIENT DATABASE SCHEMA
+  #
+  # Idempotent step: connects to Cloud SQL as the postgres superuser and:
+  #   1. Grants the webclient user CONNECT + full privileges on nexus_acl
+  #   2. Creates the vehicle_groups table (IF NOT EXISTS)
+  #   3. Grants the webclient user SELECT/INSERT/UPDATE/DELETE on the table
+  #
+  # Runs after the image push so it does not block a parallel deploy, but
+  # before the Helmfile sync so the schema is ready before the app starts.
+  # ============================================================================
+  - id: 'init-webclient-db'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        set -euo pipefail
+
+        echo "Installing postgresql-client..."
+        apt-get update -qq && apt-get install -y -qq postgresql-client
+
+        echo "Downloading Cloud SQL Proxy..."
+        curl -sSL https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v2.18.0/cloud-sql-proxy.linux.amd64 \
+          -o /usr/local/bin/cloud-sql-proxy
+        chmod +x /usr/local/bin/cloud-sql-proxy
+
+        echo "Starting Cloud SQL Proxy..."
+        cloud-sql-proxy "$$CLOUD_SQL_INSTANCE_CONNECTION_NAME" --port=5433 &
+        PROXY_PID=$$!
+
+        echo "Waiting for proxy to be ready..."
+        for i in {1..15}; do
+          pg_isready -h 127.0.0.1 -p 5433 -U postgres && break
+          echo "  not ready yet ($i/15)..."
+          sleep 2
+        done
+
+        echo "Running schema initialisation..."
+        PGPASSWORD="$$POSTGRES_DB_PASSWORD" psql \
+          "host=127.0.0.1 port=5433 dbname=nexus_acl user=postgres sslmode=disable" << 'SQLEOF'
+        -- Grant webclient user access to the database
+        GRANT CONNECT ON DATABASE nexus_acl TO webclient;
+        GRANT USAGE ON SCHEMA public TO webclient;
+        GRANT CREATE ON SCHEMA public TO webclient;
+
+        -- Create vehicle-to-group mapping table (ACL)
+        CREATE TABLE IF NOT EXISTS vehicle_groups (
+          id         SERIAL      PRIMARY KEY,
+          group_name TEXT        NOT NULL,
+          vehicle_id TEXT        NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE (group_name, vehicle_id)
+        );
+
+        -- Grant webclient full DML access
+        GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE vehicle_groups TO webclient;
+        GRANT USAGE, SELECT ON SEQUENCE vehicle_groups_id_seq TO webclient;
+        SQLEOF
+
+        echo "✅ Schema initialisation complete."
+        kill $$PROXY_PID || true
+    secretEnv: ['CLOUD_SQL_INSTANCE_CONNECTION_NAME', 'POSTGRES_DB_PASSWORD']
+    waitFor: ['build-push-data-web-client', 'get-gke-credentials']
+
+  # ============================================================================
+  # 4. GENERATE & STORE FLEETVIEW TLS CERT (remote PKI only)
+  #
+  # Issues a 30-day DNS-SAN cert from the Server CA pool and stores it in
+  # Secret Manager as FLEETVIEW_TLS_CRT / FLEETVIEW_TLS_KEY.
+  # Skipped silently when PKI_STRATEGY=local.
+  # ============================================================================
+  - id: 'generate-fleetview-tls-cert'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        if [ "$$PKI_STRATEGY" != "remote" ]; then echo "Skipping TLS cert generation (local mode)."; exit 0; fi
+
+        HOSTNAME="$$FLEETVIEW_HOSTNAME.$$BASE_DOMAIN"
+        CERT_DIR="temp-certs"
+        mkdir -p "$$CERT_DIR"
+        CERT_ID="fleetview-$(date +%s)"
+
+        echo "Generating TLS cert for $$HOSTNAME ..."
+        openssl genpkey -algorithm RSA -out $$CERT_DIR/fleetview.key.pem
+        openssl req -new -key $$CERT_DIR/fleetview.key.pem \
+          -out $$CERT_DIR/fleetview.csr.pem \
+          -subj "/CN=$$HOSTNAME" \
+          -addext "subjectAltName=DNS:$$HOSTNAME"
+
+        SERVER_CA_POOL=$$(gcloud secrets versions access latest --secret="SERVER_CA_POOL" --project="$PROJECT_ID")
+        gcloud privateca certificates create "$$CERT_ID" \
+          --issuer-pool="$$SERVER_CA_POOL" \
+          --issuer-location="$$GCP_REGION" \
+          --csr="$$CERT_DIR/fleetview.csr.pem" \
+          --cert-output-file="$$CERT_DIR/fleetview.crt.pem" \
+          --validity="P30D" --quiet
+
+        # Store in Secret Manager (create if not exists)
+        for SECRET in FLEETVIEW_TLS_CRT FLEETVIEW_TLS_KEY; do
+          if ! gcloud secrets describe "$$SECRET" --project="$PROJECT_ID" &>/dev/null; then
+            gcloud secrets create "$$SECRET" --replication-policy="automatic" --project="$PROJECT_ID"
+          fi
+        done
+        gcloud secrets versions add FLEETVIEW_TLS_CRT --data-file="$$CERT_DIR/fleetview.crt.pem" --project="$PROJECT_ID"
+        gcloud secrets versions add FLEETVIEW_TLS_KEY --data-file="$$CERT_DIR/fleetview.key.pem" --project="$PROJECT_ID"
+
+        # Cache cert/key to /workspace so subsequent steps can read them
+        cp $$CERT_DIR/fleetview.crt.pem /workspace/fleetview_tls_crt.txt
+        cp $$CERT_DIR/fleetview.key.pem /workspace/fleetview_tls_key.txt
+        echo "✅ Fleetview TLS cert generated and stored."
+    secretEnv: ['PKI_STRATEGY', 'GCP_REGION', 'BASE_DOMAIN', 'FLEETVIEW_HOSTNAME']
+    waitFor: ['build-push-data-web-client', 'get-gke-credentials']
+
+  # ============================================================================
+  # 5. UPDATE NEXTAUTH_URL (remote PKI only)
+  #
+  # Sets NEXTAUTH_URL to https://fleetview.<BASE_DOMAIN> when using remote PKI.
+  # Skipped silently when PKI_STRATEGY=local.
+  # ============================================================================
+  - id: 'update-nextauth-url'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        if [ "$$PKI_STRATEGY" != "remote" ]; then echo "Skipping NEXTAUTH_URL update (local mode)."; exit 0; fi
+        NEXTAUTH_URL="https://$$FLEETVIEW_HOSTNAME.$$BASE_DOMAIN"
+        echo "Setting NEXTAUTH_URL to $$NEXTAUTH_URL"
+        if ! gcloud secrets describe "NEXTAUTH_URL" --project="$PROJECT_ID" &>/dev/null; then
+          gcloud secrets create "NEXTAUTH_URL" --replication-policy="automatic" --project="$PROJECT_ID"
+        fi
+        printf '%s' "$$NEXTAUTH_URL" | gcloud secrets versions add NEXTAUTH_URL --data-file=- --project="$PROJECT_ID"
+        echo "✅ NEXTAUTH_URL updated."
+    secretEnv: ['PKI_STRATEGY', 'BASE_DOMAIN', 'FLEETVIEW_HOSTNAME']
+    waitFor: ['generate-fleetview-tls-cert', 'build-push-data-web-client', 'get-gke-credentials']
+
+  # ============================================================================
+  # 5. ENSURE KEYCLOAK WEB CLIENT SECRETS EXIST
+  #
+  # Idempotent prerequisite for step 6: creates KEYCLOAK_CLIENT_ID_WEB_CLIENT,
+  # KEYCLOAK_CLIENT_SECRET_WEB_CLIENT, and KEYCLOAK_ISSUER in Secret Manager
+  # (and registers the client in Keycloak) when they are missing — i.e. on first
+  # deployment or when deploy-keycloak.yaml has not yet completed its
+  # create-web-client-secrets step.  Safe to run on every build because it exits
+  # immediately when the secrets already exist.
+  # ============================================================================
+  - id: 'ensure-keycloak-web-client'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        apt-get install -y -q jq
+
+        if gcloud secrets versions access latest --secret="KEYCLOAK_CLIENT_ID_WEB_CLIENT" \
+             --project="$PROJECT_ID" &>/dev/null; then
+          echo "✓ Keycloak web-client secrets already exist — skipping."
+          exit 0
+        fi
+
+        echo "Keycloak web-client secrets not found — provisioning..."
+
+        KEYCLOAK_ADMIN_PASSWORD=$$(gcloud secrets versions access latest \
+          --secret="KEYCLOAK_ADMIN_PASSWORD" --project="$PROJECT_ID")
+        BASE_DOMAIN=$$(gcloud secrets versions access latest \
+          --secret="BASE_DOMAIN" --project="$PROJECT_ID")
+        PKI_STRATEGY=$$(gcloud secrets versions access latest \
+          --secret="PKI_STRATEGY" --project="$PROJECT_ID")
+
+        if [ "$$PKI_STRATEGY" == "remote" ]; then
+          FLEETVIEW_HOSTNAME=$$(gcloud secrets versions access latest \
+            --secret="FLEETVIEW_HOSTNAME" --project="$PROJECT_ID")
+          KEYCLOAK_BASE_URL="https://keycloak.$${BASE_DOMAIN}"
+          FLEETVIEW_URL="https://$${FLEETVIEW_HOSTNAME}.$${BASE_DOMAIN}"
+        else
+          KEYCLOAK_BASE_URL="https://keycloak"
+          FLEETVIEW_URL="http://localhost:3000"
+        fi
+
+        ISSUER="$${KEYCLOAK_BASE_URL}/realms/sdv-telemetry"
+        CLIENT_ID="data-web-client"
+        CLIENT_SECRET=$$(openssl rand -hex 32)
+        REDIRECT_URI="$${FLEETVIEW_URL}/*"
+        WEB_ORIGIN="$${FLEETVIEW_URL}"
+
+        add_secret() {
+          local NAME=$$1 VALUE=$$2
+          if ! gcloud secrets describe "$$NAME" --project="$PROJECT_ID" &>/dev/null; then
+            gcloud secrets create "$$NAME" --replication-policy="automatic" --project="$PROJECT_ID"
+          fi
+          printf '%s' "$$VALUE" | gcloud secrets versions add "$$NAME" --data-file=- --project="$PROJECT_ID"
+        }
+
+        add_secret "KEYCLOAK_CLIENT_ID_WEB_CLIENT"     "$$CLIENT_ID"
+        add_secret "KEYCLOAK_CLIENT_SECRET_WEB_CLIENT" "$$CLIENT_SECRET"
+        add_secret "KEYCLOAK_ISSUER"                   "$$ISSUER"
+
+        echo "Secrets stored. Registering client in Keycloak..."
+
+        CURL="curl -s -f"
+
+        TOKEN_RESPONSE=$$($$CURL -X POST \
+          "$${KEYCLOAK_BASE_URL}/realms/master/protocol/openid-connect/token" \
+          -H "Content-Type: application/x-www-form-urlencoded" \
+          -d "client_id=admin-cli" \
+          -d "username=admin" \
+          -d "password=$${KEYCLOAK_ADMIN_PASSWORD}" \
+          -d "grant_type=password" || echo "{}")
+
+        ADMIN_TOKEN=$$(echo "$$TOKEN_RESPONSE" | jq -r '.access_token // ""' 2>/dev/null || true)
+
+        if [[ -z "$$ADMIN_TOKEN" ]]; then
+          echo "::warning::Could not reach Keycloak admin API — secrets stored, client will be registered on next deploy-keycloak run."
+          exit 0
+        fi
+
+        ADMIN_URL="$${KEYCLOAK_BASE_URL}/admin/realms/sdv-telemetry"
+
+        EXISTING=$$(curl -s "$${ADMIN_URL}/clients?clientId=$${CLIENT_ID}" \
+          -H "Authorization: Bearer $${ADMIN_TOKEN}" || echo "[]")
+        CLIENT_UUID=$$(echo "$$EXISTING" | jq -r '.[0].id // ""' 2>/dev/null || true)
+
+        if [[ -n "$$CLIENT_UUID" ]]; then
+          $$CURL -X POST "$${ADMIN_URL}/clients/$${CLIENT_UUID}/client-secret" \
+            -H "Authorization: Bearer $${ADMIN_TOKEN}" -H "Content-Type: application/json" \
+            -d "{\"type\":\"secret\",\"value\":\"$${CLIENT_SECRET}\"}"
+          $$CURL -X PUT "$${ADMIN_URL}/clients/$${CLIENT_UUID}" \
+            -H "Authorization: Bearer $${ADMIN_TOKEN}" -H "Content-Type: application/json" \
+            -d "{\"clientId\":\"$${CLIENT_ID}\",\"redirectUris\":[\"$${REDIRECT_URI}\"],\"webOrigins\":[\"$${WEB_ORIGIN}\"]}"
+          echo "✓ Updated existing Keycloak client '$${CLIENT_ID}'."
+        else
+          $$CURL -X POST "$${ADMIN_URL}/clients" \
+            -H "Authorization: Bearer $${ADMIN_TOKEN}" -H "Content-Type: application/json" \
+            -d "{\"clientId\":\"$${CLIENT_ID}\",\"name\":\"$${CLIENT_ID}\",\"enabled\":true,\"clientAuthenticatorType\":\"client-secret\",\"secret\":\"$${CLIENT_SECRET}\",\"redirectUris\":[\"$${REDIRECT_URI}\"],\"webOrigins\":[\"$${WEB_ORIGIN}\"],\"standardFlowEnabled\":true,\"serviceAccountsEnabled\":false,\"publicClient\":false,\"protocol\":\"openid-connect\"}"
+          echo "✓ Created Keycloak client '$${CLIENT_ID}'."
+        fi
+
+        echo "✅ Keycloak web-client provisioning complete."
+    waitFor: ['get-gke-credentials']
+
+  # ============================================================================
+  # 6. ROLLOUT RESTART (force pods to pull the new :latest image)
+  # ============================================================================
+  - id: 'rollout-restart'
+    name: 'gcr.io/cloud-builders/gcloud'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        kubectl rollout restart deployment/data-web-client -n sample-services || true
+        kubectl rollout status deployment/data-web-client -n sample-services --timeout=300s || true
+    waitFor: ['get-gke-credentials', 'init-webclient-db', 'update-nextauth-url']
+
+  # ============================================================================
+  # 6. DEPLOY DATA WEB CLIENT (Helmfile)
+  # ============================================================================
+  - id: 'deploy-data-web-client'
+    name: 'ghcr.io/helmfile/helmfile:latest'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        cd iac/helm/helmfile.d
+
+        echo "Exporting environment variables for Helmfile..."
+        export GCP_PROJECT_ID="$PROJECT_ID"
+        export GCP_REGION="$$GCP_REGION"
+        export IMAGE_REPO="$$IMAGE_REPO"
+        export DATA_API_BIGTABLE_CONNECTOR_GCP_SERVICE_ACCOUNT="$$DATA_API_BIGTABLE_CONNECTOR_GCP_SERVICE_ACCOUNT"
+        export CLOUD_SQL_INSTANCE_CONNECTION_NAME="$$CLOUD_SQL_INSTANCE_CONNECTION_NAME"
+        export WEBCLIENT_DB_PASSWORD="$$WEBCLIENT_DB_PASSWORD"
+        export NEXTAUTH_SECRET="$$NEXTAUTH_SECRET"
+        export KEYCLOAK_CLIENT_ID="$$KEYCLOAK_CLIENT_ID_WEB_CLIENT"
+        export KEYCLOAK_CLIENT_SECRET="$$KEYCLOAK_CLIENT_SECRET_WEB_CLIENT"
+        export KEYCLOAK_ISSUER="$$KEYCLOAK_ISSUER"
+        export BIGTABLE_INSTANCE_ID="$$BIGTABLE_INSTANCE_ID"
+        export GOOGLE_MAPS_API_KEY="$$GOOGLE_MAPS_API_KEY"
+        export GOOGLE_MAPS_MAP_ID="${_GOOGLE_MAPS_MAP_ID}"
+        export PKI_STRATEGY="$$PKI_STRATEGY"
+        export BASE_DOMAIN="$$BASE_DOMAIN"
+        export FLEETVIEW_HOSTNAME="$$FLEETVIEW_HOSTNAME"
+        export NEXTAUTH_URL="$$NEXTAUTH_URL"
+        export EXTERNAL_SECRETS_OPERATOR_GCP_SERVICE_ACCOUNT="$$EXTERNAL_SECRETS_OPERATOR_GCP_SERVICE_ACCOUNT"
+        # Pre-encode cert/key as single-line base64 so helm --set doesn't mangle PEM newlines.
+        # secret.yaml puts these directly into data: without b64enc.
+        if [ -f "/workspace/fleetview_tls_crt.txt" ]; then
+          export FLEETVIEW_TLS_CRT=$$(base64 -w 0 /workspace/fleetview_tls_crt.txt)
+          export FLEETVIEW_TLS_KEY=$$(base64 -w 0 /workspace/fleetview_tls_key.txt)
+        fi
+
+        echo "Running Helmfile ${_HELM_ACTION}..."
+
+        if ! helmfile --file data-web-client.yaml.gotmpl ${_HELM_ACTION} \
+             --state-values-set arch=${_ARCH} \
+             --state-values-set clusterLocation="$$GCP_REGION" \
+             --state-values-set clusterName="$$GKE_CLUSTER_NAME"; then
+            echo "❌ Deployment Failed! Fetching Pod Logs for Debugging..."
+            if ! command -v kubectl &> /dev/null; then
+                curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+                chmod +x kubectl
+                mv kubectl /usr/local/bin/
+            fi
+            echo "--- POD STATUS ---"
+            kubectl get pods -n sample-services -l app.kubernetes.io/name=data-web-client
+            echo "--- LOGS ---"
+            kubectl logs -n sample-services -l app.kubernetes.io/name=data-web-client --tail=50
+            exit 1
+        fi
+    secretEnv: ['GCP_REGION', 'GKE_CLUSTER_NAME', 'IMAGE_REPO', 'DATA_API_BIGTABLE_CONNECTOR_GCP_SERVICE_ACCOUNT',
+                'CLOUD_SQL_INSTANCE_CONNECTION_NAME', 'WEBCLIENT_DB_PASSWORD', 'NEXTAUTH_SECRET',
+                'NEXTAUTH_URL', 'KEYCLOAK_CLIENT_ID_WEB_CLIENT', 'KEYCLOAK_CLIENT_SECRET_WEB_CLIENT',
+                'KEYCLOAK_ISSUER', 'BIGTABLE_INSTANCE_ID', 'GOOGLE_MAPS_API_KEY',
+                'PKI_STRATEGY', 'BASE_DOMAIN', 'FLEETVIEW_HOSTNAME',
+                'EXTERNAL_SECRETS_OPERATOR_GCP_SERVICE_ACCOUNT']
+    waitFor: ['rollout-restart', 'init-webclient-db', 'update-nextauth-url', 'ensure-keycloak-web-client']
+
+# ============================================================================
+# SUBSTITUTIONS & SECRETS CONFIG
+# ============================================================================
+substitutions:
+  _HELM_ACTION: "sync"
+  _ARCH: "arm64"
+  # GOOGLE_MAPS_MAP_ID is not sensitive — kept as a substitution so it can be
+  # overridden per-trigger without touching Secret Manager.
+  _GOOGLE_MAPS_MAP_ID: ""
+
+availableSecrets:
+  secretManager:
+    - versionName: projects/$PROJECT_ID/secrets/GCP_REGION/versions/latest
+      env: 'GCP_REGION'
+    - versionName: projects/$PROJECT_ID/secrets/GKE_CLUSTER_NAME/versions/latest
+      env: 'GKE_CLUSTER_NAME'
+    - versionName: projects/$PROJECT_ID/secrets/IMAGE_REPO/versions/latest
+      env: 'IMAGE_REPO'
+    - versionName: projects/$PROJECT_ID/secrets/DATA_API_BIGTABLE_CONNECTOR_GCP_SERVICE_ACCOUNT/versions/latest
+      env: 'DATA_API_BIGTABLE_CONNECTOR_GCP_SERVICE_ACCOUNT'
+    - versionName: projects/$PROJECT_ID/secrets/CLOUD_SQL_INSTANCE_CONNECTION_NAME/versions/latest
+      env: 'CLOUD_SQL_INSTANCE_CONNECTION_NAME'
+    - versionName: projects/$PROJECT_ID/secrets/WEBCLIENT_DB_PASSWORD/versions/latest
+      env: 'WEBCLIENT_DB_PASSWORD'
+    - versionName: projects/$PROJECT_ID/secrets/NEXTAUTH_SECRET/versions/latest
+      env: 'NEXTAUTH_SECRET'
+    - versionName: projects/$PROJECT_ID/secrets/NEXTAUTH_URL/versions/latest
+      env: 'NEXTAUTH_URL'
+    - versionName: projects/$PROJECT_ID/secrets/KEYCLOAK_CLIENT_ID_WEB_CLIENT/versions/latest
+      env: 'KEYCLOAK_CLIENT_ID_WEB_CLIENT'
+    - versionName: projects/$PROJECT_ID/secrets/KEYCLOAK_CLIENT_SECRET_WEB_CLIENT/versions/latest
+      env: 'KEYCLOAK_CLIENT_SECRET_WEB_CLIENT'
+    - versionName: projects/$PROJECT_ID/secrets/KEYCLOAK_ISSUER/versions/latest
+      env: 'KEYCLOAK_ISSUER'
+    - versionName: projects/$PROJECT_ID/secrets/BIGTABLE_INSTANCE_ID/versions/latest
+      env: 'BIGTABLE_INSTANCE_ID'
+    - versionName: projects/$PROJECT_ID/secrets/NEXT_PUBLIC_GOOGLE_MAPS_API_KEY/versions/latest
+      env: 'GOOGLE_MAPS_API_KEY'
+    - versionName: projects/$PROJECT_ID/secrets/POSTGRES_DB_PASSWORD/versions/latest
+      env: 'POSTGRES_DB_PASSWORD'
+    - versionName: projects/$PROJECT_ID/secrets/PKI_STRATEGY/versions/latest
+      env: 'PKI_STRATEGY'
+    - versionName: projects/$PROJECT_ID/secrets/BASE_DOMAIN/versions/latest
+      env: 'BASE_DOMAIN'
+    - versionName: projects/$PROJECT_ID/secrets/FLEETVIEW_HOSTNAME/versions/latest
+      env: 'FLEETVIEW_HOSTNAME'
+    - versionName: projects/$PROJECT_ID/secrets/EXTERNAL_SECRETS_OPERATOR_GCP_SERVICE_ACCOUNT/versions/latest
+      env: 'EXTERNAL_SECRETS_OPERATOR_GCP_SERVICE_ACCOUNT'
+
+options:
+  machineType: 'E2_HIGHCPU_8'
+  logging: CLOUD_LOGGING_ONLY
+  substitutionOption: 'ALLOW_LOOSE'

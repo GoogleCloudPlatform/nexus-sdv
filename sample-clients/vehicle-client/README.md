@@ -144,13 +144,13 @@ The easiest way to run the vehicle client is using the provided run script, whic
 ./run-vehicle-client.sh local VEHICLE001
 
 # Full customization (VIN, registration URL, interval)
-./run-vehicle-client.sh local VEHICLE001 https://registration.sdv-lal.com:8443 10
+./run-vehicle-client.sh local VEHICLE001 https://registration.nexus-sdv.io:8443 10
 ```
 
 **Script Parameters:**
 - `pki_strategy` (required): `local` or `remote`
 - `VIN` (optional): Vehicle Identification Number (default: VEHICLE001)
-- `REGISTRATION_URL` (optional): Registration server URL (default: https://registration.sdv-lal.com:8443)
+- `REGISTRATION_URL` (optional): Registration server URL (default: https://registration.nexus-sdv.io:8443)
 - `INTERVAL` (optional): Telemetry interval in seconds (default: 5)
 
 ### Manual Usage
@@ -162,7 +162,7 @@ The easiest way to run the vehicle client is using the provided run script, whic
   -vin="VEHICLE001" \
   -factory-cert="vehicle001-factory-chain.pem" \
   -factory-key="vehicle001-factory-key.pem" \
-  -registration-url="https://registration.sdv-lal.com:8443"
+  -registration-url="https://registration.nexus-sdv.io:8443"
 ```
 
 ### Parameters
@@ -174,14 +174,62 @@ The easiest way to run the vehicle client is using the provided run script, whic
 | `-factory-key` | Path to factory-issued private key | `factory-key.pem` | Yes |
 | `-registration-url` | Registration server URL | Value of `REGISTRATION_URL` env var | Yes (via flag or env) |
 | `-interval` | Telemetry publishing interval in seconds | `5` | No |
+| `-message-type` | Message type: `telemetry` (TelemetryMessage) or `metrics_report` (MetricsReport) | `telemetry` | No |
+| `-pki_strategy` | PKI Strategy: `local` or `remote` | `local` | No |
 
 **Note**: The `-registration-url` can be provided either as a command-line flag or via the `REGISTRATION_URL` environment variable.
+
+### Message Types
+
+The vehicle client supports two different message formats:
+
+#### 1. TelemetryMessage (Default)
+Flat, generic sensor readings published to `telemetry.{VIN}.battery` subject
+```bash
+./vehicle-client -vin=VEHICLE001 -message-type=telemetry ...
+```
+- Publishes to: `telemetry.{VIN}.battery`
+- Contains: Battery voltage, current, state-of-charge, temperature
+- Message Format: `telemetry.TelemetryMessage` (flat structure with repeated SensorReading)
+
+#### 2. MetricsReport (Android SDV)
+Structured vehicle telemetry reports published to `vehicle_reports.{VIN}` subject
+```bash
+./vehicle-client -vin=VEHICLE001 -message-type=metrics_report ...
+```
+- Publishes to: `vehicle_reports.{VIN}`
+- Contains: Engine metrics, fuel level, velocity, vehicle dynamics, gear status
+- Message Format: `google.sdv.telemetry.MetricsReport` (outer envelope) + `com.android.sdv.telemetry.VehicleTelemetryData` (inner payload via protobuf.Any)
+
+### Example Usage
+
+**Send flat telemetry messages:**
+```bash
+./vehicle-client \
+  -vin="VEHICLE001" \
+  -message-type="telemetry" \
+  -factory-cert="vehicle001-factory-chain.pem" \
+  -factory-key="vehicle001-factory-key.pem" \
+  -registration-url="https://registration.nexus-sdv.io:8443" \
+  -interval="5"
+```
+
+**Send structured metrics reports:**
+```bash
+./vehicle-client \
+  -vin="VEHICLE001" \
+  -message-type="metrics_report" \
+  -factory-cert="vehicle001-factory-chain.pem" \
+  -factory-key="vehicle001-factory-key.pem" \
+  -registration-url="https://registration.nexus-sdv.io:8443" \
+  -interval="5"
+```
 
 ### Environment Variables
 
 | Variable | Description | Example | Default |
 |----------|-------------|---------|---------|
-| `REGISTRATION_URL` | Registration server URL (alternative to `-registration-url` flag) | `https://34.185.214.249:8443` | - |
+| `REGISTRATION_URL` | Registration server URL (alternative to `-registration-url` flag) | `https://34.185.214.249` | - |
 | `TELEMETRY_PREFIX` | Optional prefix for telemetry NATS subjects | `prod.bigtable` | - |
 
 #### TELEMETRY_PREFIX Examples
@@ -211,17 +259,17 @@ This allows the NATS-Bigtable connector to subscribe to specific environments:
 2025/11/02 12:00:00 Step 1: Generating operational key pair...
 2025/11/02 12:00:00 Step 2: Creating Certificate Signing Request (CSR)...
 2025/11/02 12:00:00 Step 3: Loading factory-issued certificate for mTLS...
-2025/11/02 12:00:00 Step 4: Sending CSR to registration server at https://registration.sdv-lal.com:8443...
+2025/11/02 12:00:00 Step 4: Sending CSR to registration server at https://registration.nexus-sdv.io:8443...
 2025/11/02 12:00:01 Step 5: Parsing operational certificate...
-2025/11/02 12:00:01   Keycloak URL: https://keycloak.sdv-lal.com:8443
-2025/11/02 12:00:01   NATS URL: nats://nats.sdv-lal.com:4222
+2025/11/02 12:00:01   Keycloak URL: https://keycloak.nexus-sdv.io:8443
+2025/11/02 12:00:01   NATS URL: nats://nats.nexus-sdv.io:4222
 2025/11/02 12:00:01   Certificate valid until: 2025-12-02 12:00:01 +0000 UTC
 2025/11/02 12:00:01 ✓ Successfully registered and obtained operational certificate
 2025/11/02 12:00:01 Step 1: Configuring mTLS with operational certificate...
-2025/11/02 12:00:01 Step 2: Requesting JWT from Keycloak at https://keycloak.sdv-lal.com:8443...
+2025/11/02 12:00:01 Step 2: Requesting JWT from Keycloak at https://keycloak.nexus-sdv.io:8443...
 2025/11/02 12:00:02   Token expires in: 300 seconds
 2025/11/02 12:00:02 ✓ Successfully authenticated with Keycloak and obtained JWT
-2025/11/02 12:00:02 Connecting to NATS at nats://nats.sdv-lal.com:4222 with JWT...
+2025/11/02 12:00:02 Connecting to NATS at nats://nats.nexus-sdv.io:4222 with JWT...
 2025/11/02 12:00:02   Connected to NATS successfully
 2025/11/02 12:00:03 ✓ Successfully connected to NATS
 2025/11/02 12:00:03 Publishing telemetry data...

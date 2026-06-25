@@ -1,0 +1,78 @@
+syntax = "proto3";
+
+package com.android.sdv.telemetry;
+
+option go_package = "github.com/valtech-sdv/vehicle-client/telemetry";
+
+// Inner payload of MetricsReport.report_data for vehicle telemetry reports.
+// Type URL: type.googleapis.com/com.android.sdv.telemetry.VehicleTelemetryData
+//
+// Field numbers sourced from the embedded descriptor_protos in:
+// tmp/reports_10_20/config_files/metrics_configs/vehicle_telemetry.textproto
+//
+// Scalar fields use proto3 optional where zero/false is a meaningful value
+// that must be distinguished from "field not present in this report".
+// All other scalars are bare — zero unambiguously means off/empty.
+message VehicleTelemetryData {
+  // Engine output power in watts.
+  float ENGINE_POWER = 1;
+
+  // Engine revolutions per minute.
+  float ENGINE_RPM = 2;
+
+  // Total fuel tank capacity (constant per vehicle).
+  float FUEL_CAPACITY = 3;
+
+  // Current fuel level.
+  float FUEL_LEVEL = 4;
+
+  // GPS latitude — optional: 0.0 is a real coordinate (equator).
+  optional float GPS_LATITUDE = 5;
+
+  // GPS longitude — optional: 0.0 is a real coordinate (prime meridian).
+  optional float GPS_LONGITUDE = 6;
+
+  // Ignition state — optional: false means engine off, not field absent.
+  optional bool IGNITION_STATE = 7;
+
+  // Tyre pressure in bar.
+  float TIRE_PRESSURE = 8;
+
+  // Vehicle speed in m/s.
+  float VELOCITY = 9;
+
+  // Vehicle locked state — optional: false means unlocked, not field absent.
+  optional bool LOCKED = 10;
+
+  // Acceleration magnitude in m/s².
+  double acceleration_modulus_m_s2 = 11;
+
+  // Odometer distance in metres.
+  uint64 distance_meters = 12;
+
+  // Steering and pedal inputs from the Carla vehicle dynamics model.
+  CarlaVehicleDynamics vehicle_dynamics = 13;
+
+  // Current gear selection.
+  CarlaVehicleGearStatus gear_status = 14;
+}
+
+message CarlaVehicleDynamics {
+  double steering_angle_deg    = 1;
+  double accelerator_pedal_pct = 2;
+  double brake_pedal_pct       = 3;
+}
+
+message CarlaVehicleGearStatus {
+  enum Gear {
+    UNKNOWN = 0;
+    REVERSE = 1;
+    NEUTRAL = 2;
+    FIRST   = 3;
+    SECOND  = 4;
+    THIRD   = 5;
+    FOURTH  = 6;
+    FIFTH   = 7;
+  }
+  Gear gear = 1;
+}

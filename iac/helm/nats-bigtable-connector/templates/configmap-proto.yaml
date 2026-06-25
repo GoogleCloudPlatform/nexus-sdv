@@ -6,3 +6,11 @@ metadata:
 data:
   telemetry.proto: |-
 {{ .Files.Get "files/telemetry.proto" | indent 4 }}
+  metrics_report.proto: |-
+{{ .Files.Get "files/metrics_report.proto" | indent 4 }}
+  vehicle_telemetry.proto: |-
+{{ .Files.Get "files/vehicle_telemetry.proto" | indent 4 }}
+  aaos_vehicle_telemetry.proto: |-
+{{ .Files.Get "files/aaos_vehicle_telemetry.proto" | indent 4 }}
+  display_safety.proto: |-
+{{ .Files.Get "files/display_safety.proto" | indent 4 }}

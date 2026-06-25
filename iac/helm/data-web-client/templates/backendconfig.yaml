@@ -1,0 +1,18 @@
+{{- if eq .Values.pkiStrategy "remote" }}
+apiVersion: cloud.google.com/v1
+kind: BackendConfig
+metadata:
+  name: {{ include "data-web-client.fullname" . }}-backendconfig
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "data-web-client.labels" . | nindent 4 }}
+spec:
+  healthCheck:
+    checkIntervalSec: 15
+    timeoutSec: 5
+    healthyThreshold: 1
+    unhealthyThreshold: 3
+    type: HTTP
+    requestPath: /api/health
+    port: 3000
+{{- end }}

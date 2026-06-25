@@ -1,0 +1,58 @@
+// Copyright 2024 Google LLC
+// Reconstructed from descriptor_protos in vehicle_telemetry.textproto.
+// Package: com.android.sdv.someip
+// Source:  config_files/metrics_configs/vehicle_telemetry.proto
+
+syntax = "proto2";
+
+package com.android.sdv.someip;
+
+option go_package = "telemetry-subscriber/aaos_telemetry";
+
+import "display_safety.proto";
+
+message VehicleTelemetryData {
+  optional float  ENGINE_POWER               = 1;
+  optional float  ENGINE_RPM                 = 2;
+  optional float  FUEL_CAPACITY              = 3;
+  optional float  FUEL_LEVEL                 = 4;
+  optional float  GPS_LATITUDE               = 5;
+  optional float  GPS_LONGITUDE              = 6;
+  optional bool   IGNITION_STATE             = 7;
+  optional float  TIRE_PRESSURE              = 8;
+  optional float  VELOCITY                   = 9;
+  optional bool   LOCKED                     = 10;
+  optional double acceleration_modulus_m_s2  = 11;
+  optional uint64 distance_meters            = 12;
+  optional CarlaVehicleDynamics vehicle_dynamics       = 13;
+  optional com.sdv.google.display_safety.CurrentGear gear_status = 14;
+  optional float  max_speed                  = 15;
+  optional float  speedlimit                 = 16;
+  optional bool   speed_limit_displayed      = 17;
+  optional bool   trunk_open                 = 18;
+  optional bool   fog_lights                 = 19;
+  optional bool   park_lights                = 20;
+  optional bool   hibeam                     = 21;
+  optional bool   lowbeam                    = 22;
+  optional bool   turn_signal_left           = 23;
+  optional bool   turn_signal_right          = 24;
+  optional bool   carla_vehicle_ambient_light = 25;
+  optional bool   carla_vehicle_ambient_fog  = 26;
+  optional CarlaVehicleTripStatus trip_status = 27;
+}
+
+message CarlaVehicleDynamics {
+  optional double steering_angle_deg    = 1;
+  optional double accelerator_pedal_pct = 2;
+  optional double brake_pedal_pct       = 3;
+}
+
+message CarlaVehicleTripStatus {
+  optional uint64 start_timestamp_ms = 1;
+  optional uint64 end_timestamp_ms   = 2;
+  optional bool   is_active          = 3;
+}
+
+message VehicleLockStatusData {
+  optional bool LOCKED = 1;
+}

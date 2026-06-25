@@ -34,6 +34,8 @@ steps:
       - |
         mkdir -p iac/helm/nats-bigtable-connector/files
         cp proto/telemetry.proto iac/helm/nats-bigtable-connector/files/
+        cp proto/metrics_report.proto iac/helm/nats-bigtable-connector/files/
+        cp proto/vehicle_telemetry.proto iac/helm/nats-bigtable-connector/files/
     waitFor: ['get-gke-credentials']
 
   # ============================================================================
@@ -47,15 +49,36 @@ steps:
       - |
         cd iac/helm/helmfile.d
 
+        echo "Pre-flight: verifying external-secrets webhook is available..."
+        TIMEOUT=120
+        ELAPSED=0
+        until kubectl get endpoints external-secrets-webhook -n external-secrets-system \
+              -o jsonpath='{.subsets[0].addresses[0].ip}' 2>/dev/null | grep -qE '^[0-9]+\.[0-9]+'; do
+          if [ "$$ELAPSED" -ge "$$TIMEOUT" ]; then
+            echo "❌ external-secrets webhook has no endpoints after $${TIMEOUT}s — aborting"
+            exit 1
+          fi
+          echo "  Waiting for webhook endpoint (elapsed: $${ELAPSED}s)..."
+          sleep 5
+          ELAPSED=$$((ELAPSED + 5))
+        done
+        echo "✅ Webhook endpoint ready."
+
         echo "Exporting environment variables for Helmfile..."
         export GCP_PROJECT_ID="$PROJECT_ID"
         export BIGTABLE_CONNECTOR_GCP_SERVICE_ACCOUNT="$$BIGTABLE_CONNECTOR_GCP_SERVICE_ACCOUNT"
-        export NATS_URL="nats://connector:$${NATS_CONNECTOR_PASSWORD}@nats:4222"
+        export EXTERNAL_SECRETS_OPERATOR_GCP_SERVICE_ACCOUNT="$$EXTERNAL_SECRETS_OPERATOR_GCP_SERVICE_ACCOUNT"
+        # NATS_CONNECTOR_PASSWORD is NOT passed here — it is synced from GCP Secret
+        # Manager by the external-secrets operator running in the cluster.
 
         echo "Running Helmfile ${_HELM_ACTION}..."
+        echo "Cluster Location: $$GCP_REGION"
+        echo "Cluster Name: $$GKE_CLUSTER_NAME"
 
         if ! helmfile --file nats-connector.yaml.gotmpl ${_HELM_ACTION} \
-             --state-values-set arch=${_ARCH}; then
+             --state-values-set arch=${_ARCH} \
+             --state-values-set clusterLocation="$$GCP_REGION" \
+             --state-values-set clusterName="$$GKE_CLUSTER_NAME"; then
             echo "❌ Deployment Failed! Fetching Pod Logs for Debugging..."
             if ! command -v kubectl &> /dev/null; then
                 curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
@@ -69,7 +92,7 @@ steps:
             exit 1
         fi
 
-    secretEnv: [ 'GCP_REGION', 'NATS_CONNECTOR_PASSWORD', 'BIGTABLE_CONNECTOR_GCP_SERVICE_ACCOUNT' ]
+    secretEnv: [ 'GCP_REGION', 'GKE_CLUSTER_NAME', 'BIGTABLE_CONNECTOR_GCP_SERVICE_ACCOUNT', 'EXTERNAL_SECRETS_OPERATOR_GCP_SERVICE_ACCOUNT' ]
     waitFor: [ 'get-gke-credentials', 'prepare-proto-configmap' ]
 
 # ============================================================================
@@ -87,8 +110,10 @@ availableSecrets:
       env: 'GKE_CLUSTER_NAME'
     - versionName: projects/$PROJECT_ID/secrets/BIGTABLE_CONNECTOR_GCP_SERVICE_ACCOUNT/versions/latest
       env: 'BIGTABLE_CONNECTOR_GCP_SERVICE_ACCOUNT'
-    - versionName: projects/$PROJECT_ID/secrets/NATS_CONNECTOR_PASSWORD/versions/latest
-      env: 'NATS_CONNECTOR_PASSWORD'
+    - versionName: projects/$PROJECT_ID/secrets/EXTERNAL_SECRETS_OPERATOR_GCP_SERVICE_ACCOUNT/versions/latest
+      env: 'EXTERNAL_SECRETS_OPERATOR_GCP_SERVICE_ACCOUNT'
+
+timeout: '3600s'
 
 options:
   machineType: 'E2_HIGHCPU_8'

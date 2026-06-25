@@ -84,21 +84,21 @@ resource "google_project_iam_member" "sa_secret_accessor" {
 
 output "service_account_email" {
   description = "The email of the service account for GitHub OIDC."
-  value       = var.enable_github_oidc ? google_service_account.oidc-sa[0].email : null
+  value       = var.enable_github_oidc ? try(google_service_account.oidc-sa[0].email, null) : null
 }
 
 output "oidc_sa_id" {
-  value = var.enable_github_oidc ? google_service_account.oidc-sa[0].account_id : null
+  value = var.enable_github_oidc ? try(google_service_account.oidc-sa[0].account_id, null) : null
 }
 
 output "workload_identity_pool_id" {
-  value = var.enable_github_oidc ? google_iam_workload_identity_pool.workload-identity-pool[0].workload_identity_pool_id : null
+  value = var.enable_github_oidc ? try(google_iam_workload_identity_pool.workload-identity-pool[0].workload_identity_pool_id, null) : null
 }
 
 output "workload_identity_pool_provider_id" {
-  value = var.enable_github_oidc ? google_iam_workload_identity_pool_provider.workload-identity-provider[0].workload_identity_pool_provider_id : null
+  value = var.enable_github_oidc ? try(google_iam_workload_identity_pool_provider.workload-identity-provider[0].workload_identity_pool_provider_id, null) : null
 }
 
-output "random_suffix" {
-  value = var.random_suffix
+output "deployment_suffix" {
+  value = var.deployment_suffix
 }

@@ -49,23 +49,25 @@ resource "random_password" "keycloak_db_user_password" {
   special = false
   keepers = {
     environment = var.environment
-    suffix      = var.random_suffix
   }
 }
 
 # Create the keycloak database user
 resource "google_sql_user" "keycloak_user" {
-  name     = "keycloak"
-  instance = google_sql_database_instance.sql_db.name
-  password = random_password.keycloak_db_user_password.result
+  name            = "keycloak"
+  instance        = google_sql_database_instance.sql_db.name
+  password        = random_password.keycloak_db_user_password.result
+  # Bootstrap re-runs have been observed planning a deletion of these SQL users,
+  # causing a "role cannot be dropped because some objects depend on it" error.
+  # The exact root cause is unknown — likely the SQL instance being replaced
+  # (which would cascade to replacing all users), but the trigger has not been
+  # identified. ABANDON prevents Terraform from calling users.delete so the
+  # bootstrap can proceed; the SQL instance deletion handles user cleanup
+  # server-side when the environment is torn down.
+  deletion_policy = "ABANDON"
 
   depends_on = [google_sql_database.database_keycloak]
 }
-
-# Note: If you need to destroy the keycloak user and encounter errors about owned objects,
-# manually run the following SQL commands as the postgres user:
-#   REASSIGN OWNED BY keycloak TO postgres;
-#   DROP OWNED BY keycloak;
 
 # Create the secret for the Keycloak DB password.
 # This was changed from a data source to a resource to ensure the secret is created by Terraform,
@@ -111,4 +113,79 @@ output "sql_database_name" {
 
 output "sql_user_name" {
   value = google_sql_user.keycloak_user.name
+}
+
+# ==============================================================================
+# Web Client (nexus_acl) database, user, and secrets
+# ==============================================================================
+
+resource "google_sql_database" "database_nexus_acl" {
+  name     = "nexus_acl"
+  instance = google_sql_database_instance.sql_db.name
+  depends_on = [google_project_service.project_apis]
+}
+
+resource "random_password" "webclient_db_user_password" {
+  length  = 32
+  special = false
+  keepers = {
+    environment = var.environment
+  }
+}
+
+resource "google_sql_user" "webclient_user" {
+  name            = "webclient"
+  instance        = google_sql_database_instance.sql_db.name
+  password        = random_password.webclient_db_user_password.result
+  deletion_policy = "ABANDON" # see keycloak_user for the reason
+  depends_on      = [google_sql_database.database_nexus_acl]
+}
+
+resource "google_secret_manager_secret" "webclient_db_password" {
+  secret_id = "WEBCLIENT_DB_PASSWORD"
+  replication {
+    auto {}
+  }
+  depends_on = [google_project_service.project_apis]
+}
+
+resource "google_secret_manager_secret_version" "webclient_db_password" {
+  secret      = google_secret_manager_secret.webclient_db_password.id
+  secret_data = random_password.webclient_db_user_password.result
+  depends_on  = [google_sql_user.webclient_user]
+}
+
+# ==============================================================================
+# Postgres superuser password — used by CloudBuild schema-init step to grant
+# the webclient user access and create the vehicle_groups table.
+# ==============================================================================
+
+resource "random_password" "postgres_db_password" {
+  length  = 32
+  special = false
+  keepers = {
+    environment = var.environment
+  }
+}
+
+# Updates the built-in postgres superuser password so CloudBuild can connect.
+resource "google_sql_user" "postgres_user" {
+  name            = "postgres"
+  instance        = google_sql_database_instance.sql_db.name
+  password        = random_password.postgres_db_password.result
+  deletion_policy = "ABANDON" # see keycloak_user for the reason
+}
+
+resource "google_secret_manager_secret" "postgres_db_password" {
+  secret_id = "POSTGRES_DB_PASSWORD"
+  replication {
+    auto {}
+  }
+  depends_on = [google_project_service.project_apis]
+}
+
+resource "google_secret_manager_secret_version" "postgres_db_password" {
+  secret      = google_secret_manager_secret.postgres_db_password.id
+  secret_data = random_password.postgres_db_password.result
+  depends_on  = [google_sql_user.postgres_user]
 }

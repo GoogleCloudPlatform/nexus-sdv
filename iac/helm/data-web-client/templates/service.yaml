@@ -1,0 +1,27 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "data-web-client.fullname" . }}
+  {{- if eq .Values.pkiStrategy "remote" }}
+  annotations:
+    external-dns.alpha.kubernetes.io/hostname: {{ .Values.fleetviewHostname }}.{{ .Values.baseDomain }}
+    external-dns.alpha.kubernetes.io/ttl: "300"
+  {{- end }}
+  labels:
+    {{- include "data-web-client.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    {{- if eq .Values.pkiStrategy "remote" }}
+    - port: 443
+      targetPort: https
+      protocol: TCP
+      name: https
+    {{- else }}
+    - port: {{ .Values.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+    {{- end }}
+  selector:
+    {{- include "data-web-client.selectorLabels" . | nindent 4 }}

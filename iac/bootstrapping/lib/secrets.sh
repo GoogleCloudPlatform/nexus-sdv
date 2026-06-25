@@ -8,7 +8,6 @@
 add_secret() {
     local secret_name="$1"
     local secret_value="$2"
-
     local create_output
     create_output=$(gcloud secrets create "$secret_name" --labels="nexussdvenv=${ENV}" --replication-policy="automatic" --project="$GCP_PROJECT_ID" 2>&1) || {
         # This block runs ONLY if gcloud exits non-zero (creation failed)
@@ -16,9 +15,28 @@ add_secret() {
         if ! echo "$create_output" | grep -q "already exists"; then
             # Error is NOT "already exists" → real problem (permissions, quota, etc.)
             log_error "Failed to create secret $secret_name: $create_output"
+            return 1
         fi
-        # Error IS "already exists" → expected on re-runs, continue normally
+        # Error IS "already exists" — check if it already has at least one version.
+        # If so, skip writing to preserve existing values (e.g. passwords already
+        # committed to a database like Keycloak's SQL DB).
+        local version_count
+        version_count=$(gcloud secrets versions list "$secret_name" --project="$GCP_PROJECT_ID" \
+            --filter="state=enabled" --format="value(name)" 2>/dev/null | wc -l)
+        if [[ "$version_count" -gt 0 ]]; then
+            log_info "Secret $secret_name already has $version_count version(s) — skipping to preserve existing value."
+            return 0
+        fi
     }
+    if [[ -z "$secret_value" ]]; then
+        # gcloud rejects empty payloads, but the secret must exist with at least one
+        # version so Cloud Build availableSecrets can resolve it. Store a sentinel so
+        # the secret is accessible; the feature relying on it will be disabled until
+        # the value is updated manually in Secret Manager.
+        log_warn "Secret $secret_name has no value — storing sentinel 'UNSET'. Update it in Secret Manager to enable the feature."
+        echo -n "UNSET" | gcloud secrets versions add "$secret_name" --data-file=- --project="$GCP_PROJECT_ID" --quiet
+        return 0
+    fi
     echo -n "$secret_value" | gcloud secrets versions add "$secret_name" --data-file=- --project="$GCP_PROJECT_ID" --quiet
 }
 
@@ -26,6 +44,7 @@ configure_secrets() {
     add_secret "KEYCLOAK_GCP_SERVICE_ACCOUNT" "keycloak-gsa@${GCP_PROJECT_ID}.iam.gserviceaccount.com"
     add_secret "BIGTABLE_CONNECTOR_GCP_SERVICE_ACCOUNT" "bigtable-connector@${GCP_PROJECT_ID}.iam.gserviceaccount.com"
     add_secret "DATA_API_BIGTABLE_CONNECTOR_GCP_SERVICE_ACCOUNT" "data-api-bigtable-connector@${GCP_PROJECT_ID}.iam.gserviceaccount.com"
+    add_secret "EXTERNAL_SECRETS_OPERATOR_GCP_SERVICE_ACCOUNT" "external-secrets-gsa@${GCP_PROJECT_ID}.iam.gserviceaccount.com"
     add_secret "KEYCLOAK_DB_PASSWORD" "${KEYCLOAK_DB_PASSWORD}"
     add_secret "KEYCLOAK_ADMIN_PASSWORD" "$(openssl rand -base64 32)"
     # NATS credentials:
@@ -57,9 +76,27 @@ configure_secrets() {
         add_secret "GKE_CLUSTER_NAME" "${ENV}-gke"
     fi
 
-    # --- c) DNS, BASE_DOMAIN & PKI Configuration (Remote only) ---
+    # WEBCLIENT_DB_PASSWORD is managed by Terraform (sql.tf) alongside the
+    # webclient SQL user — do not set it here to avoid a mismatch.
+    add_secret "NEXTAUTH_SECRET" "$(openssl rand -hex 32)"
+    # NEXTAUTH_URL is always stored so the deploy-data-web-client step can resolve it in
+    # secretEnv regardless of PKI strategy. For remote PKI the update-nextauth-url Cloud Build
+    # step overwrites this with the real https://fleetview.<BASE_DOMAIN> URL.
+    add_secret "NEXTAUTH_URL" "${NEXTAUTH_URL:-http://localhost:3000}"
+    # KEYCLOAK_CLIENT_ID_WEB_CLIENT, KEYCLOAK_CLIENT_SECRET_WEB_CLIENT, and KEYCLOAK_ISSUER
+    # are created by deploy-keycloak.yaml after Keycloak is deployed and the issuer URL is known.
+    add_secret "NEXT_PUBLIC_GOOGLE_MAPS_API_KEY" "${NEXT_PUBLIC_GOOGLE_MAPS_API_KEY}"
+    add_secret "NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID" "${NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID}"
+
+    # --- c) DNS, BASE_DOMAIN & PKI Configuration ---
+    # BASE_DOMAIN and FLEETVIEW_HOSTNAME are always stored so Cloud Build steps
+    # that declare them in secretEnv can resolve them regardless of PKI strategy.
+    # For local PKI they are empty strings; the steps that use them guard on
+    # PKI_STRATEGY first and skip any remote-only logic.
+    add_secret "BASE_DOMAIN" "${BASE_DOMAIN:-local}"
+    add_secret "FLEETVIEW_HOSTNAME" "${FLEETVIEW_HOSTNAME:-fleetview}"
+
     if [ "$PKI_STRATEGY" == "remote" ]; then
-        add_secret "BASE_DOMAIN" "$BASE_DOMAIN"
 
         # Store CA pool names and CA names in Secret Manager for workflows to use
         SERVER_CA_POOL_NAME="${EXISTING_SERVER_CA_POOL:-$CREATED_SERVER_CA_POOL}"
@@ -72,10 +109,11 @@ configure_secrets() {
         add_secret "SERVER_CA" "$SERVER_CA_NAME"
         add_secret "FACTORY_CA" "$FACTORY_CA_NAME"
 
-        # Store hostnames
+        # Store hostnames (remote-specific — require a real domain)
         add_secret "KEYCLOAK_HOSTNAME" "$KEYCLOAK_HOSTNAME"
         add_secret "NATS_HOSTNAME" "$NATS_HOSTNAME"
         add_secret "REGISTRATION_HOSTNAME" "$REGISTRATION_HOSTNAME"
+
 
         log_info "Stored PKI configuration in Secret Manager:"
         log_info "  SERVER_CA_POOL: $SERVER_CA_POOL_NAME"
@@ -248,6 +286,7 @@ upload_pki_secrets() {
         add_secret "REGISTRATION_CA_CERT" "$(cat $PKI_DIR/registration-ca/ca.crt.pem)"
         add_secret "REGISTRATION_CA_KEY" "$(cat $PKI_DIR/registration-ca/ca.key.pem)"
         add_secret "REGISTRATION_FACTORY_CA_CERT" "$(cat $PKI_DIR/factory-ca/ca.crt.pem)"
+        add_secret "REGISTRATION_FACTORY_CA_KEY"  "$(cat $PKI_DIR/factory-ca/ca.key.pem)"
         log_info "${CHECK} All CA certificates and keys uploaded to Secret Manager (LOCAL mode)"
         log_info "  Note: Server certificates (registration, keycloak) will be generated by GitHub Actions workflows after deployment"
     else
@@ -290,6 +329,7 @@ delete_gcp_secrets() {
         "REGISTRATION_CA_CERT"
         "REGISTRATION_CA_KEY"
         "REGISTRATION_FACTORY_CA_CERT"
+        "REGISTRATION_FACTORY_CA_KEY"
 
         # Remote mode secrets (may not exist in local mode)
         "BASE_DOMAIN"
@@ -318,6 +358,22 @@ delete_gcp_secrets() {
 
         "KEYCLOAK_JWK_URI"
         "KEYCLOAK_JWK_B64"
+
+        # Webclient secrets (WEBCLIENT_DB_PASSWORD and POSTGRES_DB_PASSWORD are
+        # managed by Terraform — terraform destroy removes them automatically)
+        "NEXTAUTH_SECRET"
+        "NEXT_PUBLIC_GOOGLE_MAPS_API_KEY"
+        "NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID"
+
+        # Keycloak web client secrets (created by deploy-keycloak.yaml)
+        "KEYCLOAK_CLIENT_ID_WEB_CLIENT"
+        "KEYCLOAK_CLIENT_SECRET_WEB_CLIENT"
+        "KEYCLOAK_ISSUER"
+
+        # Terraform-managed secrets
+        "BIGTABLE_INSTANCE_ID"
+        "CLOUD_SQL_INSTANCE_CONNECTION_NAME"
+        "NEXTAUTH_URL"
     )
 
     log_info "Deleting ${#SECRETS_TO_DELETE[@]} secrets..."

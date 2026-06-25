@@ -127,8 +127,16 @@ steps:
         export KEYCLOAK_TLS_KEY="placeholder"
         
         echo "Starting initial deploy with dummy certs..."
-        
-        helmfile --file keycloak.yaml.gotmpl ${_HELM_ACTION} --state-values-set pkiStrategy=local --state-values-set baseDomain="${_BASE_DOMAIN}" --state-values-set arch=arm64
+        # IMPORTANT: do NOT use --wait here. This deploy intentionally uses
+        # placeholder TLS cert/key because the real cert can only be issued once
+        # the LoadBalancer IP exists. With placeholder certs Keycloak crash-loops
+        # on the HTTPS listener ("Missing BEGIN PRIVATE KEY delimiter"), so the
+        # pod can never become ready until deploy-keycloak-final applies the real
+        # certs. The only purpose of this step is to create the Service so the
+        # LoadBalancer IP is assigned for cert generation; pod readiness is
+        # irrelevant here. arch=${_ARCH} (not hardcoded) so amd64 pods schedule.
+        helmfile --file keycloak.yaml.gotmpl ${_HELM_ACTION} \
+            --state-values-set pkiStrategy=local --state-values-set baseDomain="${_BASE_DOMAIN}" --state-values-set arch=${_ARCH}
     secretEnv: ['PKI_STRATEGY', 'KEYCLOAK_ADMIN_PASSWORD', 'KEYCLOAK_DB_PASSWORD', 'KEYCLOAK_GCP_SERVICE_ACCOUNT', 'KEYCLOAK_INSTANCE_CON_SQL_PROXY', 'ENVIRONMENT']
     waitFor: ['prepare-keycloak-chart']
 
@@ -402,7 +410,8 @@ steps:
         fi
         
         cd iac/helm/helmfile.d
-        helmfile --file keycloak.yaml.gotmpl ${_HELM_ACTION} --wait \
+        helmfile --file keycloak.yaml.gotmpl ${_HELM_ACTION} \
+            --wait --timeout 1800 \
             --state-values-set pkiStrategy=$$PKI_STRATEGY \
             --state-values-set baseDomain="$$BASE_DOMAIN" \
             --state-values-set arch=${_ARCH} \
@@ -455,7 +464,9 @@ steps:
         fi
         gcloud secrets versions add KEYCLOAK_HOSTNAME --data-file=- --project="$PROJECT_ID" <<< "$$IP"
 
-        # Define the JWKS URL
+        # Port 8443 is exposed for all PKI strategies. Use HTTPS because Keycloak
+        # enforces sslRequired=external and rejects HTTP from non-localhost callers.
+        # -k skips cert verification (self-signed for local PKI).
         JWKS_URL="https://$${IP}:8443/realms/sdv-telemetry/protocol/openid-connect/certs"
         echo "JWKS URL is: $$JWKS_URL"
 
@@ -468,14 +479,11 @@ steps:
 
         echo "Waiting for Keycloak JWKS endpoint to become available..."
         for i in {1..30}; do
-          # JWKS endpoint is now accessible without client cert (KC_HTTPS_CLIENT_AUTH=request)
-          # Using -k to skip cert verification since we're using IP (DNS may not be ready)
           HTTP_RESPONSE=$$(curl --silent --show-error --fail \
-                                --retry 5 --retry-delay 2 \
+                                --connect-timeout 10 --max-time 30 \
                                 -k \
                                 "$$JWKS_URL" || true)
 
-          # Check if the response contains the 'keys' field, indicating a valid JWKS.
           if [[ "$$HTTP_RESPONSE" == *"keys"* ]]; then
             echo "Successfully fetched JWKS."
             KEYCLOAK_JWK_JSON="$$HTTP_RESPONSE"
@@ -484,7 +492,7 @@ steps:
 
           echo "Attempt $i failed. Retrying in 10 seconds..."
           sleep 10
-          KEYCLOAK_JWK_JSON="" # Reset variable on failure
+          KEYCLOAK_JWK_JSON=""
         done
 
         if [[ -z "$$KEYCLOAK_JWK_JSON" ]]; then
@@ -564,7 +572,9 @@ steps:
         for i in {1..30}; do
           # JWKS endpoint is now accessible without client cert (KC_HTTPS_CLIENT_AUTH=request)
           # Using -k to skip cert verification since we're using IP (DNS may not be ready)
-          HTTP_RESPONSE=$$(curl --silent --show-error --fail --retry 5 -k \
+          HTTP_RESPONSE=$$(curl --silent --show-error --fail \
+                                --connect-timeout 10 --max-time 30 \
+                                -k \
                                 "$$JWKS_URL" || true)
 
           # Check if the response contains the 'keys' field, indicating a valid JWKS.
@@ -574,7 +584,7 @@ steps:
             break
           fi
 
-          echo "Attempt $i failed. Retrying in 10 seconds..."
+          echo "Attempt $i/30 failed. Retrying in 10 seconds..."
           sleep 10
           KEYCLOAK_JWK_JSON="" # Reset variable on failure
         done
@@ -596,15 +606,170 @@ steps:
     secretEnv: ['PKI_STRATEGY']
     waitFor: ['create-keycloak-hostname-secret-remote']
 
+  # ============================================================================
+  # 8. CREATE WEB CLIENT SECRETS
+  #
+  # Creates the three Secret Manager secrets consumed by the data-web-client:
+  #   KEYCLOAK_CLIENT_ID_WEB_CLIENT  — fixed identifier for the web client
+  #   KEYCLOAK_CLIENT_SECRET_WEB_CLIENT — randomly generated client secret
+  #   KEYCLOAK_ISSUER                — Keycloak issuer URL for the sdv-telemetry realm
+  #
+  # The issuer URL is derived from the Keycloak hostname/IP established earlier
+  # in the deployment. Both local (IP-based) and remote (DNS-based) modes are
+  # handled.
+  # ============================================================================
+  - id: 'create-web-client-secrets'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        apt-get install -y -q jq
+
+        # Derive the Keycloak base URL from the PKI strategy.
+        # KEYCLOAK_BASE_URL  — used for the ISSUER secret (must be the public hostname in remote mode)
+        # KEYCLOAK_CALL_URL  — used for direct API calls (always IP-based to avoid DNS propagation delays)
+        if [ "$$PKI_STRATEGY" == "remote" ]; then
+          BASE_DOMAIN=$$(gcloud secrets versions access latest --secret="BASE_DOMAIN" --project="$PROJECT_ID")
+          KEYCLOAK_BASE_URL="https://keycloak.$${BASE_DOMAIN}:8443"
+          # Get the LoadBalancer IP directly (same approach as create-jwk-secrets-remote)
+          # so admin API calls do not depend on DNS having propagated yet.
+          echo "Resolving Keycloak LoadBalancer IP for API calls..."
+          KEYCLOAK_IP=""
+          for i in {1..30}; do
+            KEYCLOAK_IP=$$(kubectl get svc keycloak -n base-services -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)
+            if [[ -n "$$KEYCLOAK_IP" ]]; then break; fi
+            echo "Waiting for LoadBalancer IP... ($i/30)"
+            sleep 10
+          done
+          if [[ -z "$$KEYCLOAK_IP" ]]; then
+            echo "::error::Could not resolve Keycloak LoadBalancer IP; falling back to DNS."
+            KEYCLOAK_CALL_URL="$$KEYCLOAK_BASE_URL"
+          else
+            echo "Using IP $$KEYCLOAK_IP for API calls."
+            KEYCLOAK_CALL_URL="https://$${KEYCLOAK_IP}:8443"
+          fi
+        else
+          if [ ! -f "keycloak_ip.txt" ]; then
+            echo "::error::keycloak_ip.txt not found — cannot derive KEYCLOAK_ISSUER."
+            exit 1
+          fi
+          IP=$$(cat keycloak_ip.txt)
+          # Use HTTPS 8443 for all PKI strategies — Keycloak rejects HTTP admin/token
+          # requests from non-localhost. -k handles the self-signed cert for local PKI.
+          KEYCLOAK_BASE_URL="https://$${IP}:8443"
+          KEYCLOAK_CALL_URL="$$KEYCLOAK_BASE_URL"
+        fi
+
+        ISSUER="$${KEYCLOAK_BASE_URL}/realms/sdv-telemetry"
+        CLIENT_ID="data-web-client"
+        CLIENT_SECRET=$$(openssl rand -hex 32)
+
+        echo "Creating KEYCLOAK_CLIENT_ID_WEB_CLIENT..."
+        if ! gcloud secrets describe "KEYCLOAK_CLIENT_ID_WEB_CLIENT" --project="$PROJECT_ID" &>/dev/null; then
+          gcloud secrets create "KEYCLOAK_CLIENT_ID_WEB_CLIENT" --replication-policy="automatic" --project="$PROJECT_ID"
+        fi
+        printf '%s' "$$CLIENT_ID" | gcloud secrets versions add KEYCLOAK_CLIENT_ID_WEB_CLIENT --data-file=- --project="$PROJECT_ID"
+
+        echo "Creating KEYCLOAK_CLIENT_SECRET_WEB_CLIENT..."
+        if ! gcloud secrets describe "KEYCLOAK_CLIENT_SECRET_WEB_CLIENT" --project="$PROJECT_ID" &>/dev/null; then
+          gcloud secrets create "KEYCLOAK_CLIENT_SECRET_WEB_CLIENT" --replication-policy="automatic" --project="$PROJECT_ID"
+        fi
+        printf '%s' "$$CLIENT_SECRET" | gcloud secrets versions add KEYCLOAK_CLIENT_SECRET_WEB_CLIENT --data-file=- --project="$PROJECT_ID"
+
+        echo "Creating KEYCLOAK_ISSUER ($${ISSUER})..."
+        if ! gcloud secrets describe "KEYCLOAK_ISSUER" --project="$PROJECT_ID" &>/dev/null; then
+          gcloud secrets create "KEYCLOAK_ISSUER" --replication-policy="automatic" --project="$PROJECT_ID"
+        fi
+        printf '%s' "$$ISSUER" | gcloud secrets versions add KEYCLOAK_ISSUER --data-file=- --project="$PROJECT_ID"
+
+        echo "✅ Web client secrets stored in Secret Manager."
+
+        # ----------------------------------------------------------------
+        # Register / update the client in Keycloak via Admin REST API.
+        # This is needed for re-deployments where realm import (first-boot)
+        # already ran — the import used a placeholder secret that must be
+        # rotated to the freshly generated CLIENT_SECRET.
+        # ----------------------------------------------------------------
+        ADMIN_URL="$${KEYCLOAK_CALL_URL}/admin/realms/sdv-telemetry"
+        # -k: skip TLS verification (IP-based SANs are fine for build pipelines)
+        # Note: -f is intentionally omitted here so curl always returns the body,
+        # making HTTP error responses visible instead of silently empty.
+        CURL="curl -k -s"
+
+        echo "Obtaining Keycloak admin token..."
+        # Use --data-urlencode for password so special characters like + and = are
+        # properly percent-encoded. With plain -d, a + in the password is treated
+        # as a space by the application/x-www-form-urlencoded parser in Keycloak.
+        TOKEN_RESPONSE=$$($$CURL --connect-timeout 10 --max-time 30 -X POST \
+          "$${KEYCLOAK_CALL_URL}/realms/master/protocol/openid-connect/token" \
+          -H "Content-Type: application/x-www-form-urlencoded" \
+          -d "client_id=admin-cli" \
+          -d "username=admin" \
+          --data-urlencode "password=$${KEYCLOAK_ADMIN_PASSWORD}" \
+          -d "grant_type=password")
+        echo "Token response: $${TOKEN_RESPONSE}"
+
+        ADMIN_TOKEN=$$(echo "$$TOKEN_RESPONSE" | jq -r '.access_token')
+        if [[ -z "$$ADMIN_TOKEN" ]]; then
+          echo "::error::Failed to obtain Keycloak admin token."
+          exit 1
+        fi
+        echo "✓ Admin token obtained."
+
+        # Check whether the client already exists (may have been created via realm import)
+        EXISTING=$$($$CURL \
+          "$${ADMIN_URL}/clients?clientId=$${CLIENT_ID}" \
+          -H "Authorization: Bearer $${ADMIN_TOKEN}" || echo "[]")
+
+        CLIENT_UUID=$$(echo "$$EXISTING" | jq -r '.[0].id // ""')
+
+        if [[ -n "$$CLIENT_UUID" ]]; then
+          echo "Client '$${CLIENT_ID}' exists (uuid=$${CLIENT_UUID}). Rotating secret..."
+          $$CURL -X POST \
+            "$${ADMIN_URL}/clients/$${CLIENT_UUID}/client-secret" \
+            -H "Authorization: Bearer $${ADMIN_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "{\"type\":\"secret\",\"value\":\"$${CLIENT_SECRET}\"}"
+          echo "✓ Client secret rotated."
+        else
+          echo "Client '$${CLIENT_ID}' not found. Creating it..."
+          $$CURL -X POST \
+            "$${ADMIN_URL}/clients" \
+            -H "Authorization: Bearer $${ADMIN_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"clientId\": \"$${CLIENT_ID}\",
+              \"name\": \"$${CLIENT_ID}\",
+              \"enabled\": true,
+              \"clientAuthenticatorType\": \"client-secret\",
+              \"secret\": \"$${CLIENT_SECRET}\",
+              \"redirectUris\": [\"/*\"],
+              \"webOrigins\": [\"/*\"],
+              \"standardFlowEnabled\": true,
+              \"implicitFlowEnabled\": false,
+              \"directAccessGrantsEnabled\": false,
+              \"serviceAccountsEnabled\": false,
+              \"publicClient\": false,
+              \"frontchannelLogout\": true,
+              \"protocol\": \"openid-connect\"
+            }"
+          echo "✓ Client '$${CLIENT_ID}' created."
+        fi
+
+        echo "✅ Keycloak web client registered and secret synchronised."
+    secretEnv: ['PKI_STRATEGY', 'KEYCLOAK_ADMIN_PASSWORD']
+    waitFor: ['create-jwk-secrets-remote']
+
 # ============================================================================
 # SUBSTITUTIONS & SECRETS CONFIG
 # ============================================================================
 substitutions:
-  _ENVIRONMENT: "cb-test"
+  _ENVIRONMENT: "sandbox"
   _PKI_STRATEGY: "local"
   _BASE_DOMAIN: ""
   _ARCH: "arm64"
-  _CLUSTER_NAME: "cb-test-gke"
+  _CLUSTER_NAME: "sandbox-gke"
   _REGION: "europe-west4"
   _HELM_ACTION: "sync"
 
@@ -626,6 +791,7 @@ availableSecrets:
       env: 'KEYCLOAK_GCP_SERVICE_ACCOUNT'
     - versionName: projects/$PROJECT_ID/secrets/KEYCLOAK_INSTANCE_CON_SQL_PROXY/versions/latest
       env: 'KEYCLOAK_INSTANCE_CON_SQL_PROXY'
+timeout: '7200s'
 
 options:
   machineType: 'E2_HIGHCPU_8'

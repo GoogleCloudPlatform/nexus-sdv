@@ -1,0 +1,8 @@
+syntax = "proto3";
+package scoring;
+
+message ScoringMessage {
+  string vehicle_id = 1;
+  string score = 2;
+  repeated string suggestions = 3;
+}

@@ -17,3 +17,12 @@ gcp:
 env:
   logLevel: "debug"
   grpcAddr: "0.0.0.0:8080"
+
+# Resource requests/limits — explicit values prevent GKE Autopilot from
+# assigning its defaults (500m CPU / 2Gi memory per pod).
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    memory: 512Mi

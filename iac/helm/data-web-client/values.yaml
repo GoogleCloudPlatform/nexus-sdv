@@ -1,0 +1,64 @@
+image:
+  repository: ""
+  pullPolicy: Always
+  tag: "latest"
+
+service:
+  type: LoadBalancer
+  port: 3000
+
+gcp:
+  projectId: ""
+  serviceAccountEmail: ""
+
+database:
+  instanceConnectionName: ""
+  name: "nexus_acl"
+  user: "webclient"
+  password: ""
+
+nextauth:
+  secret: ""
+  url: ""
+
+keycloak:
+  clientId: ""
+  clientSecret: ""
+  issuer: ""
+
+bigtable:
+  instanceId: ""
+
+googleMaps:
+  apiKey: ""
+  mapId: "DEMO_MAP_ID"
+
+pkiStrategy: "local"
+baseDomain: ""
+fleetviewHostname: "fleetview"
+
+tls:
+  cert: ""
+  key: ""
+
+ingress:
+  staticIpName: ""
+
+nats:
+  url: "nats://nats.base-services.svc.cluster.local:4222"
+  user: ""
+  password: ""
+  scoringPassword: ""
+
+externalSecretsEnabled: false
+
+externalSecrets:
+  secretStoreName: "gcpsm-secret-store"
+  secretStoreKind: "SecretStore"
+  refreshInterval: "1h"
+  clusterLocation: ""
+  clusterName: ""
+  serviceAccountName: "external-secrets-ksa"
+  gcpServiceAccount: ""
+  natsUserSecretName: "NATS_SERVER_USER"
+  natsPasswordSecretName: "NATS_SERVER_PASSWORD"

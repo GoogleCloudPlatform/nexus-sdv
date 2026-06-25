@@ -1,0 +1,53 @@
+[project]
+name = "trip-analyzer"
+version = "1.0.0"
+description = "Service to analyse and score trip-data."
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.27.0",
+    "pydantic-settings>=2.2.0",
+    "nats-py>=2.7.0",
+    "grpcio>=1.62.0",
+    "protobuf>=4.25.0",
+    "httpx>=0.27.0", # Async HTTP client for REST and testing
+    "structlog>=21.4.0", # Used to have logs in json format for gke logging
+    "apscheduler>=3.11.2" # Used for polling for trip started event
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+    "pytest-asyncio>=0.23.0",
+    "pytest-mock>=3.12.0",
+    "testcontainers[nats]>=4.0.0", # For integration tests
+    "ruff>=0.3.0",
+    "mypy>=1.9.0", # Static type checking
+    "betterproto[compiler]>=2.0.0b6", # For "pythonic" gRPC code generation
+    "grpcio-tools>=1.62.0", # Generating Data-api classes
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+# Enable live logging to the terminal
+log_cli = true
+log_cli_level = "DEBUG"
+log_cli_format = "%(asctime)s [%(levelname)6s] %(name)s: %(message)s"
+log_cli_date_format = "%Y-%m-%d %H:%M:%S"
+
+#Python linter and code formatter
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B"] # Enforce style, imports, and best practices
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/trip_analyzer"]

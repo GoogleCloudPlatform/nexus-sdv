@@ -1,0 +1,13 @@
+{{- if eq .Values.pkiStrategy "remote" }}
+apiVersion: networking.gke.io/v1beta1
+kind: FrontendConfig
+metadata:
+  name: {{ include "keycloak.fullname" . | trim }}-frontend
+  namespace: {{ .Release.Namespace }}
+  labels:
+{{ include "keycloak.labels" . | indent 4 }}
+spec:
+  redirectToHttps:
+    enabled: true
+    responseCodeName: MOVED_PERMANENTLY_DEFAULT
+{{- end }}

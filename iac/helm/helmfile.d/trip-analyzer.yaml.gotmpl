@@ -1,0 +1,13 @@
+releases:
+  - name: trip-analyzer
+    namespace: sample-services
+    createNamespace: true
+    chart: ../trip-analyzer
+    values:
+      - image:
+          repository: {{ requiredEnv "IMAGE_REPO" }}/trip-analyzer
+          tag: 'latest'
+        nats:
+          host: {{ requiredEnv "NATS_HOSTNAME" }}
+          user: '{{ env "NATS_CONNECTOR_USER" | default "connector" }}'
+          password: '{{ requiredEnv "NATS_CONNECTOR_PASSWORD" }}'

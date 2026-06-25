@@ -35,11 +35,23 @@ steps:
       - "-c"
       - |
         if [ "$$PKI_STRATEGY" != "remote" ]; then echo "Skipping External DNS Deploy."; exit 0; fi
+
+        # Build the arm64 compute-class selector block. Autopilot requires arm64 to
+        # name a compute-class; "autopilot-arm" is the container-optimized Arm class
+        # (backed by C4A, available in us-east4; Scale-Out/T2A is not). amd64 needs
+        # no selector (default provisioning).
+        if [ "${_ARCH}" = "arm64" ]; then
+          MF_BLOCK='- key: cloud.google.com/compute-class\n                operator: In\n                values:\n                - autopilot-arm'
+        else
+          MF_BLOCK=''
+        fi
+
         # Replace placeholders with actual values using Pipe
           cat iac/helm/external-dns/deployment.yaml | \
           sed "s|__GCP_PROJECT_ID__|${PROJECT_ID}|g" | \
           sed "s|__BASE_DOMAIN__|${_BASE_DOMAIN}|g" | \
           sed "s|__ARCH__|${_ARCH}|g" | \
+          sed "s|__MACHINE_FAMILY_BLOCK__|$${MF_BLOCK}|" | \
           kubectl apply -f -
     secretEnv: ["PKI_STRATEGY", "ENVIRONMENT"]
     waitFor: ["get-gke-credentials"]
@@ -72,11 +84,11 @@ steps:
 # SUBSTITUTIONS & SECRETS CONFIG
 # ============================================================================
 substitutions:
-  _ENVIRONMENT: "cb-test"
+  _ENVIRONMENT: "sandbox"
   _PKI_STRATEGY: "local"
   _BASE_DOMAIN: ""
   _ARCH: "arm64"
-  _CLUSTER_NAME: "cb-test-gke"
+  _CLUSTER_NAME: "sandbox-gke"
   _REGION: "europe-west4"
   _HELM_ACTION: "sync"
 

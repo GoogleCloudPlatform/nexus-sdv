@@ -54,11 +54,6 @@ spec:
         app.kubernetes.io/name: external-dns
     spec:
       serviceAccountName: external-dns
-      tolerations:
-      - key: "cloud.google.com/compute-class"
-        operator: "Equal"
-        value: "Scale-Out"
-        effect: "NoSchedule"
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -68,10 +63,11 @@ spec:
                 operator: In
                 values:
                 - __ARCH__
-              - key: cloud.google.com/compute-class
-                operator: In
-                values:
-                - Scale-Out
+              # deploy-external-dns.yaml fills this in: for arm64 the
+              # compute-class: autopilot-arm selector (Autopilot requires arm64 to
+              # name a compute-class; autopilot-arm is backed by C4A); for amd64 it
+              # is blanked out so Autopilot uses default amd64 provisioning.
+              __MACHINE_FAMILY_BLOCK__
       containers:
       - name: external-dns
         image: registry.k8s.io/external-dns/external-dns:v0.15.0

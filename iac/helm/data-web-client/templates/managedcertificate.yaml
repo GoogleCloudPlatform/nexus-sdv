@@ -1,0 +1,12 @@
+{{- if eq .Values.pkiStrategy "remote" }}
+apiVersion: networking.gke.io/v1
+kind: ManagedCertificate
+metadata:
+  name: {{ include "data-web-client.fullname" . }}-cert
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "data-web-client.labels" . | nindent 4 }}
+spec:
+  domains:
+    - {{ .Values.fleetviewHostname }}.{{ .Values.baseDomain }}
+{{- end }}

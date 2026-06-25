@@ -1,6 +1,7 @@
 # --- Stage 1: The Builder ---
 # This stage compiles the Go application into a static binary.
-FROM --platform=$BUILDPLATFORM golang:1.24-alpine AS builder
+ARG DOCKER_HUB_MIRROR=europe-west4-docker.pkg.dev/horizon-sdv-lal/docker-hub
+FROM --platform=$BUILDPLATFORM ${DOCKER_HUB_MIRROR}/golang:1.24-alpine AS builder
 
 # Set the working directory inside the container
 WORKDIR /app
@@ -25,7 +26,7 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -a -ldflags="-w
 
 # --- Stage 2: The Final Image ---
 # This stage creates the final, lightweight image with only the compiled binary.
-FROM alpine:latest
+FROM ${DOCKER_HUB_MIRROR}/alpine:latest
 
 # It's a good security practice to run the application as a non-root user.
 RUN addgroup -S natsapp && adduser -S natsapp -G natsapp

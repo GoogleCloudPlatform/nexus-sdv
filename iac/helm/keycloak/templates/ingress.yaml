@@ -1,0 +1,30 @@
+{{- if eq .Values.pkiStrategy "remote" }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "keycloak.fullname" . | trim }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+{{ include "keycloak.labels" . | indent 4 }}
+  annotations:
+    kubernetes.io/ingress.class: "gce"
+    networking.gke.io/managed-certificates: {{ include "keycloak.fullname" . | trim }}-cert
+    networking.gke.io/v1beta1.FrontendConfig: {{ include "keycloak.fullname" . | trim }}-frontend
+    external-dns.alpha.kubernetes.io/hostname: keycloak.{{ .Values.baseDomain }}
+    external-dns.alpha.kubernetes.io/ttl: "300"
+    {{- if .Values.ingress.staticIpName }}
+    kubernetes.io/ingress.global-static-ip-name: {{ .Values.ingress.staticIpName }}
+    {{- end }}
+spec:
+  rules:
+  - host: keycloak.{{ .Values.baseDomain }}
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: {{ include "keycloak.fullname" . | trim }}
+            port:
+              number: 8080
+{{- end }}

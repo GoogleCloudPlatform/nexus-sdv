@@ -39,6 +39,15 @@ certificates:
   caKey: ""
   factoryCaCert: ""
 
+# Resource requests/limits — explicit values prevent GKE Autopilot from
+# assigning its defaults (500m CPU / 2Gi memory per pod).
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    memory: 512Mi
+
 # Service URLs
 urls:
   nats: ""

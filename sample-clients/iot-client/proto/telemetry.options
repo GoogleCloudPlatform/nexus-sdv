@@ -1,0 +1,5 @@
+telemetry.TelemetryMessage.message_id    max_size:40
+telemetry.TelemetryMessage.device_id     max_size:32
+telemetry.TelemetryMessage.sensor_data   max_count:8
+telemetry.SensorReading.value            max_size:64
+telemetry.SensorReading.sensor           max_size:32

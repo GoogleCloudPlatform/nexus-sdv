@@ -24,7 +24,26 @@ steps:
     secretEnv: ['GKE_CLUSTER_NAME', 'GCP_REGION']
 
   # ============================================================================
-  # 2. BUILD & PUSH DOCKER IMAGE
+  # 2. DOCKER HUB AUTHENTICATION
+  # Authenticates before the build to avoid Docker Hub rate-limit 404s on
+  # anonymous pulls of maven / eclipse-temurin base images.
+  # ============================================================================
+  - id: 'configure-ar'
+    name: 'gcr.io/cloud-builders/gcloud'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        TOKEN=$$(gcloud auth print-access-token)
+        AUTH=$$(printf '%s' "oauth2accesstoken:$$TOKEN" | base64 -w0)
+        mkdir -p /root/.docker
+        echo '{"auths":{"europe-west4-docker.pkg.dev":{"auth":"'$$AUTH'"}}}' \
+          > /root/.docker/config.json
+        echo "Artifact Registry auth configured (token-based, no credential helper)."
+    waitFor: ['-']
+
+  # ============================================================================
+  # 3. BUILD & PUSH DOCKER IMAGE
   # ============================================================================
   - id: 'build-push-data-api-sampler'
     name: 'gcr.io/cloud-builders/docker'
@@ -40,14 +59,15 @@ steps:
         echo "Building Data-API Sampler image for linux/${_ARCH} and pushing..."
         docker buildx build \
           --platform linux/${_ARCH} \
+          --build-arg DOCKER_HUB_MIRROR="$${IMAGE_REPO%/artifact-registry}/docker-hub" \
           --tag "$${IMAGE_REPO}/data-api-sampler:latest" \
           --push \
           .
     secretEnv: ['IMAGE_REPO']
-    waitFor: ['-']
+    waitFor: ['configure-ar']
 
   # ============================================================================
-  # 3. GET DATA API IP (Dynamische Ermittlung der IP)
+  # 4. GET DATA API IP (Dynamische Ermittlung der IP)
   # ============================================================================
   - id: 'get-data-api-ip'
     name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'

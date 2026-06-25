@@ -1,5 +1,6 @@
 # --- Stage 1: Build ---
-FROM --platform=$BUILDPLATFORM maven:3.9-eclipse-temurin-21 AS build
+ARG DOCKER_HUB_MIRROR=europe-west4-docker.pkg.dev/horizon-sdv-lal/docker-hub
+FROM --platform=$BUILDPLATFORM ${DOCKER_HUB_MIRROR}/maven:3.9-eclipse-temurin-21 AS build
 WORKDIR /app
 
 COPY pom.xml .
@@ -12,7 +13,7 @@ COPY src ./src
 RUN mvn clean package -DskipTests
 
 # --- Stage 2: Runtime ---
-FROM eclipse-temurin:21-jre
+FROM ${DOCKER_HUB_MIRROR}/eclipse-temurin:21-jre
 WORKDIR /app
 
 COPY --from=build /app/target/*.jar app.jar

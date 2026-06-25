@@ -1,0 +1,30 @@
+{{- if eq .Values.pkiStrategy "remote" }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "data-web-client.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "data-web-client.labels" . | nindent 4 }}
+  annotations:
+    kubernetes.io/ingress.class: "gce"
+    networking.gke.io/managed-certificates: {{ include "data-web-client.fullname" . }}-cert
+    networking.gke.io/v1beta1.FrontendConfig: {{ include "data-web-client.fullname" . }}-frontend
+    external-dns.alpha.kubernetes.io/hostname: {{ .Values.fleetviewHostname }}.{{ .Values.baseDomain }}
+    external-dns.alpha.kubernetes.io/ttl: "300"
+    {{- if .Values.ingress.staticIpName }}
+    kubernetes.io/ingress.global-static-ip-name: {{ .Values.ingress.staticIpName }}
+    {{- end }}
+spec:
+  rules:
+  - host: {{ .Values.fleetviewHostname }}.{{ .Values.baseDomain }}
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: {{ include "data-web-client.fullname" . }}
+            port:
+              number: 3000
+{{- end }}
