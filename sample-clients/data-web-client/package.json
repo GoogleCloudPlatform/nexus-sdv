@@ -14,7 +14,7 @@
     "@tanstack/react-table": "^8.21.3",
     "@vis.gl/react-google-maps": "^1.7.1",
     "nats": "^2.29.3",
-    "next": "16.2.7",
+    "next": "16.3.4",
     "next-auth": "^4.24.13",
     "pg": "^8.20.0",
     "protobufjs": "^8.6.0",
