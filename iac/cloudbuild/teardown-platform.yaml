@@ -24,7 +24,7 @@
 
 steps:
   - id: 'teardown-platform'
-    name: 'gcr.io/cloud-builders/gcloud'
+    name: 'gcr.io/cloud-builders/gcloud@sha256:abcad906c9fa0dd063c4b6e570994f34024673486b17e9f4c99c720165e03ae5'
     entrypoint: 'bash'
     env:
       - 'PRESERVE_SERVER_CA=${_PRESERVE_CAS}'
@@ -71,17 +71,34 @@ steps:
         # -----------------------------------------------------------------------
         echo "Clearing DEPLOYMENT_SUFFIX from bootstrap config..."
         sed -i '/^DEPLOYMENT_SUFFIX=/d' iac/bootstrapping/.bootstrap_env
-        echo "Uploading updated config back to ${_BOOTSTRAP_ENV_GCS_PATH}..."
-        gsutil cp iac/bootstrapping/.bootstrap_env "${_BOOTSTRAP_ENV_GCS_PATH}"
-        echo "Config saved."
+        # The config is written to archive/, not back where it was. The scheduled
+        # health check runs in 'dir' mode over this bucket and checks every
+        # *.bootstrap_env in it, so a config left in place keeps describing a
+        # platform that no longer exists: the schedule turns red at the first
+        # teardown and stays red, whatever the live environments do.
+        #
+        # Archived rather than deleted, because the file is also the input for
+        # bootstrapping this environment again, and it is the only record of how
+        # it was configured.
+        ARCHIVE_PATH=$(dirname "${_BOOTSTRAP_ENV_GCS_PATH}")/archive/$(basename "${_BOOTSTRAP_ENV_GCS_PATH}")
+        echo "Archiving config to $${ARCHIVE_PATH}..."
+        gsutil cp iac/bootstrapping/.bootstrap_env "$${ARCHIVE_PATH}"
+        gsutil rm "${_BOOTSTRAP_ENV_GCS_PATH}" || echo "  (nothing to remove)"
+        echo "Config archived; this environment is no longer checked by the schedule."
 
 # =============================================================================
 # SUBSTITUTIONS & OPTIONS
 # =============================================================================
 substitutions:
   _BOOTSTRAP_ENV_GCS_PATH: ''
-  _PRESERVE_CAS: 'Y'
-  _PRESERVE_DNS: 'Y'
+  # Preserve by default — the opposite of test-environments.yaml, deliberately.
+  # A single teardown may run in a project where another environment is still
+  # live and sharing these, so keeping them is the safe default here. The test
+  # pipeline defaults to deleting because it owns every environment it touches.
+  _PRESERVE_CAS: 'Y'        # Y = keep the CA pools
+  _PRESERVE_DNS: 'Y'        # Y = keep the Cloud DNS zone (only ever deletable
+                            #     when the bootstrap created it, i.e. when
+                            #     EXISTING_DNS_ZONE was empty — see dns.tf)
 
 timeout: '3600s'
 

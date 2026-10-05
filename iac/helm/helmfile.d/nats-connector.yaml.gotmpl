@@ -20,4 +20,4 @@ releases:
           # Cluster location and name injected from CloudBuild environment
           clusterLocation: '{{ .StateValues.clusterLocation | default "" }}'
           clusterName: '{{ .StateValues.clusterName | default "" }}'
-          gcpServiceAccount: '{{ env "EXTERNAL_SECRETS_OPERATOR_GCP_SERVICE_ACCOUNT" | default "external-secrets-gsa@horizon-sdv-lal.iam.gserviceaccount.com" }}'
+          gcpServiceAccount: '{{ requiredEnv "EXTERNAL_SECRETS_OPERATOR_GCP_SERVICE_ACCOUNT" }}'

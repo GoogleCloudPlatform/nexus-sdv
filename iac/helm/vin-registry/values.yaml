@@ -1,0 +1,27 @@
+replicaCount: 1
+arch: arm64
+
+image:
+  repository: ""
+  name: vin-registry
+  tag: latest
+  pullPolicy: Always
+
+service:
+  type: ClusterIP
+  port: 8080
+
+gcpProjectId: ""
+# Reuses the data-api/bigtable-connector service account, which already holds
+# roles/cloudsql.client. Terraform binds it to this chart's KSA as well.
+gcpServiceAccountEmail: ""
+
+database:
+  name: nexus_acl
+  user: webclient
+  password: ""
+  instanceConnectionName: ""
+
+resources:
+  requests: { cpu: "50m", memory: "64Mi" }
+  limits:   { cpu: "250m", memory: "256Mi" }

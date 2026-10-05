@@ -9,6 +9,10 @@ tokio = { version = "1.0", features = ["full"] }
 tower-http = { version = "0.5", features = ["trace"] }
 rustls = { version = "0.23", features = ["aws_lc_rs"] }
 tokio-rustls = "0.26"
+# HTTP only (no TLS feature): the vin-registry call goes to a ClusterIP
+# service over plain HTTP, and a second rustls provider would clash with the
+# one the TLS listener installs.
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
 rustls-pemfile = "2.0"
 x509-parser = "0.15"
 tracing = { version = "0.1", features = ["attributes"] }

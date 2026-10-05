@@ -19,9 +19,44 @@ pub fn sign_csr<S: SigningKey>(
     Ok(issued)
 }
 
+/// Default lifetime of an issued operational certificate.
+///
+/// It must stay well below the lifetime of the factory certificate a vehicle
+/// re-registers with, otherwise renewal is impossible: the credential needed to
+/// obtain a new operational certificate would expire first.
+pub const DEFAULT_VALIDITY: Duration = Duration::days(90);
+
+/// Parse a validity given as `<number><unit>`, e.g. `90d`, `12h`, `5m`, `30s`.
+///
+/// Deliberately strict: a malformed value is an error rather than a silent
+/// fallback. A certificate lifetime that quietly becomes something else is
+/// worse than a service that refuses to start.
+pub fn parse_validity(spec: &str) -> anyhow::Result<Duration> {
+    let spec = spec.trim();
+    let (digits, unit) = spec.split_at(
+        spec.find(|c: char| !c.is_ascii_digit())
+            .with_context(|| format!("validity '{spec}' has no unit, expected e.g. 90d"))?,
+    );
+
+    let value: i64 = digits
+        .parse()
+        .with_context(|| format!("validity '{spec}' does not start with a number"))?;
+    if value == 0 {
+        anyhow::bail!("validity '{spec}' must be greater than zero");
+    }
+
+    match unit {
+        "s" => Ok(Duration::seconds(value)),
+        "m" => Ok(Duration::minutes(value)),
+        "h" => Ok(Duration::hours(value)),
+        "d" => Ok(Duration::days(value)),
+        other => anyhow::bail!("validity '{spec}' has unknown unit '{other}', expected s, m, h or d"),
+    }
+}
+
 /// set the CSR params for the issued Certificate
-pub fn set_csr_params(mut csr_params: CertificateParams) -> CertificateParams {
-    csr_params.not_after = OffsetDateTime::now_utc() + Duration::days(365);
+pub fn set_csr_params(mut csr_params: CertificateParams, validity: Duration) -> CertificateParams {
+    csr_params.not_after = OffsetDateTime::now_utc() + validity;
     csr_params.extended_key_usages = [ExtendedKeyUsagePurpose::ClientAuth].into();
     csr_params.key_usages = [
         KeyUsagePurpose::DigitalSignature,
@@ -57,9 +92,29 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_validity_units() {
+        assert_eq!(parse_validity("90d").unwrap(), Duration::days(90));
+        assert_eq!(parse_validity("12h").unwrap(), Duration::hours(12));
+        assert_eq!(parse_validity("5m").unwrap(), Duration::minutes(5));
+        assert_eq!(parse_validity("30s").unwrap(), Duration::seconds(30));
+        assert_eq!(parse_validity("  90d  ").unwrap(), Duration::days(90));
+    }
+
+    #[test]
+    fn test_parse_validity_rejects_bad_input() {
+        // Each of these would otherwise become a certificate lifetime.
+        for bad in ["", "90", "d", "90x", "-1d", "0d", "9 0d", "ninety days"] {
+            assert!(
+                parse_validity(bad).is_err(),
+                "expected '{bad}' to be rejected"
+            );
+        }
+    }
+
+    #[test]
     fn test_set_csr_params() {
         let params = CertificateParams::default();
-        let modified_params = set_csr_params(params);
+        let modified_params = set_csr_params(params, DEFAULT_VALIDITY);
 
         assert_eq!(modified_params.is_ca, IsCa::NoCa);
         assert!(modified_params
@@ -71,10 +126,17 @@ mod tests {
         assert!(modified_params
             .key_usages
             .contains(&KeyUsagePurpose::KeyEncipherment));
-        // Check validity period is roughly 365 days from now
+        // Check the validity period matches what was passed in
         let now = OffsetDateTime::now_utc();
         let diff = modified_params.not_after - now;
-        assert!(diff >= Duration::days(364) && diff <= Duration::days(366));
+        assert!(diff >= Duration::days(89) && diff <= Duration::days(91));
+    }
+
+    #[test]
+    fn test_set_csr_params_honours_a_short_validity() {
+        let params = set_csr_params(CertificateParams::default(), parse_validity("30m").unwrap());
+        let diff = params.not_after - OffsetDateTime::now_utc();
+        assert!(diff <= Duration::minutes(30) && diff > Duration::minutes(29));
     }
 
     #[test]

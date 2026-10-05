@@ -1,3 +1,4 @@
+vinRegistryUrl: ""
 image:
   repository: ""
   pullPolicy: Always

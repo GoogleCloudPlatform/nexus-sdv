@@ -80,7 +80,7 @@ This creates:
 
 ### 2. Go Environment
 
-- Go 1.24 or later
+- Go 1.25 or later
 - Dependencies will be automatically installed via `go mod download`
 
 ## Build

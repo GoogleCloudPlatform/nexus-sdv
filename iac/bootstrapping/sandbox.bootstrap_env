@@ -1,21 +1,39 @@
-GCP_PROJECT_ID="sdv-demo-474513"
+# Example configuration for the Cloud Build triggers (bootstrap-platform,
+# teardown-platform, run-sample-clients, platform-health-check).
+#
+# Copy it, fill in your own values, and upload the copy to
+#   gs://<PROJECT_ID>-bootstrap-envs/<name>.bootstrap_env
+# then pass that path as _BOOTSTRAP_ENV_GCS_PATH. Never commit a filled-in copy:
+# it names your project and domain and carries your Maps API key.
+#
+# Empty EXISTING_* values mean "create new", exactly as the interactive
+# create-bootstrap-env.sh does when you leave a prompt blank.
+GCP_PROJECT_ID="<your-gcp-project-id>"
 GCP_REGION="europe-west4"
 DEPLOY_MODE="cloudbuild"
 GITHUB_REPO=""
-ENV="demo"
+ENV="sandbox"
 PKI_STRATEGY="remote"
-BASE_DOMAIN="nexus-sdv.io"
-EXISTING_DNS_ZONE="nexus-sdv-io"
+BASE_DOMAIN="<your-domain>"
+EXISTING_DNS_ZONE="<your-cloud-dns-zone-name>"
 KEYCLOAK_HOSTNAME="keycloak"
 NATS_HOSTNAME="nats"
 REGISTRATION_HOSTNAME="registration"
 FLEETVIEW_HOSTNAME="fleetview"
-EXISTING_SERVER_CA="server-root-ca"
-EXISTING_SERVER_CA_POOL="server-ca-pool-3dc01bd8"
-EXISTING_FACTORY_CA="factory-root-ca"
-EXISTING_FACTORY_CA_POOL="factory-ca-pool-3dc01bd8"
-EXISTING_REG_CA="registration-root-ca"
-EXISTING_REG_CA_POOL="registration-ca-pool-3dc01bd8"
+EXISTING_SERVER_CA=""
+EXISTING_SERVER_CA_POOL=""
+EXISTING_FACTORY_CA=""
+EXISTING_FACTORY_CA_POOL=""
+EXISTING_REG_CA=""
+EXISTING_REG_CA_POOL=""
 ARCH="arm64"
-NEXT_PUBLIC_GOOGLE_MAPS_API_KEY="AIzaSyAy70zsbgvGv79s75OjY2wx_baeBXDE2Ug"
-NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID="44d2acf641bda667d3f8286d"
+# Credential lifetimes. Both are optional; leaving them out keeps the defaults
+# shown here. The factory certificate must outlive the operational certificates
+# derived from it, otherwise a vehicle cannot renew.
+OPERATIONAL_CERT_VALIDITY="90d"
+FACTORY_HELPER_CERT_VALIDITY_DAYS="730"
+# Browser key: restrict it to your FleetView hostname (HTTP referrer) in the
+# Google Cloud console — shipping to the browser is by design, so the referrer
+# restriction is the protection, not secrecy.
+NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=""
+NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID=""

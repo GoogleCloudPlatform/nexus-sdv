@@ -23,7 +23,7 @@ steps:
   # WAVE 0a — External Secrets Operator (blocks all other deployments)
   # ===========================================================================
   - id: 'deploy-external-secrets'
-    name: 'gcr.io/cloud-builders/gcloud'
+    name: 'gcr.io/cloud-builders/gcloud@sha256:abcad906c9fa0dd063c4b6e570994f34024673486b17e9f4c99c720165e03ae5'
     entrypoint: 'bash'
     waitFor: ['-']
     args:
@@ -40,7 +40,7 @@ steps:
   # WAVE 0 — External DNS (remote PKI only, blocks all other deployments)
   # ===========================================================================
   - id: 'deploy-external-dns'
-    name: 'gcr.io/cloud-builders/gcloud'
+    name: 'gcr.io/cloud-builders/gcloud@sha256:abcad906c9fa0dd063c4b6e570994f34024673486b17e9f4c99c720165e03ae5'
     entrypoint: 'bash'
     waitFor: ['deploy-external-secrets']
     args:
@@ -61,7 +61,7 @@ steps:
   # WAVE 1 — Keycloak, NATS, Data API (parallel, all wait for external-dns)
   # ===========================================================================
   - id: 'deploy-keycloak'
-    name: 'gcr.io/cloud-builders/gcloud'
+    name: 'gcr.io/cloud-builders/gcloud@sha256:abcad906c9fa0dd063c4b6e570994f34024673486b17e9f4c99c720165e03ae5'
     entrypoint: 'bash'
     waitFor: ['deploy-external-secrets', 'deploy-external-dns']
     args:
@@ -75,7 +75,7 @@ steps:
           --substitutions=^::^_ARCH=${_ARCH}::_PKI_STRATEGY=${_PKI_STRATEGY}::_BASE_DOMAIN=${_BASE_DOMAIN}::_HELM_ACTION=${_HELM_ACTION}
 
   - id: 'build-push-nats-auth-callout'
-    name: 'gcr.io/cloud-builders/gcloud'
+    name: 'gcr.io/cloud-builders/gcloud@sha256:abcad906c9fa0dd063c4b6e570994f34024673486b17e9f4c99c720165e03ae5'
     entrypoint: 'bash'
     waitFor: ['deploy-keycloak']
     args:
@@ -89,7 +89,7 @@ steps:
           --substitutions=^::^_ARCH=${_ARCH}
 
   - id: 'deploy-nats-auth-callout'
-    name: 'gcr.io/cloud-builders/gcloud'
+    name: 'gcr.io/cloud-builders/gcloud@sha256:abcad906c9fa0dd063c4b6e570994f34024673486b17e9f4c99c720165e03ae5'
     entrypoint: 'bash'
     waitFor: ['build-push-nats-auth-callout']
     args:
@@ -103,7 +103,7 @@ steps:
           --substitutions=^::^_ARCH=${_ARCH}::_HELM_ACTION=${_HELM_ACTION}
 
   - id: 'deploy-nats'
-    name: 'gcr.io/cloud-builders/gcloud'
+    name: 'gcr.io/cloud-builders/gcloud@sha256:abcad906c9fa0dd063c4b6e570994f34024673486b17e9f4c99c720165e03ae5'
     entrypoint: 'bash'
     waitFor: ['deploy-external-secrets', 'deploy-external-dns']
     args:
@@ -117,7 +117,7 @@ steps:
           --substitutions=^::^_ARCH=${_ARCH}::_PKI_STRATEGY=${_PKI_STRATEGY}::_BASE_DOMAIN=${_BASE_DOMAIN}::_HELM_ACTION=${_HELM_ACTION}
 
   - id: 'build-push-deploy-data-api'
-    name: 'gcr.io/cloud-builders/gcloud'
+    name: 'gcr.io/cloud-builders/gcloud@sha256:abcad906c9fa0dd063c4b6e570994f34024673486b17e9f4c99c720165e03ae5'
     entrypoint: 'bash'
     waitFor: ['deploy-external-secrets', 'deploy-external-dns']
     args:
@@ -136,7 +136,7 @@ steps:
   #          Data API Sampler (needs Data API)
   # ===========================================================================
   - id: 'build-push-deploy-registration'
-    name: 'gcr.io/cloud-builders/gcloud'
+    name: 'gcr.io/cloud-builders/gcloud@sha256:abcad906c9fa0dd063c4b6e570994f34024673486b17e9f4c99c720165e03ae5'
     entrypoint: 'bash'
     waitFor: ['deploy-nats-auth-callout', 'deploy-nats']
     args:
@@ -155,8 +155,32 @@ steps:
           --region=${_REGION} \
           --substitutions=^::^_ARCH=${_ARCH}::_PKI_STRATEGY=${_PKI_STRATEGY}::_BASE_DOMAIN=${_BASE_DOMAIN}::_HELM_ACTION=${_HELM_ACTION}::_COMMIT_SHA=$$SHA
 
+  - id: 'build-push-deploy-factory-helper'
+    name: 'gcr.io/cloud-builders/gcloud@sha256:abcad906c9fa0dd063c4b6e570994f34024673486b17e9f4c99c720165e03ae5'
+    entrypoint: 'bash'
+    waitFor: ['deploy-keycloak']
+    args:
+      - '-c'
+      - |
+        # factory-helper v1 issues its TLS cert via GCP CAS and refuses to run
+        # with local PKI, so skip it there instead of failing the deployment.
+        if [ "${_PKI_STRATEGY}" != "remote" ]; then
+          echo "Skipping factory-helper (PKI strategy is '${_PKI_STRATEGY}', not 'remote')"
+          exit 0
+        fi
+        SHA="${_COMMIT_SHA}"
+        if [ -z "$$SHA" ] || [ "$$SHA" = "manual" ]; then
+          SHA="${COMMIT_SHA:-manual-latest}"
+        fi
+        echo "Building and deploying Factory Helper (SHA: $$SHA)..."
+        gcloud builds submit . \
+          --config=iac/cloudbuild/build-push-deploy-factory-helper.yaml \
+          --project=$PROJECT_ID \
+          --region=${_REGION} \
+          --substitutions=^::^_ARCH=${_ARCH}::_HELM_ACTION=${_HELM_ACTION}::_COMMIT_SHA=$$SHA
+
   - id: 'deploy-nats-bigtable-connector'
-    name: 'gcr.io/cloud-builders/gcloud'
+    name: 'gcr.io/cloud-builders/gcloud@sha256:abcad906c9fa0dd063c4b6e570994f34024673486b17e9f4c99c720165e03ae5'
     entrypoint: 'bash'
     waitFor: ['deploy-nats']
     args:
@@ -170,7 +194,7 @@ steps:
           --substitutions=^::^_ARCH=${_ARCH}::_HELM_ACTION=${_HELM_ACTION}
 
   - id: 'build-push-deploy-data-api-sampler'
-    name: 'gcr.io/cloud-builders/gcloud'
+    name: 'gcr.io/cloud-builders/gcloud@sha256:abcad906c9fa0dd063c4b6e570994f34024673486b17e9f4c99c720165e03ae5'
     entrypoint: 'bash'
     waitFor: ['build-push-deploy-data-api']
     args:
@@ -184,7 +208,7 @@ steps:
           --substitutions=^::^_ARCH=${_ARCH}::_HELM_ACTION=${_HELM_ACTION}
 
   - id: 'build-push-deploy-web-client'
-    name: 'gcr.io/cloud-builders/gcloud'
+    name: 'gcr.io/cloud-builders/gcloud@sha256:abcad906c9fa0dd063c4b6e570994f34024673486b17e9f4c99c720165e03ae5'
     entrypoint: 'bash'
     waitFor: ['build-push-deploy-data-api']
     args:
@@ -196,6 +220,24 @@ steps:
           --project=$PROJECT_ID \
           --region=${_REGION} \
           --substitutions=^::^_ARCH=${_ARCH}::_HELM_ACTION=${_HELM_ACTION}        
+
+  # vin-registry waits for the web client because that pipeline creates the
+  # vehicle_groups table it enrols VINs into. Reporting is best effort either
+  # way, but ordering them avoids losing the first few reports of a fresh
+  # platform to a table that does not exist yet.
+  - id: 'build-push-deploy-vin-registry'
+    name: 'gcr.io/cloud-builders/gcloud@sha256:abcad906c9fa0dd063c4b6e570994f34024673486b17e9f4c99c720165e03ae5'
+    entrypoint: 'bash'
+    waitFor: ['build-push-deploy-web-client']
+    args:
+      - '-c'
+      - |
+        echo "Building and deploying VIN Registry..."
+        gcloud builds submit . \
+          --config=iac/cloudbuild/build-push-deploy-vin-registry.yaml \
+          --project=$PROJECT_ID \
+          --region=${_REGION} \
+          --substitutions=^::^_ARCH=${_ARCH}::_HELM_ACTION=${_HELM_ACTION}
         
         
 

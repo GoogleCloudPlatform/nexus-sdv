@@ -3,6 +3,10 @@ keycloak:
   logLevel: DEBUG
   pkiStrategy: "local"
   baseDomain: ""
+  # Local PKI only: full KC_HOSTNAME URL pointing at the Keycloak LoadBalancer IP
+  # (e.g. https://34.7.129.221:8443) so the browser-facing OIDC URLs are reachable.
+  # Empty => fall back to the in-cluster service name "keycloak" (in-cluster use only).
+  frontendUrl: ""
   tls:
     cert: ""
     key: ""
@@ -23,8 +27,5 @@ database:
 
 service:
   type: LoadBalancer
-  annotations:
-    external-dns.alpha.kubernetes.io/hostname: keycloak.{{ .Values.baseDomain }}
-    external-dns.alpha.kubernetes.io/ttl: "300"
   httpPort: 8080
   httpsPort: 8443

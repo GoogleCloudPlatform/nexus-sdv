@@ -32,10 +32,10 @@ describe('DataTable', () => {
     expect(onRowClick).toHaveBeenCalledWith(testData[0]);
   });
 
-  it('renders "—" for missing values', () => {
+  it('renders "---" for missing values', () => {
     const sparseData = [{ 'dynamic:temp': '25.0' }];
     render(<DataTable columnKeys={testColumns} data={sparseData} />);
 
-    expect(screen.getByText('—')).toBeInTheDocument();
+    expect(screen.getByText('---')).toBeInTheDocument();
   });
 });

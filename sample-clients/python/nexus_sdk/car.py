@@ -5,6 +5,7 @@ import nats
 import asyncio
 import requests
 from . import telemetry
+import tempfile
 import time
 import json
 from pathlib import Path
@@ -20,7 +21,7 @@ from cryptography.x509.oid import NameOID
 #VIN = "VEHICLE001"
 #DEVICE = "car"
 
-# Der feste Anker: Wo liegt dieses SDK?
+# The fixed anchor: where does this SDK live?
 SDK_DIR = Path(__file__).parent.absolute()
 PROJECT_ROOT = SDK_DIR.parent
 
@@ -31,7 +32,7 @@ def resolve_path(p: str) -> str:
     path = Path(p)
     if path.is_absolute():
         return str(path)
-    # Dies löst auch "../../" korrekt ab dem PROJECT_ROOT auf!
+    # This also resolves "../../" correctly, relative to PROJECT_ROOT
     return str((PROJECT_ROOT / path).resolve())
 
 OPERATIONAL_CERTIFICATE_PATH = resolve_path("certificates/operational.crt.pem")
@@ -46,6 +47,30 @@ LOCAL_SERVER_CA_PATH = resolve_path("../../base-services/registration/pki/server
 
 TELEMETRY_SENDING_DURATION = 10
 TELEMETRY_SENDING_INTERVAL = 2
+
+def combined_ca_bundle(ca_path: str) -> str:
+    """Return a CA bundle holding the public roots *and* the given private CA.
+
+    Under remote PKI Keycloak is served by the Ingress with a publicly trusted
+    certificate, so verifying against Nexus's private CA alone fails with
+    "certificate verify failed: unable to get local issuer certificate". The
+    private CA is still needed for the registration server, and for Keycloak
+    itself under local PKI — so both go into one bundle rather than choosing.
+
+    Falls back to the private CA alone if the bundle cannot be written.
+    """
+    try:
+        import certifi
+        out = Path(tempfile.gettempdir()) / f"nexus-ca-bundle-{os.getpid()}.pem"
+        if not out.exists():
+            out.write_bytes(
+                Path(certifi.where()).read_bytes() + b"\n" + Path(ca_path).read_bytes()
+            )
+        return str(out)
+    except Exception as e:  # noqa: BLE001 - never fail the request over this
+        print(f"[NexusCar] could not build a combined CA bundle ({e}); using {ca_path} alone")
+        return ca_path
+
 
 def get_ca_paths(pki_strategy: str) -> tuple[str, str]:
     """Get the appropriate CA paths based on PKI strategy."""
@@ -153,7 +178,7 @@ class NexusCar:
         if not self._access_token or now >= self._token_expiry:
             print("[NexusCar] requesting fresh OIDC token...")
             
-            # Wir brauchen den CA-Pfad aus der Config oder den globalen Variablen
+            # The CA path comes from the config or from the global variables
             # Im Remote-Fall ist das meist REMOTE_KEYCLOAK_CA_PATH
             ca_path = self.config.get("keycloak_ca_path", REMOTE_KEYCLOAK_CA_PATH)
 
@@ -163,13 +188,13 @@ class NexusCar:
                     server_url=self.config["keycloak_url"],
                     client_id="car",
                     realm_name="sdv-telemetry", # Realm-Name!!!
-                    # mTLS: Operative Zertifikate zur Identifikation des Fahrzeugs
+                    # mTLS: the operational certificate identifies the vehicle
                     cert=(
                         self.config["operational_cert_path"], 
                         self.config["operational_key_path"]
                     ),
-                    # SSL-Verifikation: CA-Zertifikat zur Validierung des Servers
-                    verify=ca_path
+                    # SSL-Verifikation: oeffentliche Wurzeln plus die private CA
+                    verify=combined_ca_bundle(ca_path)
                 )
 
                 # Token-Abruf
@@ -188,7 +213,7 @@ class NexusCar:
     async def send_telemetry_batch(self, readings_list):
         """Sending Protobuf-Batch to NATS."""
         
-        # Verbindung herstellen, falls nicht vorhanden oder geschlossen
+        # Connect if there is no connection yet, or it was closed
         if self.nc is None or not self.nc.is_connected:
             token = await self.get_access_token()
             print(f"Connecting NATS via {self.config['nats_url']}...")
@@ -210,7 +235,7 @@ class NexusCar:
         # 2. Nexus-Telemetry-Subject
         subject = f"telemetry.prod.bigtable.{vin}"
         
-        # 3. Senden und Flushen
+        # 3. Publish and flush
         await self.nc.publish(subject, message.SerializeToString())
         await self.nc.flush() 
         print(f"[NATS] Telemetry sent to {subject}")

@@ -12,8 +12,14 @@ releases:
         pkiStrategy: {{ .StateValues.pkiStrategy | default "local" }}
         baseDomain: '{{ .StateValues.baseDomain | default "" }}'
         gcpProjectId: '{{ env "GCP_PROJECT_ID" }}'
+        # Empty => the service default (90d). See registration/values.yaml.
+        operationalCertValidity: '{{ env "OPERATIONAL_CERT_VALIDITY" }}'
         urls:
+          vinRegistry: 'http://vin-registry.base-services.svc.cluster.local:8080'
           {{ if eq (.StateValues.pkiStrategy | default "local") "remote" }}
+          # Handed to the vehicle in the registration response. Port 8443 on
+          # purpose: the vehicle authenticates to Keycloak with its operational
+          # certificate, and the Ingress would strip it.
           keycloak: 'https://keycloak.{{ .StateValues.baseDomain }}:8443'
           nats: 'nats://nats.{{ .StateValues.baseDomain }}:4222'
           {{ else }}

@@ -15,6 +15,7 @@ const config: Config = {
       displayName: 'node',
       testEnvironment: 'node',
       testMatch: [
+        '<rootDir>/__tests__/*.test.ts',
         '<rootDir>/__tests__/lib/**/*.test.ts',
         '<rootDir>/__tests__/api/**/*.test.ts',
       ],
@@ -25,7 +26,14 @@ const config: Config = {
       displayName: 'jsdom',
       testEnvironment: 'jsdom',
       testMatch: ['<rootDir>/__tests__/components/**/*.test.tsx'],
-      moduleNameMapper: { '^@/(.*)$': '<rootDir>/src/$1' },
+      // Static assets must come first: '@/assets/logo.png' also matches the alias
+      // below, and Jest takes the first matching pattern. Without this mapping the
+      // PNG reached the transformer and the suite failed to parse before a single
+      // test ran.
+      moduleNameMapper: {
+        '\\.(png|jpe?g|gif|webp|avif|ico|bmp|svg)$': '<rootDir>/__mocks__/fileMock.js',
+        '^@/(.*)$': '<rootDir>/src/$1',
+      },
       setupFilesAfterEnv: ['<rootDir>/jest.setup.ts'],
       transform: nextTransform,
     },

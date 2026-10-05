@@ -93,6 +93,12 @@ configure_secrets() {
     # that declare them in secretEnv can resolve them regardless of PKI strategy.
     # For local PKI they are empty strings; the steps that use them guard on
     # PKI_STRATEGY first and skip any remote-only logic.
+    # Credential lifetimes. The effective default is stored rather than an empty
+    # string: Secret Manager rejects empty values, and a platform should be able
+    # to say what its certificates are set to without consulting the source.
+    add_secret "OPERATIONAL_CERT_VALIDITY" "${OPERATIONAL_CERT_VALIDITY:-90d}"
+    add_secret "FACTORY_HELPER_CERT_VALIDITY_DAYS" "${FACTORY_HELPER_CERT_VALIDITY_DAYS:-730}"
+
     add_secret "BASE_DOMAIN" "${BASE_DOMAIN:-local}"
     add_secret "FLEETVIEW_HOSTNAME" "${FLEETVIEW_HOSTNAME:-fleetview}"
 
@@ -300,14 +306,55 @@ upload_pki_secrets() {
     fi
 }
 
+# Deleting the hostname secrets is only half of it: config.sh writes their
+# values back into .bootstrap_env during a bootstrap, and the teardown uploads
+# that file to the bucket. A reused file therefore feeds the stale value straight
+# back into a freshly created secret, and a remote platform composes
+# "<stale-ip>.<base-domain>" exactly as before.
+#
+# Only values that look like an IPv4 address are reset — that is what the local
+# path writes. A deliberately chosen hostname is left alone.
+reset_env_file_hostnames() {
+    local ipv4='^"?[0-9]{1,3}(\.[0-9]{1,3}){3}"?$'
+    local key default current
+    for pair in "KEYCLOAK_HOSTNAME=keycloak" "NATS_HOSTNAME=nats" \
+                "REGISTRATION_HOSTNAME=registration" "FLEETVIEW_HOSTNAME=fleetview"; do
+        key="${pair%%=*}"; default="${pair#*=}"
+        current=$(grep "^${key}=" "$ENV_FILE" 2>/dev/null | cut -d= -f2-)
+        if [[ "$current" =~ $ipv4 ]]; then
+            log_info "  Resetting ${key} (was ${current}) to ${default}"
+            sed_inplace "s|^${key}=.*|${key}=\"${default}\"|" "$ENV_FILE"
+        fi
+    done
+    # The next bootstrap generates its own; leaving the old one behind makes a
+    # fresh environment inherit a suffix that names resources that are gone.
+    sed_inplace "s|^DEPLOYMENT_SUFFIX=.*|DEPLOYMENT_SUFFIX=\"\"|" "$ENV_FILE"
+}
+
 delete_gcp_secrets() {
 
     # List of all secrets created by bootstrap-platform-ca.sh
     SECRETS_TO_DELETE=(
+        # Per-environment service hostnames. With local PKI these hold the
+        # LoadBalancer IP (build-push-deploy-registration.yaml:587), and
+        # config.sh reads them back into .bootstrap_env. Left behind, the next
+        # environment inherits them: a remote platform then builds
+        # "<stale-ip>.<base-domain>" and its clients cannot resolve it.
+        "REGISTRATION_HOSTNAME"
+        "NATS_HOSTNAME"
+        "KEYCLOAK_HOSTNAME"
+
+        # FleetView's hostname is never overwritten with an IP, but it is
+        # inherited the same way: add_secret skips a secret that already has a
+        # version, so the next environment keeps this one's name whatever its
+        # .bootstrap_env says. Added with 1.2.1 and missed here until now.
+        "FLEETVIEW_HOSTNAME"
+
         # Infrastructure secrets (always created)
         "GCP_REGION"
         "DEPLOY_MODE"
         "GCP_PROJECT_ID"
+        "EXTERNAL_SECRETS_OPERATOR_GCP_SERVICE_ACCOUNT"
         "KEYCLOAK_GCP_SERVICE_ACCOUNT"
         "BIGTABLE_CONNECTOR_GCP_SERVICE_ACCOUNT"
         "DATA_API_BIGTABLE_CONNECTOR_GCP_SERVICE_ACCOUNT"
@@ -356,6 +403,8 @@ delete_gcp_secrets() {
         "REGISTRATION_SERVER_TLS_CERT"
         "REGISTRATION_SERVER_TLS_KEY"
 
+        # KEYCLOAK_JWK_URI is no longer created — nothing ever read it. It stays in
+        # this list so tearing down an older installation still removes it.
         "KEYCLOAK_JWK_URI"
         "KEYCLOAK_JWK_B64"
 
@@ -370,6 +419,20 @@ delete_gcp_secrets() {
         "KEYCLOAK_CLIENT_SECRET_WEB_CLIENT"
         "KEYCLOAK_ISSUER"
 
+        # Certificate validity, taken from .bootstrap_env during the bootstrap.
+        # Same inheritance as the hostnames above: left behind, a later
+        # environment's setting has no effect and nothing says so.
+        "OPERATIONAL_CERT_VALIDITY"
+        "FACTORY_HELPER_CERT_VALIDITY_DAYS"
+
+        # Written by the deploy pipelines rather than by add_secret, so a later
+        # install does overwrite them. Removed anyway: a torn-down project
+        # should hold neither the leaf's private key nor Keycloak credentials.
+        "NATS_LEAF_TLS_CERT"
+        "NATS_LEAF_TLS_KEY"
+        "FACTORY_OPERATOR_CLIENT_SECRET"
+        "NEXUS_FLEET_INITIAL_PASSWORD"
+
         # Terraform-managed secrets
         "BIGTABLE_INSTANCE_ID"
         "CLOUD_SQL_INSTANCE_CONNECTION_NAME"
@@ -378,15 +441,31 @@ delete_gcp_secrets() {
 
     log_info "Deleting ${#SECRETS_TO_DELETE[@]} secrets..."
 
+    local failed=0 describe_output
     for secret in "${SECRETS_TO_DELETE[@]}"; do
-        if gcloud secrets describe "$secret" --project="$GCP_PROJECT_ID" &>/dev/null; then
+        if describe_output=$(gcloud secrets describe "$secret" --project="$GCP_PROJECT_ID" 2>&1); then
             log_info "  - Deleting secret: $secret"
-            gcloud secrets delete "$secret" --project="$GCP_PROJECT_ID" --quiet || log_info "    Failed to delete $secret"
-        else
+            if ! gcloud secrets delete "$secret" --project="$GCP_PROJECT_ID" --quiet; then
+                log_warn "    Failed to delete $secret"
+                failed=$((failed + 1))
+            fi
+        elif grep -qiE 'NOT_FOUND|was not found' <<<"$describe_output"; then
             log_info "  - Secret '$secret' not found (already deleted or never created)"
+        else
+            # Anything other than NOT_FOUND must not read as success. This used to
+            # swallow SERVICE_DISABLED — Terraform disabled the Secret Manager API
+            # on destroy, every secret survived, and the next bootstrap in the same
+            # project inherited ENV and GKE_CLUSTER_NAME from its predecessor.
+            log_warn "    Cannot check $secret: $(head -1 <<<"$describe_output")"
+            failed=$((failed + 1))
         fi
     done
 
-    log_info "Secret Manager cleanup complete."
+    if [ "$failed" -gt 0 ]; then
+        log_warn "Secret Manager cleanup INCOMPLETE — $failed secret(s) may still exist."
+        log_warn "A later bootstrap in this project would inherit them; delete them by hand."
+    else
+        log_info "Secret Manager cleanup complete."
+    fi
     echo ""
 }

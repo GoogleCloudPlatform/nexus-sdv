@@ -161,7 +161,9 @@ func main() {
 			return
 		}
 
-		glog.Infof("Claims: %v", claims)
+		// Was: glog.Infof("Claims: %v", claims) — the whole decoded claim set at
+		// INFO level, in a log many people can read. Log what the decision uses.
+		glog.Debugf("Token accepted for azp=%v", claims["azp"])
 
 		userRoles := claims["realm_access"].(map[string]any)["roles"].([]any)
 		userName := claims["azp"].(string)

@@ -1,0 +1,6 @@
+apiVersion: v2
+name: vin-registry
+description: Records which vehicle identities exist on this Nexus SDV platform
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

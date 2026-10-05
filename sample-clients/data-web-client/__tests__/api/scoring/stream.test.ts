@@ -1,11 +1,12 @@
 import { GET } from '@/app/api/scoring/stream/route';
+import protobuf from 'protobufjs';
 
 const mockGetServerSession = jest.fn();
 const mockGetNatsConnection = jest.fn();
 
 jest.mock('next-auth', () => ({ getServerSession: (...a: unknown[]) => mockGetServerSession(...a) }));
 jest.mock('@/lib/auth', () => ({ authOptions: {} }));
-jest.mock('@/lib/nats', () => ({ getNatsConnection: (...a: unknown[]) => mockGetNatsConnection(...a) }));
+jest.mock('@/lib/nats', () => ({ getNatsScoringConnection: (...a: unknown[]) => mockGetNatsConnection(...a) }));
 jest.mock('nats', () => ({
   StringCodec: () => ({ decode: (d: Uint8Array) => Buffer.from(d).toString() }),
 }));
@@ -19,6 +20,20 @@ function makeAbortableRequest(): Request {
 async function* makeMessages(payloads: string[]) {
   for (const p of payloads) {
     yield { data: Buffer.from(p) };
+  }
+}
+
+const ScoringMessage = protobuf
+  .parse('syntax = "proto3"; package scoring; message ScoringMessage { string vehicle_id = 1; string score = 2; repeated string suggestions = 3; }')
+  .root.lookupType('scoring.ScoringMessage');
+
+function encodeScoring(fields: { vehicleId: string; score: string; suggestions?: string[] }): Uint8Array {
+  return ScoringMessage.encode(ScoringMessage.create({ suggestions: [], ...fields })).finish();
+}
+
+async function* makeRawMessages(payloads: Uint8Array[]) {
+  for (const data of payloads) {
+    yield { data };
   }
 }
 
@@ -48,10 +63,15 @@ describe('GET /api/scoring/stream', () => {
     expect(res.headers.get('Cache-Control')).toBe('no-cache');
   });
 
-  it('streams NATS messages as SSE events', async () => {
+  it('streams decoded ScoringMessages as SSE events', async () => {
     mockGetServerSession.mockResolvedValueOnce({ user: { name: 'test' } });
+    // The route decodes protobuf scoring.ScoringMessage and emits
+    // "<vehicle> - <score> - <suggestions>", so the test sends real protobuf.
     const sub = {
-      [Symbol.asyncIterator]: () => makeMessages(['{"score":42}', '{"score":99}']),
+      [Symbol.asyncIterator]: () => makeRawMessages([
+        encodeScoring({ vehicleId: 'VIN-1', score: '42', suggestions: ['brake earlier', 'slow down'] }),
+        encodeScoring({ vehicleId: 'VIN-2', score: '99' }),
+      ]),
       unsubscribe: jest.fn(),
     };
     mockGetNatsConnection.mockResolvedValueOnce({ subscribe: () => sub });
@@ -59,7 +79,7 @@ describe('GET /api/scoring/stream', () => {
     const res = await GET(makeAbortableRequest());
     const text = await res.text();
 
-    expect(text).toContain('data: {"score":42}\n\n');
-    expect(text).toContain('data: {"score":99}\n\n');
+    expect(text).toContain('data: VIN-1 - 42 - brake earlier, slow down\n\n');
+    expect(text).toContain('data: VIN-2 - 99 - \n\n');
   });
 });

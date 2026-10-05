@@ -8,5 +8,7 @@ metadata:
 {{ include "keycloak.labels" . | indent 4 }}
 spec:
   domains:
-    - keycloak.{{ .Values.baseDomain }}
+    # The browser-facing name; the LoadBalancer on 8443 keeps its private-CA
+    # certificate for mutual TLS with vehicles.
+    - keycloak-ui.{{ .Values.baseDomain }}
 {{- end }}

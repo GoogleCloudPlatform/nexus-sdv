@@ -1,0 +1,118 @@
+# =============================================================================
+# platform-health-check.yaml
+#
+# Runs iac/bootstrapping/tools/platform-health-check.sh from Cloud Build so
+# the health check can be triggered on demand (or on a schedule via Cloud
+# Scheduler) without anyone needing gcloud/kubectl configured locally — and,
+# notably, so kubectl connectivity checks run from GCP's own network, which
+# avoids the master_authorized_networks restriction that blocks kubectl from
+# an arbitrary laptop (see the Troubleshooting note in that script's header).
+#
+# A failing health check makes this build fail (non-zero exit), so build
+# history/notifications double as an alert.
+#
+# Trigger (example — single environment via its .bootstrap_env in GCS):
+#   gcloud builds submit . \
+#     --config=iac/cloudbuild/platform-health-check.yaml \
+#     --project=<PROJECT_ID> \
+#     --region=<REGION> \
+#     --substitutions=^::^_TARGET_MODE=file::_BOOTSTRAP_ENV_GCS_PATH=gs://<PROJECT_ID>-bootstrap-envs/sandbox.bootstrap_env
+#
+# Or trigger from the GCP console via the 'platform-health-check' manual
+# trigger (created by Terraform — see iac/terraform/cloudbuild.tf), or let
+# the 3x/day Cloud Scheduler job (iac/terraform/scheduler.tf) run it.
+#
+# Target mode is chosen explicitly via _TARGET_MODE rather than by which
+# substitution happens to be non-empty, so all three can be set at once
+# (e.g. by a trigger) without ambiguity about which one wins:
+#   _TARGET_MODE  One of 'file', 'dir', 'project', or '' (empty —
+#                 default: check every environment in
+#                 gs://<PROJECT_ID>-bootstrap-envs/, same as running the
+#                 script with no target flag at all).
+#
+# The substitution _TARGET_MODE actually reads from:
+#   _BOOTSTRAP_ENV_GCS_PATH  ('file' mode) — one environment's .bootstrap_env.
+#   _BOOTSTRAP_ENVS_DIR      ('dir' mode) — every *.bootstrap_env under this GCS dir.
+#   _TARGET_PROJECT          ('project' mode) — one project with no .bootstrap_env
+#                            (ENV/hostnames unknown; those checks are skipped).
+#
+# Other optional substitutions:
+#   _RUN_E2E  'Y' to also run the data-pipeline end-to-end check (submits
+#             a further, real Cloud Build job per environment — costs money
+#             and takes a few minutes). Default 'N'.
+#   _STRICT   'Y' to fail the build on warnings too, not just failures.
+#             Default 'N'.
+#   _REPORT_METRICS  'Y' to push metrics to Cloud Monitoring (see
+#             iac/terraform/monitoring.tf). Default 'Y'.
+# =============================================================================
+
+steps:
+  - id: 'platform-health-check'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:575.0.0'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        set -euo pipefail
+
+        # -----------------------------------------------------------------------
+        # Install the script's optional/less-common dependencies. gcloud, curl
+        # and openssl are already present in this image; kubectl and nslookup
+        # are installed defensively rather than assumed.
+        # -----------------------------------------------------------------------
+        echo "Installing dependencies (kubectl, dnsutils, jq)..."
+        gcloud components install kubectl --quiet 2>/dev/null || true
+        apt-get update -q
+        apt-get install -y -q dnsutils jq
+
+        # -----------------------------------------------------------------------
+        # Translate substitutions into the script's own flags. _TARGET_MODE
+        # picks which of the three target substitutions is actually used, so
+        # all three can be set simultaneously with no ambiguity about which
+        # one wins. Values are simple paths/names with no spaces, so
+        # unquoted expansion is safe.
+        # -----------------------------------------------------------------------
+        FLAGS=""
+        case "${_TARGET_MODE}" in
+          file)    FLAGS="--env-file ${_BOOTSTRAP_ENV_GCS_PATH}" ;;
+          dir)     FLAGS="--envs-dir ${_BOOTSTRAP_ENVS_DIR}" ;;
+          project) FLAGS="--project ${_TARGET_PROJECT}" ;;
+          '')      FLAGS="" ;;
+          *)
+            echo "::error::Unknown _TARGET_MODE '${_TARGET_MODE}' — expected file, dir, project, or empty."
+            exit 1
+            ;;
+        esac
+        if [ "${_RUN_E2E}" = "Y" ]; then
+          FLAGS="$$FLAGS --e2e"
+        fi
+        if [ "${_STRICT}" = "Y" ]; then
+          FLAGS="$$FLAGS --strict"
+        fi
+        if [ "${_REPORT_METRICS}" = "Y" ]; then
+          FLAGS="$$FLAGS --report-metrics"
+        fi
+
+        echo "Running: iac/bootstrapping/tools/platform-health-check.sh $$FLAGS"
+        bash iac/bootstrapping/tools/platform-health-check.sh $$FLAGS
+
+# =============================================================================
+# SUBSTITUTIONS & OPTIONS
+# =============================================================================
+substitutions:
+  _TARGET_MODE: ''
+  _BOOTSTRAP_ENV_GCS_PATH: ''
+  _BOOTSTRAP_ENVS_DIR: ''
+  _TARGET_PROJECT: ''
+  _RUN_E2E: '' # N(o) / Y(es)
+  _STRICT: '' # N(o) / Y(es)
+  _REPORT_METRICS: 'Y' # N(o) / Y(es)
+
+# Generous ceiling for --e2e across multiple environments (~a few minutes
+# each); a plain run with no --e2e finishes in well under this.
+timeout: '3600s'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  substitutionOption: 'ALLOW_LOOSE'
+  machineType: 'E2_HIGHCPU_8'

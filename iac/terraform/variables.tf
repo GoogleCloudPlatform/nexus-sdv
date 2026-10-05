@@ -136,3 +136,15 @@ variable "created_factory_ca_pool" {
   default     = ""
   description = "Pool name of fresh created factory CA (required if existing_reg_ca is NOT set)"
 }
+
+# Full resource path of the 2nd-gen Cloud Build repository, e.g.
+# projects/<p>/locations/<r>/connections/<conn>/repositories/<repo>.
+# Discovered and written into .bootstrap_env by
+# iac/bootstrapping/tools/setup-cloudbuild-triggers.sh — the connection name is
+# operator-chosen and cannot be derived, so it is found once there rather than
+# rediscovered by Terraform on every plan.
+variable "cloudbuild_repo_resource" {
+  description = "Cloud Build 2nd-gen repository resource path (from setup-cloudbuild-triggers.sh)"
+  type        = string
+  default     = ""
+}

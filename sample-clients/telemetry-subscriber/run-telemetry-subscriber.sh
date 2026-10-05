@@ -15,9 +15,9 @@
 set -e
 
 # --- Parse flags ---
-VIN_VALUE="VEHICLE001"
-#SUBJECT_VALUE="local.telemetry.>"
-SUBJECT_VALUE="scoring.>"
+VIN_VALUE="vin3"
+SUBJECT_VALUE="local.telemetry.>"
+#SUBJECT_VALUE="scoring.>"
 RECORD_DIR_VALUE=""
 
 while [[ $# -gt 0 ]]; do

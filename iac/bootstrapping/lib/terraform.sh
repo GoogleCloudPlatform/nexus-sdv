@@ -16,8 +16,23 @@ setup_terraform_backend() {
 
 run_terraform_apply() {
     log_info "Strategy: $PKI_STRATEGY"
+
+    # setup-cloudbuild-triggers.sh records this after it finds the connected
+    # repository. Without it Terraform cannot address the Cloud Build repo, so
+    # the platform-health-check trigger and its schedule are skipped rather
+    # than created broken. Everything else deploys normally.
+    if [ -z "${CLOUDBUILD_REPO_RESOURCE:-}" ]; then
+        log_warn "CLOUDBUILD_REPO_RESOURCE is not set — skipping the platform-health-check trigger and its schedule."
+        log_warn "To enable them, connect the repository to Cloud Build and re-run the trigger setup:"
+        log_warn "  GCP Console -> Cloud Build -> Repositories -> Connect Repository"
+        log_warn "  bash iac/bootstrapping/tools/setup-cloudbuild-triggers.sh"
+    fi
     add_delay_if_run_in_cloudshell
-    gcloud auth print-access-token
+    # Fail early if the credentials are not usable. The output is discarded:
+    # printed bare, this writes a short-lived access token of an identity holding
+    # roles/owner straight into the Cloud Build log, where it stays readable to
+    # everyone with log access for as long as the log is kept.
+    gcloud auth print-access-token >/dev/null
     cd iac/terraform
     terraform init -backend-config="bucket=${GCP_PROJECT_ID}-tfstate"
 
@@ -30,6 +45,7 @@ run_terraform_apply() {
       -var="deployment_suffix=${DEPLOYMENT_SUFFIX}"
       -var="enable_github_oidc=${enable_github_oidc}"
       -var="repository=${GITHUB_REPO}"
+      -var="cloudbuild_repo_resource=${CLOUDBUILD_REPO_RESOURCE:-}"
       -var="github_org=${GITHUB_REPO%/*}/"
       -var="pki_strategy=${PKI_STRATEGY}"
       -var="base_domain=${BASE_DOMAIN}"
@@ -309,6 +325,24 @@ run_terraform_destroy() {
 
     cd ../..
     echo ""
+}
+
+# The public trust-anchor bucket is per-instance: its certificates are only
+# valid for this deployment, so leaving it behind serves nothing and quietly
+# accumulates publicly readable buckets — the same pattern that left CA pools
+# lying around. Created by iac/bootstrapping/lib/public-pki.sh.
+delete_public_pki_bucket() {
+    local bucket="${PKI_PUBLIC_BUCKET:-${GCP_PROJECT_ID}-nexus-sdv-public}"
+    if gcloud storage buckets describe "gs://${bucket}" --project="$GCP_PROJECT_ID" &>/dev/null; then
+        log_info "Deleting public PKI bucket 'gs://${bucket}'..."
+        if gcloud storage rm -r "gs://${bucket}" --project="$GCP_PROJECT_ID" 2>/dev/null; then
+            log_info "Successfully deleted 'gs://${bucket}'."
+        else
+            log_warn "Could not delete 'gs://${bucket}' — remove it manually."
+        fi
+    else
+        log_info "Public PKI bucket 'gs://${bucket}' not found — nothing to delete."
+    fi
 }
 
 delete_tfstate_bucket() {

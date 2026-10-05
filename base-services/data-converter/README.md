@@ -7,7 +7,7 @@ Converts telemetry data from IoT protocols (MQTT) into the Nexus Protobuf format
 
 ## Prerequisites
 
-- Go 1.24+
+- Go 1.25+
 - Docker & Docker Compose
 - `protoc` with `protoc-gen-go` (for proto regeneration only)
 - NATS CLI (`nats`) for subscribing to output
@@ -48,9 +48,7 @@ This starts:
 
 ### End-to-end test
 
-Use the Go [mqtt-client](../../sample-clients/mqtt-client/README.md) to publish MQTT messages at regular intervals.
-
-Alternatively you can publish a test message via MQTT manually:
+Publish a test message via MQTT:
 ```bash
 mosquitto_pub -t "telemetry/deviceId001/sensors/temp" -m '{"name":"temperature","value":"42.3"}'
 ```

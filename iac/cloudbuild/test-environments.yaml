@@ -5,9 +5,11 @@
 #   1. bootstrap-platform.yaml   (spin up the environment)
 #   2. teardown-platform.yaml    (tear it down)
 #
-# Execution is strictly sequential — one environment at a time. Any child
-# build failure causes this build to stop immediately (gcloud builds submit
-# exits non-zero, which propagates through set -euo pipefail).
+# Execution is strictly sequential — one environment at a time. A failed
+# bootstrap is recorded, its environment is torn down anyway, and the loop
+# continues; the build fails at the end if any environment failed. A failed
+# teardown stops the loop at once, because the next environment would collide
+# with its leftovers in the shared project.
 #
 # Intended use: CI integration test across multiple environment configurations,
 # verifying that bootstrap and teardown work end-to-end for each.
@@ -36,7 +38,7 @@
 
 steps:
   - id: 'test-all-environments'
-    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:575.0.0'
     entrypoint: 'bash'
     args:
       - '-c'
@@ -78,9 +80,13 @@ steps:
 
         # -----------------------------------------------------------------------
         # Process each environment file sequentially.
-        # 'set -e' propagates any child-build failure immediately.
+        # A failed bootstrap is recorded and its environment is torn down anyway,
+        # so a half-built platform never stays up; the loop then moves on. A failed
+        # teardown stops the loop: the next environment shares the project
+        # (Terraform state, BigTable instance) and would collide with the leftovers.
         # -----------------------------------------------------------------------
         CURRENT=0
+        FAILED=""
         for ENV_PATH in $$FILES; do
           CURRENT=$$((CURRENT + 1))
           echo "=========================================================="
@@ -99,41 +105,105 @@ steps:
           echo ""
 
           # ------------------------------------------------------------------
+          # Preflight, read-only, seconds. A cycle that was killed part way
+          # through leaves state behind, and the next bootstrap inherits it
+          # silently: leftover hostname secrets get reused as-is, and leftover
+          # Terraform state makes the next run plan to destroy what it describes.
+          # Run 856c0722 lost two environments to exactly that, and the two
+          # failures looked unrelated in the log.
+          #
+          # --strict because nobody is watching: here a reservation is never a
+          # judgement call, it is a leftover.
+          # ------------------------------------------------------------------
+          # The preflight distinguishes three outcomes and the caller has to as
+          # well: 0 ready, 2 ready with standing reservations, 1 blocked. Run 5
+          # was lost to `if !` here, which reads any non-zero as a refusal and
+          # skipped all four environments over reservations that are permanent
+          # facts — no Cloud Build GitHub connection, which the submit path does
+          # not need, and application-default credentials, which a service
+          # account does not have.
+          echo "  [0/2] Preflight (read-only)..."
+          set +e
+          ./iac/operating/nexus-preflight.sh "$$GCP_PROJECT_ID" \
+              --region "$$GCP_REGION" --pki "$${PKI_STRATEGY:-remote}" --require-clean
+          PREFLIGHT_RC=$$?
+          set -e
+          if [ "$$PREFLIGHT_RC" -eq 1 ]; then
+            echo "::error::[$$CURRENT/$$FILE_COUNT] Preflight refused $$ENV_PATH — the project is not clean. Skipping this environment."
+            FAILED="$$FAILED $$(basename "$$ENV_PATH"):preflight"
+            continue
+          fi
+          echo "  [0/2] Preflight clean (exit $$PREFLIGHT_RC)."
+
+          # Clear what earlier environments left in Secret Manager. Unattended
+          # and unasked: there is nobody here to confirm, and a bootstrap that
+          # finds a secret with a version reuses it instead of writing its own —
+          # so a leftover TLS private key becomes the new platform's key.
+          # The install skill takes the same step but asks a person first.
+          echo "  [0/2] Clearing secrets from earlier environments..."
+          # --ignore-build: this step runs inside the matrix build, which the
+          # script would otherwise count as the project being busy.
+          ./iac/bootstrapping/tools/delete-all-secrets.sh "$$GCP_PROJECT_ID" --yes --ignore-build "$BUILD_ID"
+          echo ""
+
+          # ------------------------------------------------------------------
           # Step 1 of 2: Bootstrap
           # ------------------------------------------------------------------
           echo "  [1/2] Submitting bootstrap-platform..."
-          gcloud builds submit . \
+          BOOTSTRAP_OK=true
+          if gcloud builds submit . \
             --config=iac/cloudbuild/bootstrap-platform.yaml \
             --project="$$GCP_PROJECT_ID" \
             --region="$$GCP_REGION" \
             --timeout=7200 \
-            --substitutions=^::^_BOOTSTRAP_ENV_GCS_PATH=$$ENV_PATH
-          echo "  [1/2] Bootstrap complete."
+            --substitutions=^::^_BOOTSTRAP_ENV_GCS_PATH=$$ENV_PATH; then
+            echo "  [1/2] Bootstrap complete."
+          else
+            BOOTSTRAP_OK=false
+            FAILED="$$FAILED $$(basename "$$ENV_PATH"):bootstrap"
+            echo "::error::[$$CURRENT/$$FILE_COUNT] Bootstrap failed for $$ENV_PATH — tearing it down anyway."
+          fi
           echo ""
 
-          sleep 3600
-        
+          # Only a healthy platform is left standing for the observation window.
+          if [ "$$BOOTSTRAP_OK" = true ]; then
+            sleep 3600
+          fi
+
           # ------------------------------------------------------------------
-          # Step 2 of 2: Teardown
+          # Step 2 of 2: Teardown — always, also after a failed bootstrap
           # ------------------------------------------------------------------
           echo "  [2/2] Submitting teardown-platform..."
-          gcloud builds submit . \
+          if ! gcloud builds submit . \
             --config=iac/cloudbuild/teardown-platform.yaml \
             --project="$$GCP_PROJECT_ID" \
             --region="$$GCP_REGION" \
             --timeout=7200 \
-            --substitutions=^::^_BOOTSTRAP_ENV_GCS_PATH=$$ENV_PATH::_PRESERVE_CAS=${_PRESERVE_CAS}::_PRESERVE_DNS=${_PRESERVE_DNS}
+            --substitutions=^::^_BOOTSTRAP_ENV_GCS_PATH=$$ENV_PATH::_PRESERVE_CAS=${_PRESERVE_CAS}::_PRESERVE_DNS=${_PRESERVE_DNS}; then
+            echo "::error::[$$CURRENT/$$FILE_COUNT] Teardown failed for $$ENV_PATH — stopping, the next environment would collide with its leftovers."
+            echo "Failed:$$FAILED $$(basename "$$ENV_PATH"):teardown"
+            exit 1
+          fi
           echo "  [2/2] Teardown complete."
           echo ""
 
-          echo "  ✓ [$$CURRENT/$$FILE_COUNT] $$ENV_PATH: cycle successful."
+          if [ "$$BOOTSTRAP_OK" = true ]; then
+            echo "  ✓ [$$CURRENT/$$FILE_COUNT] $$ENV_PATH: cycle successful."
+          else
+            echo "  ✗ [$$CURRENT/$$FILE_COUNT] $$ENV_PATH: bootstrap failed, environment torn down."
+          fi
           echo ""
-        
+
           sleep 3600
-      
+
         done
 
         echo "=========================================================="
+        if [ -n "$$FAILED" ]; then
+          echo "  Failed:$$FAILED"
+          echo "=========================================================="
+          exit 1
+        fi
         echo "  All $$FILE_COUNT environment(s) processed successfully."
         echo "=========================================================="
 

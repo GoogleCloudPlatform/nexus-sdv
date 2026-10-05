@@ -1,9 +1,9 @@
 steps:
   # ============================================================================
-  # 1. SETUP & AUTHENTICATION (Kubeconfig für späteres Deployment)
+  # 1. SETUP & AUTHENTICATION (kubeconfig for the later deployment)
   # ============================================================================
   - id: 'get-gke-credentials'
-    name: 'gcr.io/cloud-builders/gcloud'
+    name: 'gcr.io/cloud-builders/gcloud@sha256:abcad906c9fa0dd063c4b6e570994f34024673486b17e9f4c99c720165e03ae5'
     entrypoint: 'bash'
     args:
       - '-c'
@@ -51,7 +51,7 @@ steps:
   # 3. DOCKER HUB AUTHENTICATION
   # ============================================================================
   - id: 'configure-ar'
-    name: 'gcr.io/cloud-builders/gcloud'
+    name: 'gcr.io/cloud-builders/gcloud@sha256:abcad906c9fa0dd063c4b6e570994f34024673486b17e9f4c99c720165e03ae5'
     entrypoint: 'bash'
     args:
       - '-c'

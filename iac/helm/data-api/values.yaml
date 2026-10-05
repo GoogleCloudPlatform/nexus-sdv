@@ -4,7 +4,12 @@ image:
   tag: "latest"
 
 service:
-  type: LoadBalancer
+  # Cluster-internal on purpose. The Data API is the in-cluster path to the
+  # telemetry: it speaks plaintext gRPC and authenticates nobody, so a
+  # LoadBalancer served a year of any vehicle's telemetry to anyone who knew a
+  # VIN — and a VIN is readable through a windscreen. Consumers reach it at
+  # data-api.base-services.svc.cluster.local:8080.
+  type: ClusterIP
   port: 8080
   loadBalancerSourceRanges: []
 

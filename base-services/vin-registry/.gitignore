@@ -1,0 +1,3 @@
+# Compiled binary from a local `go build` — must never be committed or
+# uploaded as part of the Cloud Build source context.
+/vin-registry

@@ -1,0 +1,32 @@
+releases:
+  - name: factory-helper
+    namespace: factory
+    createNamespace: true
+    chart: ../factory-helper
+    values:
+      - ../factory-helper/values.yaml
+      - arch: '{{ .StateValues.arch | default "arm64" }}'
+        image:
+          repository: '{{ requiredEnv "IMAGE_REPO" }}'
+          tag: '{{ .StateValues.image.tag | default "latest" }}'
+        baseDomain: '{{ .StateValues.baseDomain | default "" }}'
+        gcpProjectId: '{{ env "GCP_PROJECT_ID" }}'
+        gcpRegion: '{{ env "GCP_REGION" }}'
+        caPool: '{{ env "FACTORY_CA_POOL" }}'
+        # Must match the issuer Keycloak mints (KC_HOSTNAME). factory-helper
+        # authenticates with a client secret, not a certificate, so it can reach
+        # the Ingress and does not need the direct 8443 path.
+        keycloakIssuer: 'https://keycloak-ui.{{ .StateValues.baseDomain }}/realms/sdv-telemetry'
+        vinRegistryUrl: 'http://vin-registry.base-services.svc.cluster.local:8080'
+        # Empty => the service default (730 days). See factory-helper/values.yaml.
+        certValidityDays: '{{ env "FACTORY_HELPER_CERT_VALIDITY_DAYS" }}'
+        certificates:
+          # Block scalars (|) — a quoted scalar would fold the PEM's newlines
+          # into spaces and break certificate parsing (same pattern as
+          # registration.yaml.gotmpl).
+          serverCert: |
+{{ requiredEnv "FACTORY_HELPER_TLS_CERT" | indent 12 }}
+          serverKey: |
+{{ requiredEnv "FACTORY_HELPER_TLS_KEY" | indent 12 }}
+          keycloakCa: |
+{{ requiredEnv "KEYCLOAK_TLS_CRT" | indent 12 }}

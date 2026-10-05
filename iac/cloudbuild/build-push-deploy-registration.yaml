@@ -3,7 +3,7 @@ steps:
   # 0. SETUP & AUTHENTICATION
   # ============================================================================
   - id: 'get-gke-credentials'
-    name: 'gcr.io/cloud-builders/gcloud'
+    name: 'gcr.io/cloud-builders/gcloud@sha256:abcad906c9fa0dd063c4b6e570994f34024673486b17e9f4c99c720165e03ae5'
     entrypoint: 'bash'
     args:
       - '-c'
@@ -27,7 +27,7 @@ steps:
   # 1. BUILD & PUSH REGISTRATION SERVER (Docker Buildx)
   # ============================================================================
   - id: 'configure-ar'
-    name: 'gcr.io/cloud-builders/gcloud'
+    name: 'gcr.io/cloud-builders/gcloud@sha256:abcad906c9fa0dd063c4b6e570994f34024673486b17e9f4c99c720165e03ae5'
     entrypoint: 'bash'
     args:
       - '-c'
@@ -103,11 +103,11 @@ steps:
             --state-values-set baseDomain="${_BASE_DOMAIN}" \
             --state-values-set arch=${_ARCH} \
             --state-values-set image.tag=latest
-    secretEnv: [ 'PKI_STRATEGY', 'IMAGE_REPO' ]
+    secretEnv: [ 'PKI_STRATEGY', 'IMAGE_REPO', 'OPERATIONAL_CERT_VALIDITY' ]
     waitFor: [ 'build-push-registration' ]
 
   - id: 'get-external-ips'
-    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:575.0.0'
     entrypoint: 'bash'
     args:
       - '-c'
@@ -156,7 +156,7 @@ steps:
     waitFor: [ 'pki-local-initial-deploy' ]
 
   - id: 'download-ca-certificate-secrets-local'
-    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:575.0.0'
     entrypoint: 'bash'
     args:
       - '-c'
@@ -196,11 +196,12 @@ steps:
     waitFor: [ 'get-external-ips' ]
 
   - id: 'generate-certificates-local'
-    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:575.0.0'
     entrypoint: 'bash'
     args:
       - '-c'
       - |
+        apt-get update -q && apt-get install -y -q openssl
         if [ "$$PKI_STRATEGY" != "local" ]; then echo "Skipping Local PKI Generation."; exit 0; fi
         
         if [ -f "registration_server_ip.txt" ]; then
@@ -250,7 +251,7 @@ steps:
     waitFor: [ 'download-ca-certificate-secrets-local' ]
 
   - id: 'update-cert-config-local'
-    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:575.0.0'
     entrypoint: 'bash'
     args:
       - '-c'
@@ -285,6 +286,14 @@ steps:
         BASE_DIR="base-services/registration/pki"
         
         add_secret_version "REGISTRATION_SERVER_TLS_CERT" "$$BASE_DIR/server-ca/registration/registration.crt.pem"
+
+        # Publish the server TLS certificate to the public trust-anchor bucket.
+        # Done here, where the certificate is written, so the bucket cannot fall
+        # behind a rotation. Non-fatal: without it clients fall back to Secret
+        # Manager, which needs a GCP credential but still works.
+        source iac/bootstrapping/lib/public-pki.sh
+        publish_public_pki "$PROJECT_ID" "${_REGION}" "REGISTRATION_SERVER_TLS_CERT.pem" "$$BASE_DIR/server-ca/registration/registration.crt.pem" \
+          || echo "WARNING: could not publish REGISTRATION_SERVER_TLS_CERT.pem to the public PKI bucket — clients must use Secret Manager."
         add_secret_version "REGISTRATION_SERVER_TLS_KEY" "$$BASE_DIR/server-ca/registration/registration.key.pem"
         add_secret_version "REGISTRATION_CA_CERT" "$$BASE_DIR/registration-ca/ca.crt.pem"
         add_secret_version "REGISTRATION_CA_KEY" "$$BASE_DIR/registration-ca/ca.key.pem"
@@ -296,7 +305,7 @@ steps:
     waitFor: [ 'generate-certificates-local' ]
 
   - id: 'download-ca-certificates-remote'
-    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:575.0.0'
     entrypoint: 'bash'
     args:
       - '-c'
@@ -332,11 +341,12 @@ steps:
 
 
   - id: 'issue-tls-certs-gcp-cas'
-    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:575.0.0'
     entrypoint: 'bash'
     args:
       - '-c'
       - |
+        apt-get update -q && apt-get install -y -q openssl
         if [ "$$PKI_STRATEGY" != "remote" ]; then echo "Skipping Remote PKI Generation."; exit 0; fi
         
         BASE_DOMAIN=$$(gcloud secrets versions access latest --secret="BASE_DOMAIN" --project="$PROJECT_ID" | tr -d '\n')
@@ -380,7 +390,7 @@ steps:
     waitFor: [ 'download-ca-certificates-remote' ]
 
   - id: 'update-gcp-secrets-remote'
-    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:575.0.0'
     entrypoint: 'bash'
     args:
       - '-c'
@@ -409,6 +419,14 @@ steps:
 
         # Server identity certificates
         add_secret_version "REGISTRATION_SERVER_TLS_CERT" "temp-certs/server.crt.pem"
+
+        # Publish the server TLS certificate to the public trust-anchor bucket.
+        # Done here, where the certificate is written, so the bucket cannot fall
+        # behind a rotation. Non-fatal: without it clients fall back to Secret
+        # Manager, which needs a GCP credential but still works.
+        source iac/bootstrapping/lib/public-pki.sh
+        publish_public_pki "$PROJECT_ID" "${_REGION}" "REGISTRATION_SERVER_TLS_CERT.pem" "temp-certs/server.crt.pem" \
+          || echo "WARNING: could not publish REGISTRATION_SERVER_TLS_CERT.pem to the public PKI bucket — clients must use Secret Manager."
         add_secret_version "REGISTRATION_SERVER_TLS_KEY" "temp-certs/server.key.pem"
 
         # Factory CA certificate (downloaded from GCP CAS)
@@ -420,7 +438,7 @@ steps:
     waitFor: [ 'issue-tls-certs-gcp-cas' ]
 
   - id: 'fetch-new-secrets-for-deployment'
-    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:575.0.0'
     entrypoint: 'bash'
     args:
       - '-c'
@@ -518,7 +536,7 @@ steps:
         
             exit 1
         fi
-    secretEnv: [ 'PKI_STRATEGY', 'IMAGE_REPO' ]
+    secretEnv: [ 'PKI_STRATEGY', 'IMAGE_REPO', 'OPERATIONAL_CERT_VALIDITY' ]
     waitFor: [ 'fetch-new-secrets-for-deployment' ]
 
 
@@ -527,7 +545,7 @@ steps:
   # ============================================================================
 
   - id: 'restart-registration-server-local'
-    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:575.0.0'
     entrypoint: 'bash'
     args:
       - '-c'
@@ -543,7 +561,7 @@ steps:
     waitFor: [ 'deploy-registration-server-final' ]
 
   - id: 'create-registration-hostname-secret-local'
-    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:575.0.0'
     entrypoint: 'bash'
     args:
       - '-c'
@@ -593,6 +611,8 @@ availableSecrets:
       env: 'GKE_CLUSTER_NAME'
     - versionName: projects/$PROJECT_ID/secrets/IMAGE_REPO/versions/latest
       env: 'IMAGE_REPO'
+    - versionName: projects/$PROJECT_ID/secrets/OPERATIONAL_CERT_VALIDITY/versions/latest
+      env: 'OPERATIONAL_CERT_VALIDITY'
 
 options:
   machineType: 'E2_HIGHCPU_8'

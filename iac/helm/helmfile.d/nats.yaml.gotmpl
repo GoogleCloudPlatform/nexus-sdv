@@ -1,4 +1,5 @@
 {{- $pki_strategy := .StateValues.pkiStrategy | default "local" }}
+{{- $base_domain := .StateValues.baseDomain | default "" }}
 repositories:
   - name: nats
     url: https://nats-io.github.io/k8s/helm/charts/
@@ -8,6 +9,10 @@ releases:
     namespace: base-services
     createNamespace: true
     chart: "nats/nats"
+    # Pinned: without a version every deployment takes whatever the NATS repo
+    # publishes that day, so two platforms bootstrapped on different days run
+    # different brokers. Chart and nats-server share the version number.
+    version: "2.14.6"
     labels:
       app: nats
     installed: true
@@ -23,6 +28,18 @@ releases:
           merge:
             leafnodes:
               listen: 0.0.0.0:7422
+              # Every leaf node gets the server's INFO greeting before it has
+              # authenticated, and that greeting names an address the leaf keeps as a
+              # reconnect target. By default it is the pod's internal address — useless
+              # to a vehicle behind the load balancer, where every reconnect first times
+              # out against it, and disclosed to anyone who opens port 7422. Advertise
+              # the public name instead. `no_advertise` does not do this: measured
+              # against nats-server 2.14.2 and 2.14.6 it is ignored in this block and
+              # rejected at the top level. Without a base domain (local PKI) the
+              # default stays.
+              {{- if $base_domain }}
+              advertise: "nats.{{ $base_domain }}:7422"
+              {{- end }}
             # Define accounts for proper auth_callout isolation
             accounts:
               AUTH:

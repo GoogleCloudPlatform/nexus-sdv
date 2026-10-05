@@ -20,7 +20,7 @@
 
 steps:
   - id: 'bootstrap-platform'
-    name: 'gcr.io/cloud-builders/gcloud'
+    name: 'gcr.io/cloud-builders/gcloud@sha256:abcad906c9fa0dd063c4b6e570994f34024673486b17e9f4c99c720165e03ae5'
     entrypoint: 'bash'
     args:
       - '-c'
@@ -50,7 +50,7 @@ steps:
         # Install Terraform
         # -----------------------------------------------------------------------
         apt-get update -q
-        apt-get install -y -q gnupg software-properties-common wget unzip lsb-release jq
+        apt-get install -y -q gnupg software-properties-common wget unzip lsb-release jq openssl git
         wget -qO- https://apt.releases.hashicorp.com/gpg \
           | gpg --dearmor \
           | tee /usr/share/keyrings/hashicorp-archive-keyring.gpg > /dev/null
@@ -92,10 +92,10 @@ steps:
         echo "Config saved."
 
   # ===========================================================================
-  # STEP 2 — Sample client smoke test (runs after bootstrap completes)
+  # STEP 2 — Platform health check (runs after bootstrap completes)
   # ===========================================================================
-  - id: 'run-sample-clients'
-    name: 'gcr.io/cloud-builders/gcloud'
+  - id: 'platform-health-check'
+    name: 'gcr.io/cloud-builders/gcloud@sha256:abcad906c9fa0dd063c4b6e570994f34024673486b17e9f4c99c720165e03ae5'
     entrypoint: 'bash'
     waitFor: ['bootstrap-platform']
     args:
@@ -105,13 +105,13 @@ steps:
         # Use $$ so Cloud Build does not try to expand these as substitution variables
         # (user-defined substitutions must start with _).
         source iac/bootstrapping/.bootstrap_env
-        echo "Triggering sample client smoke test..."
+        echo "Triggering platform health check..."
         gcloud builds submit . \
-          --config=iac/cloudbuild/run-sample-clients.yaml \
+          --config=iac/cloudbuild/platform-health-check.yaml \
           --project="$$GCP_PROJECT_ID" \
           --region="$$GCP_REGION" \
           --timeout=1800 \
-          --substitutions=^::^_BOOTSTRAP_ENV_GCS_PATH=${_BOOTSTRAP_ENV_GCS_PATH}
+          --substitutions=^::^_TARGET_MODE=file::_BOOTSTRAP_ENV_GCS_PATH=${_BOOTSTRAP_ENV_GCS_PATH}::_RUN_E2E=Y
 
 # =============================================================================
 # SUBSTITUTIONS & OPTIONS

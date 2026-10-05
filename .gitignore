@@ -145,6 +145,7 @@ sample-clients/telemetry-subscriber/telemetry-subscriber
 # Exclude environment variable file with bootstrapping default. It should be either created when
 # running the bootstrapping script or stored elsewhere
 **/.bootstrap_env*
+**/*.bootstrap_env
 /sample-services/ai_assistant/uv.lock
 **/*.srl
 **/*.backup

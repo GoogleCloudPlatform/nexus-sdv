@@ -1,4 +1,4 @@
-import { render, screen, act } from '@testing-library/react';
+import { render, screen, act, fireEvent } from '@testing-library/react';
 import Sidebar from '@/components/sidebar';
 
 const mockClose = jest.fn();
@@ -13,7 +13,7 @@ class MockEventSource {
   emitError() { this.onerror?.(); }
 }
 
-jest.mock('next/navigation', () => ({ usePathname: () => '/fleet' }));
+jest.mock('next/navigation', () => ({ usePathname: () => '/telemetry' }));
 jest.mock('next-auth/react', () => ({
   useSession: () => ({ data: { user: { email: 'test@example.com' } } }),
   signOut: jest.fn(),
@@ -23,7 +23,15 @@ beforeEach(() => {
   MockEventSource.instances = [];
   mockClose.mockReset();
   (global as unknown as { EventSource: unknown }).EventSource = MockEventSource;
+  // useScoringMessages persists messages to sessionStorage; without clearing it,
+  // one test's messages hydrate into the next.
+  window.sessionStorage.clear();
 });
+
+// The panel starts collapsed, so its textarea only renders once opened.
+function openScoringPanel() {
+  fireEvent.click(screen.getByRole('button', { name: /scoring events/i }));
+}
 
 describe('Sidebar scoring events', () => {
   it('opens an EventSource to /api/scoring/stream on mount', () => {
@@ -31,8 +39,20 @@ describe('Sidebar scoring events', () => {
     expect(MockEventSource.instances[0].url).toBe('/api/scoring/stream');
   });
 
+  it('starts collapsed and shows the event count in its header', () => {
+    render(<Sidebar />);
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+
+    act(() => { MockEventSource.instances[0].emit('{"vehicle":"v1","score":1,"message":"m1"}'); });
+
+    const toggle = screen.getByRole('button', { name: /scoring events \(1\)/i });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+  });
+
   it('shows placeholder when no messages received', () => {
     render(<Sidebar />);
+    openScoringPanel();
     expect(screen.getByPlaceholderText('No events yet…')).toBeInTheDocument();
   });
 
@@ -40,6 +60,7 @@ describe('Sidebar scoring events', () => {
     render(<Sidebar />);
     act(() => { MockEventSource.instances[0].emit('{"vehicle":"v1","score":1,"message":"m1"}'); });
     act(() => { MockEventSource.instances[0].emit('{"vehicle":"v2","score":2,"message":"m2"}'); });
+    openScoringPanel();
     const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
     expect(textarea.value).toBe('v2 - 2 - m2\nv1 - 1 - m1');
   });
@@ -47,6 +68,7 @@ describe('Sidebar scoring events', () => {
   it('falls back to raw text for non-JSON messages', () => {
     render(<Sidebar />);
     act(() => { MockEventSource.instances[0].emit('not-json'); });
+    openScoringPanel();
     const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
     expect(textarea.value).toBe('not-json');
   });

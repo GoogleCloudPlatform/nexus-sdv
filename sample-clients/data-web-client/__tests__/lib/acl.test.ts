@@ -7,6 +7,18 @@ jest.mock('pg', () => ({
 import { getAllowedVehicleIds } from '@/lib/acl';
 
 describe('getAllowedVehicleIds', () => {
+  // getAllowedVehicleIds deliberately returns undefined when no ACL database is
+  // configured (DB_NAME unset). These tests exercise the configured path, so set
+  // it for this file only and restore it afterwards.
+  const originalDbName = process.env.DB_NAME;
+  beforeAll(() => {
+    process.env.DB_NAME = 'nexus_acl';
+  });
+  afterAll(() => {
+    if (originalDbName === undefined) delete process.env.DB_NAME;
+    else process.env.DB_NAME = originalDbName;
+  });
+
   beforeEach(() => {
     mockQuery.mockClear();
   });

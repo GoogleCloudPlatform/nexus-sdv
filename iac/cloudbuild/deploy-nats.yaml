@@ -3,7 +3,7 @@ steps:
   # 0. SETUP & AUTHENTICATION
   # ============================================================================
   - id: 'get-gke-credentials'
-    name: 'gcr.io/cloud-builders/gcloud'
+    name: 'gcr.io/cloud-builders/gcloud@sha256:abcad906c9fa0dd063c4b6e570994f34024673486b17e9f4c99c720165e03ae5'
     entrypoint: 'bash'
     args:
       - '-c'
@@ -24,7 +24,7 @@ steps:
     secretEnv: ['GKE_CLUSTER_NAME', 'GCP_REGION']
 
   - id: 'prepare-domain'
-    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:575.0.0'
     entrypoint: 'bash'
     args:
       - '-c'
@@ -49,11 +49,12 @@ steps:
 
   # LOCAL mode: download Server CA, generate key + CSR, sign with Server CA
   - id: 'generate-nats-leaf-tls-local'
-    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:575.0.0'
     entrypoint: 'bash'
     args:
       - '-c'
       - |
+        apt-get update -q && apt-get install -y -q openssl
         if [ "$$PKI_STRATEGY" != "local" ]; then echo "Skipping local leaf TLS generation."; exit 0; fi
 
         mkdir -p temp-nats-leaf
@@ -84,11 +85,12 @@ steps:
 
   # REMOTE mode: issue cert via GCP CAS with DNS SAN for nats.<domain>
   - id: 'generate-nats-leaf-tls-remote'
-    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:575.0.0'
     entrypoint: 'bash'
     args:
       - '-c'
       - |
+        apt-get update -q && apt-get install -y -q openssl
         if [ "$$PKI_STRATEGY" != "remote" ]; then echo "Skipping remote leaf TLS generation."; exit 0; fi
 
         mkdir -p temp-nats-leaf
@@ -130,7 +132,7 @@ steps:
 
   # Store leaf TLS cert + key in GCP Secret Manager
   - id: 'store-nats-leaf-tls-secrets'
-    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:575.0.0'
     entrypoint: 'bash'
     args:
       - '-c'
@@ -186,7 +188,7 @@ steps:
     waitFor: [ 'create-nats-leaf-tls-k8s-secret' ]
 
   - id: 'create-nats-hostname-secret'
-    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:575.0.0'
     entrypoint: 'bash'
     args:
       - '-c'

@@ -3,7 +3,7 @@ steps:
   # 0. SETUP & AUTHENTICATION
   # ============================================================================
   - id: 'get-gke-credentials'
-    name: 'gcr.io/cloud-builders/gcloud'
+    name: 'gcr.io/cloud-builders/gcloud@sha256:abcad906c9fa0dd063c4b6e570994f34024673486b17e9f4c99c720165e03ae5'
     entrypoint: 'bash'
     args:
       - '-c'
@@ -27,7 +27,7 @@ steps:
   # 1. DOWNLOAD REGISTRATION CA CERTIFICATE
   # ============================================================================
   - id: 'download-registration-ca-cert'
-    name: 'gcr.io/cloud-builders/gcloud'
+    name: 'gcr.io/cloud-builders/gcloud@sha256:abcad906c9fa0dd063c4b6e570994f34024673486b17e9f4c99c720165e03ae5'
     entrypoint: 'bash'
     args:
       - '-c'
@@ -49,7 +49,7 @@ steps:
   # 2. DOWNLOAD SERVER CA (BASED ON PKI STRATEGY)
   # ============================================================================
   - id: 'download-server-ca'
-    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:575.0.0'
     entrypoint: 'bash'
     args:
       - '-c'
@@ -93,7 +93,7 @@ steps:
   # 3. PREPARE KEYCLOAK CHART WITH CERTIFICATES
   # ============================================================================
   - id: 'prepare-keycloak-chart'
-    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:575.0.0'
     entrypoint: 'bash'
     args:
       - '-c'
@@ -142,7 +142,7 @@ steps:
 
   # 4b. Get IP, Generate Certs - ONLY LOCAL
   - id: 'pki-local-generate-certs'
-    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:575.0.0'
     entrypoint: 'bash'
     args:
       - '-c'
@@ -181,11 +181,12 @@ steps:
 
   # 4c. Update certificate config and generate new cert - ONLY LOCAL
   - id: 'update-cert-config'
-    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:575.0.0'
     entrypoint: 'bash'
     args:
       - '-c'
       - |
+        apt-get update -q && apt-get install -y -q openssl
         if [ "$$PKI_STRATEGY" != "local" ]; then echo "Skipping Local PKI Config Update."; exit 0; fi
         
         # The IP address is already available from the previous step
@@ -231,7 +232,7 @@ steps:
 
   # 4d. Update GCP Secrets with new certificates - ONLY LOCAL
   - id: 'update-gcp-secrets-local'
-    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:575.0.0'
     entrypoint: 'bash'
     args:
       - '-c'
@@ -251,6 +252,14 @@ steps:
         SOURCE_DIR="base-services/registration/pki/server-ca/keycloak"
 
         gcloud secrets versions add KEYCLOAK_TLS_CRT --data-file="$$SOURCE_DIR/keycloak.crt.pem" --project="$PROJECT_ID"
+
+        # Publish the server TLS certificate to the public trust-anchor bucket.
+        # Done here, where the certificate is written, so the bucket cannot fall
+        # behind a rotation. Non-fatal: without it clients fall back to Secret
+        # Manager, which needs a GCP credential but still works.
+        source iac/bootstrapping/lib/public-pki.sh
+        publish_public_pki "$PROJECT_ID" "${_REGION}" "KEYCLOAK_TLS_CRT.pem" "$$SOURCE_DIR/keycloak.crt.pem" \
+          || echo "WARNING: could not publish KEYCLOAK_TLS_CRT.pem to the public PKI bucket — clients must use Secret Manager."
         gcloud secrets versions add KEYCLOAK_TLS_KEY --data-file="$$SOURCE_DIR/keycloak.key.pem" --project="$PROJECT_ID"
         
         KEYCLOAK_TLS_CRT=$$(gcloud secrets versions access latest --secret="KEYCLOAK_TLS_CRT" --project="$PROJECT_ID")
@@ -269,11 +278,12 @@ steps:
 
   # 5a. Issue TLS Certs via GCP CAS - ONLY REMOTE
   - id: 'issue-tls-certs-gcp-cas'
-    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:575.0.0'
     entrypoint: 'bash'
     args:
       - '-c'
       - |
+        apt-get update -q && apt-get install -y -q openssl
         if [ "$$PKI_STRATEGY" != "remote" ]; then echo "Skipping Remote PKI Generation."; exit 0; fi
         
         BASE_DOMAIN=$$(gcloud secrets versions access latest --secret="BASE_DOMAIN" --project="$PROJECT_ID")
@@ -341,7 +351,7 @@ steps:
 
   # 5b. Update GCP Secrets with new certificates - ONLY REMOTE
   - id: 'update-gcp-secrets-remote'
-    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:575.0.0'
     entrypoint: 'bash'
     args:
       - '-c'
@@ -360,6 +370,14 @@ steps:
 
         # Add new versions
         gcloud secrets versions add KEYCLOAK_TLS_CRT --data-file="temp-certs/keycloak.crt.pem" --project="$PROJECT_ID"
+
+        # Publish the server TLS certificate to the public trust-anchor bucket.
+        # Done here, where the certificate is written, so the bucket cannot fall
+        # behind a rotation. Non-fatal: without it clients fall back to Secret
+        # Manager, which needs a GCP credential but still works.
+        source iac/bootstrapping/lib/public-pki.sh
+        publish_public_pki "$PROJECT_ID" "${_REGION}" "KEYCLOAK_TLS_CRT.pem" "temp-certs/keycloak.crt.pem" \
+          || echo "WARNING: could not publish KEYCLOAK_TLS_CRT.pem to the public PKI bucket — clients must use Secret Manager."
         gcloud secrets versions add KEYCLOAK_TLS_KEY --data-file="temp-certs/keycloak.key.pem" --project="$PROJECT_ID"
         
         KEYCLOAK_TLS_CRT=$$(gcloud secrets versions access latest --secret="KEYCLOAK_TLS_CRT" --project="$PROJECT_ID")
@@ -407,8 +425,17 @@ steps:
              echo "::error::Local strategy selected but .txt files not found."
              exit 1
            fi
+           # Local PKI has no DNS: point KC_HOSTNAME at the Keycloak LoadBalancer IP so the
+           # browser-facing OIDC URLs (issuer, authorization_endpoint) are reachable. The cert
+           # issued in update-cert-config already carries this IP in its SAN.
+           if [ -f "keycloak_ip.txt" ]; then
+             export KEYCLOAK_FRONTEND_URL="https://$$(cat keycloak_ip.txt):8443"
+             echo "Using Local KC_HOSTNAME: $$KEYCLOAK_FRONTEND_URL"
+           else
+             echo "::warning::keycloak_ip.txt not found — KC_HOSTNAME falls back to in-cluster name 'keycloak'."
+           fi
         fi
-        
+
         cd iac/helm/helmfile.d
         helmfile --file keycloak.yaml.gotmpl ${_HELM_ACTION} \
             --wait --timeout 1800 \
@@ -425,7 +452,7 @@ steps:
   # ============================================================================
 
   - id: 'restart-keycloak'
-    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:575.0.0'
     entrypoint: 'bash'
     args:
       - '-c'
@@ -441,7 +468,7 @@ steps:
     waitFor: ['deploy-keycloak-final']
 
   - id: 'create-jwk-secrets-local'
-    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:575.0.0'
     entrypoint: 'bash'
     args:
       - '-c'
@@ -469,13 +496,6 @@ steps:
         # -k skips cert verification (self-signed for local PKI).
         JWKS_URL="https://$${IP}:8443/realms/sdv-telemetry/protocol/openid-connect/certs"
         echo "JWKS URL is: $$JWKS_URL"
-
-        # Create the KEYCLOAK_JWK_URI secret
-        if ! gcloud secrets describe "KEYCLOAK_JWK_URI" --project="$PROJECT_ID" &> /dev/null; then
-          echo "Create secret 'KEYCLOAK_JWK_URI'..."
-          gcloud secrets create "KEYCLOAK_JWK_URI" --replication-policy="automatic" --project="$PROJECT_ID"
-        fi
-        gcloud secrets versions add KEYCLOAK_JWK_URI --data-file=- --project="$PROJECT_ID" <<< "$$JWKS_URL"
 
         echo "Waiting for Keycloak JWKS endpoint to become available..."
         for i in {1..30}; do
@@ -513,7 +533,7 @@ steps:
     waitFor: ['restart-keycloak']
 
   - id: 'create-keycloak-hostname-secret-remote'
-    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:575.0.0'
     entrypoint: 'bash'
     args:
       - '-c'
@@ -535,7 +555,7 @@ steps:
     waitFor: ['create-jwk-secrets-local']
 
   - id: 'create-jwk-secrets-remote'
-    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:575.0.0'
     entrypoint: 'bash'
     args:
       - '-c'
@@ -560,13 +580,6 @@ steps:
         # Define the JWKS URL using IP instead of domain (DNS might not be propagated yet)
         JWKS_URL="https://$${IP}:8443/realms/sdv-telemetry/protocol/openid-connect/certs"
         echo "JWKS URL is: $$JWKS_URL"
-
-        # Create the KEYCLOAK_JWK_URI secret
-        if ! gcloud secrets describe "KEYCLOAK_JWK_URI" --project="$PROJECT_ID" &> /dev/null; then
-          echo "Create secret 'KEYCLOAK_JWK_URI'..."
-          gcloud secrets create "KEYCLOAK_JWK_URI" --replication-policy="automatic" --project="$PROJECT_ID"
-        fi
-        gcloud secrets versions add KEYCLOAK_JWK_URI --data-file=- --project="$PROJECT_ID" <<< "$$JWKS_URL"
 
         echo "Waiting for Keycloak JWKS endpoint to become available..."
         for i in {1..30}; do
@@ -619,19 +632,23 @@ steps:
   # handled.
   # ============================================================================
   - id: 'create-web-client-secrets'
-    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:575.0.0'
     entrypoint: 'bash'
     args:
       - '-c'
       - |
-        apt-get install -y -q jq
+        apt-get update -q && apt-get install -y -q jq openssl
 
         # Derive the Keycloak base URL from the PKI strategy.
         # KEYCLOAK_BASE_URL  — used for the ISSUER secret (must be the public hostname in remote mode)
         # KEYCLOAK_CALL_URL  — used for direct API calls (always IP-based to avoid DNS propagation delays)
         if [ "$$PKI_STRATEGY" == "remote" ]; then
           BASE_DOMAIN=$$(gcloud secrets versions access latest --secret="BASE_DOMAIN" --project="$PROJECT_ID")
-          KEYCLOAK_BASE_URL="https://keycloak.$${BASE_DOMAIN}:8443"
+          # The browser-facing name on the Ingress: this becomes the OIDC issuer,
+          # so it has to be publicly trusted and reachable. Vehicles talk to
+          # keycloak.$${BASE_DOMAIN}:8443 directly (mutual TLS cannot pass through
+          # an L7 load balancer) and receive tokens carrying this same issuer.
+          KEYCLOAK_BASE_URL="https://keycloak-ui.$${BASE_DOMAIN}"
           # Get the LoadBalancer IP directly (same approach as create-jwk-secrets-remote)
           # so admin API calls do not depend on DNS having propagated yet.
           echo "Resolving Keycloak LoadBalancer IP for API calls..."
@@ -663,7 +680,21 @@ steps:
 
         ISSUER="$${KEYCLOAK_BASE_URL}/realms/sdv-telemetry"
         CLIENT_ID="data-web-client"
-        CLIENT_SECRET=$$(openssl rand -hex 32)
+
+        # Idempotent secret handling: the running data-web-client pod bakes this
+        # secret in at *its* deploy time, so regenerating it on every
+        # deploy-keycloak run rotates it out from under the pod and breaks OIDC
+        # sign-in (unauthorized_client / OAuthCallback). Reuse the existing Secret
+        # Manager value; only generate a new one on first creation.
+        if EXISTING_SECRET=$$(gcloud secrets versions access latest --secret="KEYCLOAK_CLIENT_SECRET_WEB_CLIENT" --project="$PROJECT_ID" 2>/dev/null) && [ -n "$$EXISTING_SECRET" ]; then
+          CLIENT_SECRET="$$EXISTING_SECRET"
+          SECRET_IS_NEW=false
+          echo "Reusing existing KEYCLOAK_CLIENT_SECRET_WEB_CLIENT."
+        else
+          CLIENT_SECRET=$$(openssl rand -hex 32)
+          SECRET_IS_NEW=true
+          echo "No existing web-client secret found — generating a new one."
+        fi
 
         echo "Creating KEYCLOAK_CLIENT_ID_WEB_CLIENT..."
         if ! gcloud secrets describe "KEYCLOAK_CLIENT_ID_WEB_CLIENT" --project="$PROJECT_ID" &>/dev/null; then
@@ -671,11 +702,15 @@ steps:
         fi
         printf '%s' "$$CLIENT_ID" | gcloud secrets versions add KEYCLOAK_CLIENT_ID_WEB_CLIENT --data-file=- --project="$PROJECT_ID"
 
-        echo "Creating KEYCLOAK_CLIENT_SECRET_WEB_CLIENT..."
+        echo "Ensuring KEYCLOAK_CLIENT_SECRET_WEB_CLIENT..."
         if ! gcloud secrets describe "KEYCLOAK_CLIENT_SECRET_WEB_CLIENT" --project="$PROJECT_ID" &>/dev/null; then
           gcloud secrets create "KEYCLOAK_CLIENT_SECRET_WEB_CLIENT" --replication-policy="automatic" --project="$PROJECT_ID"
         fi
-        printf '%s' "$$CLIENT_SECRET" | gcloud secrets versions add KEYCLOAK_CLIENT_SECRET_WEB_CLIENT --data-file=- --project="$PROJECT_ID"
+        # Only add a new version when we actually generated a new secret, so the
+        # stored value stays stable across redeploys.
+        if [ "$$SECRET_IS_NEW" = "true" ]; then
+          printf '%s' "$$CLIENT_SECRET" | gcloud secrets versions add KEYCLOAK_CLIENT_SECRET_WEB_CLIENT --data-file=- --project="$PROJECT_ID"
+        fi
 
         echo "Creating KEYCLOAK_ISSUER ($${ISSUER})..."
         if ! gcloud secrets describe "KEYCLOAK_ISSUER" --project="$PROJECT_ID" &>/dev/null; then
@@ -708,7 +743,8 @@ steps:
           -d "username=admin" \
           --data-urlencode "password=$${KEYCLOAK_ADMIN_PASSWORD}" \
           -d "grant_type=password")
-        echo "Token response: $${TOKEN_RESPONSE}"
+        # Never echo the response: it carries the admin access token, and a
+        # build log is readable by anyone with log access on the project.
 
         ADMIN_TOKEN=$$(echo "$$TOKEN_RESPONSE" | jq -r '.access_token')
         if [[ -z "$$ADMIN_TOKEN" ]]; then
@@ -725,13 +761,25 @@ steps:
         CLIENT_UUID=$$(echo "$$EXISTING" | jq -r '.[0].id // ""')
 
         if [[ -n "$$CLIENT_UUID" ]]; then
-          echo "Client '$${CLIENT_ID}' exists (uuid=$${CLIENT_UUID}). Rotating secret..."
-          $$CURL -X POST \
-            "$${ADMIN_URL}/clients/$${CLIENT_UUID}/client-secret" \
-            -H "Authorization: Bearer $${ADMIN_TOKEN}" \
-            -H "Content-Type: application/json" \
-            -d "{\"type\":\"secret\",\"value\":\"$${CLIENT_SECRET}\"}"
-          echo "✓ Client secret rotated."
+          # Only the secret. The redirect URIs are deliberately left alone here:
+          # this step runs before the FleetView URL is known, so it creates the
+          # client with the placeholder ["/*"] below and
+          # build-push-deploy-data-web-client is what sets the real address.
+          # Keycloak reads "/*" relative to rootUrl, which is empty, so the
+          # placeholder matches nothing — a client left in that state has a
+          # working secret and an unusable login. That step therefore fails the
+          # build rather than warning if it cannot reach the admin API.
+          echo "Client '$${CLIENT_ID}' exists (uuid=$${CLIENT_UUID}). Reconciling secret to the Secret Manager value..."
+          # POST .../client-secret REGENERATES a random secret (the request body is
+          # ignored), which diverges from Secret Manager and the running pod. Set
+          # the exact value via GET-modify-PUT of the client representation.
+          CLIENT_JSON=$$($$CURL "$${ADMIN_URL}/clients/$${CLIENT_UUID}" -H "Authorization: Bearer $${ADMIN_TOKEN}")
+          echo "$$CLIENT_JSON" | jq --arg s "$$CLIENT_SECRET" '.secret = $$s' \
+            | $$CURL -X PUT "$${ADMIN_URL}/clients/$${CLIENT_UUID}" \
+                -H "Authorization: Bearer $${ADMIN_TOKEN}" \
+                -H "Content-Type: application/json" \
+                -d @-
+          echo "✓ Client secret reconciled to the Secret Manager value."
         else
           echo "Client '$${CLIENT_ID}' not found. Creating it..."
           $$CURL -X POST \
@@ -760,6 +808,127 @@ steps:
         echo "✅ Keycloak web client registered and secret synchronised."
     secretEnv: ['PKI_STRATEGY', 'KEYCLOAK_ADMIN_PASSWORD']
     waitFor: ['create-jwk-secrets-remote']
+
+# ============================================================================
+# 9. PROVISION THE FACTORY-OPERATOR CLIENT
+#
+# factory-helper only accepts callers whose token carries the realm role
+# "factory-operator" (auth.rs REQUIRED_ROLE). The realm import does not create
+# that client, so without this step a freshly bootstrapped platform runs a
+# factory-helper that nobody can authenticate against — and gives no hint why.
+#
+# The client secret is stored as FACTORY_OPERATOR_CLIENT_SECRET, the name the
+# sample client runners already expect.
+# ============================================================================
+  - id: 'provision-factory-operator-client'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:575.0.0'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        apt-get update -q && apt-get install -y -q jq
+
+        # Admin API calls go to the LoadBalancer IP so they do not depend on DNS
+        # having propagated yet (same approach as create-web-client-secrets).
+        KEYCLOAK_IP=""
+        for i in {1..30}; do
+          KEYCLOAK_IP=$$(kubectl get svc keycloak -n base-services -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)
+          if [[ -n "$$KEYCLOAK_IP" ]]; then break; fi
+          echo "Waiting for Keycloak LoadBalancer IP... ($$i/30)"
+          sleep 10
+        done
+        # An address is not an answer: the LoadBalancer gets an IP before Keycloak
+        # is serving on it, and the provisioning script's first call is an admin
+        # login. Waiting for the realm endpoint here turns a race into a wait.
+        if [[ -n "$$KEYCLOAK_IP" ]]; then
+          for i in {1..30}; do
+            if curl -sfk -o /dev/null --max-time 5 \
+                 "https://$${KEYCLOAK_IP}:8443/realms/master/.well-known/openid-configuration"; then
+              echo "Keycloak is answering on $$KEYCLOAK_IP"
+              break
+            fi
+            echo "Keycloak has an IP but is not answering yet... ($$i/30)"
+            sleep 10
+          done
+        fi
+
+        if [[ -z "$$KEYCLOAK_IP" ]]; then
+          echo "::error::Could not resolve Keycloak LoadBalancer IP."
+          exit 1
+        fi
+
+        # The script prints the client secret on stdout, so capture its output
+        # rather than letting it reach the build log.
+        OUT=$$(KEYCLOAK_ADMIN_PASSWORD="$$KEYCLOAK_ADMIN_PASSWORD" \
+          ./iac/operating/keycloak-provision-client.sh \
+            "https://$${KEYCLOAK_IP}:8443" sdv-telemetry factory-operator \
+            --role factory-operator)
+        echo "$$OUT" | grep -v '^client_secret:'
+
+        SECRET=$$(printf '%s' "$$OUT" | sed -n 's/^client_secret: *//p')
+        if [[ -z "$$SECRET" ]]; then
+          echo "::error::factory-operator client secret not returned."
+          exit 1
+        fi
+
+        if ! gcloud secrets describe "FACTORY_OPERATOR_CLIENT_SECRET" --project="$PROJECT_ID" &>/dev/null; then
+          gcloud secrets create "FACTORY_OPERATOR_CLIENT_SECRET" --replication-policy="automatic" --project="$PROJECT_ID"
+        fi
+        printf '%s' "$$SECRET" | gcloud secrets versions add FACTORY_OPERATOR_CLIENT_SECRET --data-file=- --project="$PROJECT_ID"
+
+        echo "✅ factory-operator client provisioned; secret stored in Secret Manager."
+    secretEnv: ['KEYCLOAK_ADMIN_PASSWORD']
+    waitFor: ['create-web-client-secrets']
+
+# ============================================================================
+# 10. PROVISION THE FLEETVIEW GROUP AND LOGIN USER
+#
+# FleetView authorises by group membership: the realm import ships the
+# oidc-group-membership-mapper but neither a group nor a user, so a freshly
+# bootstrapped platform has a working FleetView that nobody can log into.
+#
+# The generated password is temporary — Keycloak forces a change at first login,
+# which makes the stored secret worthless afterwards. It is written only when the
+# user is created, so a redeploy never resets a password somebody has chosen.
+# ============================================================================
+  - id: 'provision-fleet-user'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:575.0.0'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        apt-get update -q && apt-get install -y -q jq openssl
+
+        KEYCLOAK_IP=""
+        for i in {1..30}; do
+          KEYCLOAK_IP=$$(kubectl get svc keycloak -n base-services -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)
+          if [[ -n "$$KEYCLOAK_IP" ]]; then break; fi
+          echo "Waiting for Keycloak LoadBalancer IP... ($$i/30)"
+          sleep 10
+        done
+        if [[ -z "$$KEYCLOAK_IP" ]]; then
+          echo "::error::Could not resolve Keycloak LoadBalancer IP."
+          exit 1
+        fi
+
+        # Capture the output: the script prints the initial password on stdout.
+        OUT=$$(KEYCLOAK_ADMIN_PASSWORD="$$KEYCLOAK_ADMIN_PASSWORD" \
+          ./iac/operating/keycloak-provision-fleet-user.sh \
+            "https://$${KEYCLOAK_IP}:8443" sdv-telemetry)
+        echo "$$OUT" | grep -v '^initial_password:'
+
+        PASSWORD=$$(printf '%s' "$$OUT" | sed -n 's/^initial_password: *//p')
+        if [[ -n "$$PASSWORD" && "$$PASSWORD" != "(unchanged — user already existed)" ]]; then
+          if ! gcloud secrets describe "NEXUS_FLEET_INITIAL_PASSWORD" --project="$PROJECT_ID" &>/dev/null; then
+            gcloud secrets create "NEXUS_FLEET_INITIAL_PASSWORD" --replication-policy="automatic" --project="$PROJECT_ID"
+          fi
+          printf '%s' "$$PASSWORD" | gcloud secrets versions add NEXUS_FLEET_INITIAL_PASSWORD --data-file=- --project="$PROJECT_ID"
+          echo "✅ FleetView user created; initial password stored in Secret Manager."
+        else
+          echo "✅ FleetView user already present; no password written."
+        fi
+    secretEnv: ['KEYCLOAK_ADMIN_PASSWORD']
+    waitFor: ['provision-factory-operator-client']
 
 # ============================================================================
 # SUBSTITUTIONS & SECRETS CONFIG

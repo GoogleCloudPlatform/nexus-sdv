@@ -8,11 +8,13 @@
 # treated as success — it means the client connected, registered, and published
 # telemetry for the full 2-minute window without crashing.
 #
-# A third step then scans BigTable for telemetry rows written by the clients
-# and fails the build if none are found within 90 s.
+# A third step then scans BigTable for a fresh telemetry row per client VIN
+# (written after this build's start, not stale data from a previous run) and
+# fails the build if either is missing within 90 s.
 #
-# Triggered automatically by bootstrap-platform.yaml after a successful
-# bootstrap, or run manually:
+# Triggered automatically after a successful bootstrap via
+# iac/cloudbuild/platform-health-check.yaml's _RUN_E2E=Y (itself triggered by
+# bootstrap-platform.yaml — see that file's step 2), or run manually:
 #
 #   gcloud builds submit . \
 #     --config=iac/cloudbuild/run-sample-clients.yaml \
@@ -30,12 +32,29 @@
 
 steps:
   # ===========================================================================
+  # Record a start-of-build timestamp before any client runs, so
+  # verify-bigtable can later confirm a row *newer than this instant* exists.
+  # ===========================================================================
+  - id: 'record-start-time'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:575.0.0'
+    entrypoint: 'bash'
+    waitFor: ['-']
+    args:
+      - '-c'
+      - |
+        # Fixed-width, zero-padded UTC timestamp matching the row-key format
+        # written by the nats-bigtable-connector
+        # (iac/helm/nats-bigtable-connector/templates/configmap-template.yaml).
+        date -u +'%Y-%m-%dT%H:%M:%S.000000000Z' > /workspace/.e2e_since
+        echo "Recorded start time: $$(cat /workspace/.e2e_since)"
+
+  # ===========================================================================
   # Python vehicle client — proto → downloadcerts → run
   # ===========================================================================
   - id: 'run-python-client'
-    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:575.0.0'
     entrypoint: 'bash'
-    waitFor: ['-']
+    waitFor: ['record-start-time']
     args:
       - '-c'
       - |
@@ -77,6 +96,11 @@ steps:
         fi
 
         # -----------------------------------------------------------------------
+        # Install make (not included in the cloud-sdk base image; needed by 'make all')
+        # -----------------------------------------------------------------------
+        apt-get update -q && apt-get install -y -q make jq
+
+        # -----------------------------------------------------------------------
         # Install uv (fast Python package manager used by the client)
         # -----------------------------------------------------------------------
         echo "Installing uv..."
@@ -96,12 +120,20 @@ steps:
         # Exit 124 = timeout expired cleanly = smoke test passed.
         # Any other non-zero exit = real failure.
         # -----------------------------------------------------------------------
-        echo "Running Python client smoke test (timeout 120s)..."
-        timeout 120s make all && RC=0 || RC=$$?
+        if [ "$$PKI_STRATEGY" = "remote" ]; then
+          IDENTITY_PATH="factory-helper"
+          echo "Remote PKI: factory identity from the factory-helper (no project access)."
+          make proto
+          timeout 120s ./run-python-client-factory.sh && RC=0 || RC=$$?
+        else
+          IDENTITY_PATH="local self-signing"
+          echo "Local PKI: factory identity self-signed from the CA key."
+          timeout 120s make all && RC=0 || RC=$$?
+        fi
         if [ "$$RC" -eq 124 ]; then
-          echo "✓ Python client smoke test passed (ran for 2 minutes without crashing)."
+          echo "✓ Python client smoke test passed via $$IDENTITY_PATH (ran 2 minutes without crashing)."
         elif [ "$$RC" -ne 0 ]; then
-          echo "::error::Python client exited with unexpected error code $$RC."
+          echo "::error::Python client failed on the $$IDENTITY_PATH identity path, exit code $$RC."
           exit "$$RC"
         else
           echo "✓ Python client exited cleanly before timeout."
@@ -111,9 +143,9 @@ steps:
   # Go vehicle client — deps → proto → certs → build → run
   # ===========================================================================
   - id: 'run-vehicle-client'
-    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:575.0.0'
     entrypoint: 'bash'
-    waitFor: ['-']
+    waitFor: ['record-start-time']
     args:
       - '-c'
       - |
@@ -152,10 +184,12 @@ steps:
         fi
 
         # -----------------------------------------------------------------------
-        # Install Go 1.24
+        # Install Go 1.27
+        # The clients' go.mod requires Go 1.25 or later (golang.org/x/crypto
+        # v0.52.0); 1.24 and 1.25 are out of support, so use the current release.
         # -----------------------------------------------------------------------
-        echo "Installing Go 1.24..."
-        curl -fsSL "https://go.dev/dl/go1.24.0.linux-amd64.tar.gz" \
+        echo "Installing Go 1.27..."
+        curl -fsSL "https://go.dev/dl/go1.27.1.linux-amd64.tar.gz" \
           | tar -xz -C /usr/local
         export PATH="/usr/local/go/bin:$$PATH"
         echo "go $$(go version)"
@@ -164,7 +198,7 @@ steps:
         # Install protoc and Go code-generator plugins
         # -----------------------------------------------------------------------
         echo "Installing protoc..."
-        apt-get update -q && apt-get install -y -q protobuf-compiler
+        apt-get update -q && apt-get install -y -q protobuf-compiler make jq
         echo "protoc $$(protoc --version)"
 
         echo "Installing protoc-gen-go plugins..."
@@ -176,27 +210,40 @@ steps:
         # Run make all with a 2-minute time box
         # -----------------------------------------------------------------------
         cd sample-clients/vehicle-client
-        echo "Running vehicle client smoke test (timeout 120s)..."
-        timeout 120s make all && RC=0 || RC=$$?
+        if [ "$$PKI_STRATEGY" = "remote" ]; then
+          IDENTITY_PATH="factory-helper"
+          echo "Remote PKI: factory identity from the factory-helper (no project access)."
+          make build
+          timeout 120s ./run-vehicle-client-factory.sh && RC=0 || RC=$$?
+        else
+          IDENTITY_PATH="local self-signing"
+          echo "Local PKI: factory identity self-signed from the CA key."
+          timeout 120s make all && RC=0 || RC=$$?
+        fi
         if [ "$$RC" -eq 124 ]; then
-          echo "✓ Vehicle client smoke test passed (ran for 2 minutes without crashing)."
+          echo "✓ Vehicle client smoke test passed via $$IDENTITY_PATH (ran 2 minutes without crashing)."
         elif [ "$$RC" -ne 0 ]; then
-          echo "::error::Vehicle client exited with unexpected error code $$RC."
+          echo "::error::Vehicle client failed on the $$IDENTITY_PATH identity path, exit code $$RC."
           exit "$$RC"
         else
           echo "✓ Vehicle client exited cleanly before timeout."
         fi
 
   # ===========================================================================
-  # BigTable verification — confirm telemetry rows were written
+  # BigTable verification — confirm new telemetry rows were written
   #
   # Runs after both client smoke tests complete. Scans the telemetry table
-  # for rows with the default VIN prefix (VEHICLE001#) using the cbt CLI.
+  # for a row under each client's default VIN prefix separately — VEHICLE001
+  # (Go vehicle-client, sample-clients/vehicle-client/main.go) and VEHICLE002
+  # (Python client, sample-clients/python/run-python-client.sh:17) — so a
+  # build only passes if both clients actually got data into BigTable, not
+  # just one of them.
+  #
   # Retries for up to ~90 s to allow the NATS-to-BigTable connector time
-  # to flush any buffered writes. Fails the build if no rows are found.
+  # to flush any buffered writes. Fails the build if either VIN has no new row.
   # ===========================================================================
   - id: 'verify-bigtable'
-    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:575.0.0'
     entrypoint: 'bash'
     waitFor: ['run-python-client', 'run-vehicle-client']
     args:
@@ -211,16 +258,26 @@ steps:
         gcloud storage cp "${_BOOTSTRAP_ENV_GCS_PATH}" /workspace/iac/bootstrapping/.bootstrap_env
         source /workspace/iac/bootstrapping/.bootstrap_env
 
+        SINCE=$$(cat /workspace/.e2e_since)
+        echo "Checking for telemetry rows written at/after $$SINCE..."
+
         # -----------------------------------------------------------------------
         # Install cbt (BigTable CLI)
         # -----------------------------------------------------------------------
         echo "Installing cbt..."
-        apt-get update -q && apt-get install -y -q google-cloud-sdk-cbt
+        # The cbt package was renamed google-cloud-sdk-cbt -> google-cloud-cli-cbt.
+        # Try the current name first and fall back, so this keeps working on both
+        # older and newer cloud-sdk images.
+        apt-get update -q
+        apt-get install -y -q google-cloud-cli-cbt \
+          || apt-get install -y -q google-cloud-sdk-cbt
         echo "cbt installed: $$(cbt version 2>&1 | head -1)"
 
         INSTANCE="bigtable-production-storage"
         TABLE="telemetry"
-        VIN="VEHICLE001"
+        VINS=("VEHICLE001:Go vehicle-client" "VEHICLE002:Python client")
+        declare -A CONFIRMED
+        CONFIRMED_COUNT=0
 
         # -----------------------------------------------------------------------
         # Wait for the NATS-to-BigTable connector to flush buffered writes.
@@ -231,37 +288,61 @@ steps:
         sleep 30
 
         # -----------------------------------------------------------------------
-        # Retry loop: scan for any row with prefix VEHICLE001#
-        # cbt read with prefix= returns rows whose key starts with that string.
-        # We request count=1 — if any row exists the output contains the VIN.
+        # Retry loop: scan for a row under each VIN after the recorded start time.
+        # cbt read with start= returns rows whose key is >= that value; since
+        # keys are <vin>#<timestamp>, this bounds the scan to rows for this
+        # VIN written after the recorded start time. count=1 stops at the
+        # first (i.e. oldest qualifying) match.
         # -----------------------------------------------------------------------
         MAX_ATTEMPTS=6
         SLEEP_BETWEEN=10
 
         for i in $$(seq 1 $$MAX_ATTEMPTS); do
-          echo "Attempt $$i/$$MAX_ATTEMPTS: scanning $$TABLE for prefix '$${VIN}#'..."
-          RESULT=$$(cbt \
-            -project="$$GCP_PROJECT_ID" \
-            -instance="$$INSTANCE" \
-            read "$$TABLE" \
-            prefix="$${VIN}#" \
-            count=1 2>&1 || true)
+          for entry in "$${VINS[@]}"; do
+            VIN="$${entry%%:*}"
+            LABEL="$${entry#*:}"
+            [ -n "$${CONFIRMED[$$VIN]:-}" ] && continue
 
-          if echo "$$RESULT" | grep -q "^$${VIN}#"; then
-            echo "✓ Telemetry data confirmed in BigTable:"
-            echo "$$RESULT"
+            echo "Attempt $$i/$$MAX_ATTEMPTS: scanning $$TABLE for $$VIN# after $$SINCE ($$LABEL)..."
+            RESULT=$$(cbt \
+              -project="$$GCP_PROJECT_ID" \
+              -instance="$$INSTANCE" \
+              read "$$TABLE" \
+              start="$$VIN#$$SINCE" \
+              count=1 2>&1 || true)
+
+            # cbt quotes row keys in some versions/platforms (e.g. `"VEHICLE002#...Z"`)
+            # but not others (plain `VEHICLE002#...Z`) — strip any leading quote
+            # before matching so this works regardless of the installed cbt build.
+            if echo "$$RESULT" | sed 's/^"//' | grep -q "^$$VIN#"; then
+              echo "✓ $$LABEL telemetry confirmed in BigTable (VIN $$VIN):"
+              echo "$$RESULT"
+              CONFIRMED[$$VIN]=1
+              CONFIRMED_COUNT=$$((CONFIRMED_COUNT + 1))
+            fi
+          done
+
+          if [ "$$CONFIRMED_COUNT" -eq "$${#VINS[@]}" ]; then
+            echo "✓ All expected VINs confirmed in BigTable."
             exit 0
           fi
 
-          echo "No rows found yet."
+          echo "Not all VINs confirmed yet."
           if [ "$$i" -lt "$$MAX_ATTEMPTS" ]; then
-            echo "Waiting $${SLEEP_BETWEEN}s before next attempt..."
+            echo "Waiting $$SLEEP_BETWEEN seconds before next attempt..."
             sleep $$SLEEP_BETWEEN
           fi
         done
 
         TOTAL_WAIT=$$((30 + ($$MAX_ATTEMPTS - 1) * $$SLEEP_BETWEEN))
-        echo "::error::No telemetry rows found in BigTable for VIN '$${VIN}' after $${TOTAL_WAIT}s."
+        echo "::error::Not all expected VINs were found in BigTable after $$TOTAL_WAIT seconds."
+        for entry in "$${VINS[@]}"; do
+          VIN="$${entry%%:*}"
+          LABEL="$${entry#*:}"
+          if [ -z "$${CONFIRMED[$$VIN]:-}" ]; then
+            echo "::error::  Missing: $$LABEL (VIN $$VIN)"
+          fi
+        done
         echo "::error::Check that the NATS-to-BigTable connector is running and healthy."
         exit 1
 

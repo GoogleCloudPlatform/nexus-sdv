@@ -6,7 +6,7 @@ description: Technical guide for bootstrapping Nexus SDV.
 import { Steps } from '@astrojs/starlight/components';
 import { Tabs, TabItem } from '@astrojs/starlight/components';
 
-## 🎯 Getting Started
+## 🎯 Understanding the Deployment Flow
 
 This guide is designed for **Nexus admins and engineers conducting Proof of Concepts (PoCs).** By automating environment configuration, infrastructure provisioning, and service deployment, it streamlines the **bootstrapping** process—allowing you to stand up a fully functional platform instance in minutes through the following steps:
 
@@ -24,15 +24,25 @@ This guide is designed for **Nexus admins and engineers conducting Proof of Conc
 </Steps>
 
 :::note[Deployment in a Nutshell]
-The setup process is driven by a single, unified bootstrapping script. This script authenticates with your target **GCP project** to provision the entire infrastructure. Simultaneously, it connects to your **forked GitHub repository** to trigger the GitHub Actions required for deploying the Nexus software components.
-
-**Execution Mode:**
-* **Today:** Optimized for **supervised execution** from an operator's machine.
-* **Coming Soon:** Full **CI/CD automation** for seamless, headless deployments.
+The setup process is driven by a single, unified bootstrapping script. This script authenticates with your target **GCP project** to provision the entire infrastructure.
 :::
 
-![Nexus Deployment in a Nutshell](assets/gs-boot-simple-overview.png)
+Since v1.1.0 the Nexus deployment follows a **Dispatcher-Model** that strictly separates infrastructure provisioning from software orchestration:
 
+* **Local Operator Machine:** Your local machine acts as the command center. The `bootstrap-platform.sh` script controls **Terraform** to provision the core "hardware" (GKE clusters, networking, and BigTable) directly into your GCP project. It also serves as the trigger for the cloud-native software rollout.
+* **GCP Project Infrastructure:** Once the infrastructure is ready, **GCP Cloud Build** takes over. Running natively within your project boundaries, it provisions the **software layer** (Helm charts and Kubernetes workloads) using the internal service accounts.
+
+![Nexus Deployment in a Nutshell](assets/gs-boot-overview-cloudbuild.png)
+
+#### Why Cloud Build over GitHub Actions?
+
+While Nexus still supports GitHub Actions, the **Cloud Build** approach is recommended for v1.1.0+:
+
+1.  **Security:** No need to store sensitive GCP Service Account keys as GitHub Secrets. All credentials stay within your Google Cloud IAM boundary.
+2.  **Simplicity:** You don't need to configure GitHub OIDC providers or Personal Access Tokens (PATs).
+3.  **Connectivity:** Since the builder runs inside your GCP project, it has native, high-speed access to your GKE cluster without crossing the public internet.
+
+---
 
 ## Prerequisites and Setup
 
@@ -42,7 +52,7 @@ Before running the bootstrapping script, ensure your repository and local enviro
 1. **Fork the Repository:** Fork the [official Nexus SDV repository](https://github.com/GoogleCloudPlatform/nexus-sdv) into your own (private) GitHub account.
 2. **Clone Locally:** Clone your fork to the machine from which you will run the deployment.
 
-### Local Environment & Shell
+### Shell
 The bootstrapping script is developed and best tested for the **Bash** shell. While other shells might work, we recommend using Bash for the most stable experience.
 
 ### Required Command Line Interfaces (CLIs)
@@ -50,34 +60,48 @@ The following tools must be installed and available in your `$PATH`:
 
 | Tool | Purpose |
 | :--- | :--- |
-| [Google Cloud CLI](https://cloud.google.com/sdk/docs/) | Authentication and GCP resource management. |
-| [GitHub CLI (`gh`)](https://cli.github.com/) | Managing repository variables and triggering Actions. |
-| [Terraform CLI](https://developer.hashicorp.com/terraform/install) | Provisioning the Cloud Infrastructure (IaC). |
-| [OpenSSL](https://openssl-library.org/) | Generation of secure tokens and secrets. |
-| [Nk](https://docs.nats.io/using-nats/nats-tools/nk) | Creating NKeys for NATS communication authentication. |
-
+| [Google Cloud CLI (`gcloud`)](https://docs.cloud.google.com/sdk/docs/install-sdk/) | Authentication and GCP resource management. |
+| [Terraform CLI (`terraform`)](https://developer.hashicorp.com/terraform/install) | Provisioning the Cloud Infrastructure (IaC). |
+| [OpenSSL CLI (`openssl`)](https://openssl-library.org/) | Generation of secure tokens and secrets. |
+| [NKeys CLI (`nk`)](https://docs.nats.io/using-nats/nats-tools/nk) | Creating NKeys for NATS communication authentication. |
+| [GitHub CLI (`gh`)](https://cli.github.com/) | Managing repository variables and triggering Actions. (Optional: needed only, for GitHub driven installations. ) |
 
 ## Launching the Script
 Execute the `bootstrap-platform.sh` script from the project's root directory to initially set up the platform:
 ```bash
-$ bash iac/bootstrapping/bootstrap-platform.sh
+$ iac/bootstrapping/bootstrap-platform.sh
 ```
 
 The script will check whether all necessary prerequisites have already been installed. If not, the script will output a list with all missing tools to be installed and break.
 
+:::tip[Pre-Authentication (Recommended)]
+While the script includes an authentication check, we recommend logging in manually before execution to ensure all CLI tools have the necessary permissions:
 
-:::tip[Authentication]
-The script will attempt to log you into GCP and GitHub. Keep your browser ready to confirm the login requests to obtain the necessary access tokens.
+1. **GCP CLI Access:** `gcloud auth login`
+2. **Terraform Access (ADC):** `gcloud auth application-default login`
+
+This is particularly helpful when performing the deployment from within a **GCP VM** (e.g., a Compute Engine instance) to ensure the environment is correctly scoped for the bootstrapping process. The script will automatically detect your existing session and proceed without further interruption.
 :::
 
 ### Querying User Inputs
 After authentication, the script will prompt you for the following configuration data to set up your environment:
 
-1. **Google Cloud Project ID (`GCP_PROJECT_ID`):** The ID of the GCP project where the platform will be deployed.
-2. **Google Cloud Region (`GCP_REGION`):** The target region for your infrastructure (e.g., `europe-west3`).
-3. **GitHub Repository Notation (`GITHUB_REPO`):** Your forked repository in the format `owner/repo`.
-4. **GitHub Environment (`ENV`):** The name of the environment to be created or reused within your GitHub project.
-5. **Setup Strategy (`PKI_STRATEGY`):** `local` or `remote`, see below.  
+1. **Deployment Strategy (`DEPLOY_MODE`):** The deployment strategy used for provisioning the software layer (`GCP Cloud Build` / `GitHub`)
+2. **Google Cloud Project ID (`GCP_PROJECT_ID`):** The ID of the GCP project where the platform will be deployed.
+3. **Google Cloud Region (`GCP_REGION`):** The target region for your infrastructure (e.g., `europe-west3`).
+4. **GitHub Repository Notation (`GITHUB_REPO`):** Your forked repository in the format `owner/repo` (only for GitHub-driven deployments).
+5. **Environment Identifier (`ENV`):** This name is used to prefix and isolate your GCP infrastructure services (e.g., `dev`, `prod`). (For GitHub-driven deployments, this must match the name of the Environment to be created or reused within your GitHub project.)
+6. **GKE Compute Architecture (`ARCH`):** Defines the CPU architecture for the GKE node pools.
+    * `amd64`: Uses standard x86 instances (e.g., `e2-standard-4`).
+    * `arm64`: Uses Google Cloud **Tau T2A** instances for optimized cost-performance.
+    * **Important:** Ensure your selected `GCP_REGION` supports GKE on ARM64 and the availability of Tau T2A instances before proceeding.
+7. **Setup Strategy (`PKI_STRATEGY`):** Defines the handling of the Public Key Infrastructure. Use `local` for rapid prototyping or `remote` for production-mirroring scenarios (see the PKI section below for details).
+
+:::caution[Naming Conventions]
+To ensure a smooth **Terraform apply**, the `ENV` value must be strictly alphanumeric (lowercase, no special characters or spaces). If the input exceeds 12 characters or contains invalid characters, the infrastructure provisioning could fail.
+:::
+
+For GitHub-driven deployments, the script will create a new environment in GitHub to store deployment attributes. If an environment with the same name already exists, it will be overwritten to prevent errors during the configuration of environment variables. Note that only variables are used, no GitHub secrets.
 
 ### Setup Strategies: Local vs. Remote
 For your first deployment, we recommend starting with the **Local** strategy.
@@ -99,33 +123,29 @@ For your first deployment, we recommend starting with the **Local** strategy.
     The deployment script will guide you through an interactive dialog to capture your configuration. Key parameters include:
 
     ```bash
-    PKI_STRATEGY="remote"
-    BASE_DOMAIN="nexus.your-oem-domain.com"
-    EXISTING_DNS_ZONE="nexus-your-oem-domain-com"
+    Strategy (local/remote) [local]: remote
+    ...
+    Base Domain (e.g. sdv.example.com) []: nexus.your-oem-domain.com
+    ...
+    Existing DNS zone name []: nexus-your-oem-domain-com
     ```
 
     Beyond these, the script will prompt for additional environment-specific details, such as **endpoint hostnames**, **CA and CA-pool identifiers**. All inputs are persisted in your `.bootstrap_env` for future reference.
 
-    > ⚠️ **Critical: Backup your `.bootstrap_env`**
-    > The values captured in this file are **essential for a successful teardown**. Without it, the script cannot cleanly decommission managed resources like CA Pools and DNS records. **Always keep a secure backup.**
+    :::caution[Backup your `.bootstrap_env`]
+    The values captured in this file are **essential for a successful teardown**. Without it, the script cannot cleanly decommission managed resources like CA Pools and DNS records. **Always keep a secure backup.**
+    :::
 
     **Automated Infrastructure Output:**
     Nexus handles the complexity of production setups automatically. The script:
     * **Provisions Managed CAs:** Creates GCP CA Pools and Sub-CAs based on your inputs.
     * **Writes Metadata:** Automatically exports all generated identifiers back into the `.bootstrap_env`.
     * **DNS Orchestration:** Sets up the necessary A-records and managed zones.
-
     * **Pros:** Full mTLS with managed CAs, professional DNS endpoints, production-grade security.
   </TabItem>
 </Tabs>
 
 ---
-
-:::note[GitHub Environment]
-The script will create a new environment in GitHub to store deployment attributes. If an environment with the same name already exists, it will be overwritten to prevent errors during the configuration of environment variables. Note that only variables are used, no GitHub secrets.
-Please ensure that the environment notation input (`ENV`) consists of a maximum of 15 chars length. If your input is longer than 15 chars, the setup will fail during the initial **terraform apply**.
-:::
-
 
 ### Automated Launch with an Env-file
 
@@ -136,14 +156,15 @@ To skip the interactive dialogues and provide the required inputs automatically,
 **Example `.bootstrap_env` for Local Setup:**
 
 ```bash
-GCP_PROJECT_ID="sdv-sandbox"
+GCP_PROJECT_ID="nexus-sdv-demo"
 GCP_REGION="europe-west3"
-GITHUB_REPO="your-user/valtech-sdv-sandbox"
-ENV="sandbox"
+DEPLOY_MODE="cloudbuild"
+ENV="demo"
 PKI_STRATEGY="local"
+ARCH="arm64"
 ```
 
-
+This is the minimum for a local setup. Every key the file accepts is described under [Cloud-native Deployment](/getting-started/cloud-native-deployment/#the-bootstrap_env-file).
 
 ### Automated Provisioning & Deployment
 
@@ -159,9 +180,9 @@ The deployment follows a three-stage execution flow:
 
 1. **Infrastructure Provisioning (Terraform):** Essential Google Cloud resources are set up using Terraform. This includes the API activation, the Terraform state bucket, and the core infrastructure components.
 
-2. **Configuration & Security Mapping:** In between the main steps, the script creates GitHub environment variables within your specified repository and stores secrets within the **Google Cloud Secret Manager**. This stage is essential for establishing the automatic deployment flow and managing platform keys for **mutual TLS (mTLS)** and CA registration.
+2. **Configuration & Security Mapping:** In between the main steps, the script creates GitHub environment variables within your specified repository (only in GitHub driven deployment) and stores secrets within the **Google Cloud Secret Manager**. This stage is essential for establishing the automatic deployment flow and managing platform keys for **mutual TLS (mTLS)** and CA registration.
 
-3. **Software Deployment (GitHub Actions):** Once the foundation is secure, the platform's base services are deployed via GitHub Actions pipelines. These components are automatically distributed to their target runtimes on **Google Cloud Run** and **Google Kubernetes Engine (GKE)**.
+3. **Software Deployment (GCP Cloud Build or GitHub Actions):** Once the foundation is secure, the platform's base services are deployed via GitHub Actions pipelines. These components are automatically distributed to their target runtimes on **Google Cloud Run** and **Google Kubernetes Engine (GKE)**.
 
 ## Verifying Deployment Success
 
@@ -171,10 +192,18 @@ Once the bootstrapping script completes its execution, you should see a confirma
 A successful deployment is characterized by the following outputs:
 
 * **Terminal:** The script will print `Nexus SDV platform bootstrapping successfully completed!` along with celebratory emojis.
-![Nexus Deployment in a Nutshell](assets/gs-boot-success-terminal.png)
-* **GitHub Actions:** In your forked repository, the **"Deploy Platform"** workflow should show a green "Success" status. You can verify the individual jobs (e.g., Keycloak deployment, NATS setup) in the GitHub Actions tab.
-![Nexus Deployment in a Nutshell](assets/gs-boot-success-github.png)
+  ```bash
+  ==================================================================
+    🎉 Nexus SDV platform bootstrapping successfully completed! 🎉  
+  ==================================================================
+  Your Nexus SDV environment is now ready for use.
+  ```
 
+* **GCP Cloud Build:** navigate to **Cloud Build > History** in your GCP Console. You should see a "Successful" build containing all 9 orchestration steps (e.g., `deploy-keycloak`, `deploy-nats`, `build-push-deploy-registration`).
+![GCP Cloud Build Success](assets/gs-boot-success-cloudbuild.png)
+
+* **GitHub Actions:** For GitHub-driven deployments, the **"Deploy Platform"** workflow in your forked repository should show a green "Success" status. You can verify the individual jobs and logs in the Actions tab.
+![GitHub Actions Success](assets/gs-boot-success-github.png)
 
 ### Manual 'Smoke Check' in GCP
 To ensure all infrastructure components are correctly provisioned, log in to your **Google Cloud Console** and verify the following:
@@ -184,7 +213,6 @@ To ensure all infrastructure components are correctly provisioned, log in to you
 | **Cloud Storage** | A bucket named `[gcp-project-name]-tfstate` containing the `default.tfstate` file. |
 | **Kubernetes Engine** | A GKE cluster named `[env]-gke` with healthy, running pods. This hosts the Nexus base services (Status: Green).|
 | **BigTable** | An active BigTable instance named `bigtable-production-storage` ready for data ingestion. |
-
 
 :::tip[Technical Deep Dive]
 For a complete list of all provisioned resources, you can always refer to the Terraform configuration files located in the `iac/terraform` directory of your repository.

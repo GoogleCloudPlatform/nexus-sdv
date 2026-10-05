@@ -14,6 +14,8 @@ releases:
         value: '{{ requiredEnv "IMAGE_REPO" }}/data-web-client'
       - name: gcp.projectId
         value: '{{ requiredEnv "GCP_PROJECT_ID" }}'
+      - name: vinRegistryUrl
+        value: 'http://vin-registry.base-services.svc.cluster.local:8080'
       - name: gcp.serviceAccountEmail
         value: '{{ requiredEnv "DATA_API_BIGTABLE_CONNECTOR_GCP_SERVICE_ACCOUNT" }}'
       - name: database.instanceConnectionName

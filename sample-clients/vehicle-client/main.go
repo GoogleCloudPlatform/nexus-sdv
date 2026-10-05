@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/tls"
@@ -16,20 +17,13 @@ import (
 	"io"
 	"log"
 	mathrand "math/rand"
+	"net"
 	"net/http"
 	"os"
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/anypb"
-	"google.golang.org/protobuf/types/known/timestamppb"
-
-	pb "github.com/valtech-sdv/vehicle-client/telemetry"
-	pbMetrics "github.com/valtech-sdv/vehicle-client/telemetry"
-	pbVehicle "github.com/valtech-sdv/vehicle-client/telemetry"
 )
 
 // RegistrationResponse is returned by the registration server
@@ -58,6 +52,13 @@ type VehicleClient struct {
 	RegistrationServerURL string
 	MessageType           string // "telemetry" or "metrics_report"
 
+	// Optional static IPs to dial instead of resolving the request's hostname via DNS —
+	// needed on guests with no resolver at all (see docs/superpowers/plans/2026-08-07-
+	// nexus-connectivity-agent.md, Task 3). TLS SNI/cert validation is unaffected: Go's
+	// http.Transport infers ServerName from the original request host, not the dialed addr.
+	RegistrationResolveIP string
+	KeycloakResolveIP     string
+
 	// Generated during registration
 	operationalCert    *x509.Certificate
 	operationalKey     *rsa.PrivateKey
@@ -76,7 +77,9 @@ func main() {
 	registrationURL := flag.String("registration-url", defaultRegistrationURL, "Registration server URL (required when registration is needed)")
 	keycloakURL := flag.String("keycloak-url", "", "Keycloak URL (used when reusing existing certificates)")
 	natsURL := flag.String("nats-url", "", "NATS URL (used when reusing existing certificates)")
-	interval := flag.Int("interval", 5, "Interval in seconds between telemetry messages")
+	registrationResolveIP := flag.String("registration-resolve-ip", "", "Dial this IP instead of resolving the registration URL's hostname (for guests with no DNS resolver)")
+	keycloakResolveIP := flag.String("keycloak-resolve-ip", "", "Dial this IP instead of resolving the Keycloak URL's hostname (for guests with no DNS resolver)")
+	interval := flag.Int("interval", 3, "Interval in seconds between telemetry messages")
 	messageType := flag.String("message-type", "telemetry", "Message type to send: 'telemetry' (TelemetryMessage) or 'metrics_report' (MetricsReport)")
 	flag.Parse()
 
@@ -87,9 +90,11 @@ func main() {
 	mathrand.Seed(time.Now().UnixNano())
 
 	client := &VehicleClient{
-		VIN:         *vin,
-		pkiStrategy: *pkiStrategy,
-		MessageType: *messageType,
+		VIN:                   *vin,
+		pkiStrategy:           *pkiStrategy,
+		RegistrationResolveIP: *registrationResolveIP,
+		KeycloakResolveIP:     *keycloakResolveIP,
+		MessageType:           *messageType,
 	}
 
 	log.Printf("================================================")
@@ -151,6 +156,18 @@ func main() {
 // loadExistingCertsAndToken checks whether a valid operational certificate and
 // unexpired JWT token already exist on disk. If both are valid it loads them
 // into the client and returns (token, true); otherwise it returns ("", false).
+// certificateBelongsToVIN reports whether a certificate's common name was
+// issued to this VIN. The convention is "VIN:<vin> DEVICE:<id>"; only the VIN
+// field is compared, because DEVICE differs between clients.
+func certificateBelongsToVIN(commonName, vin string) bool {
+	for _, field := range strings.Fields(commonName) {
+		if after, ok := strings.CutPrefix(field, "VIN:"); ok {
+			return after == vin
+		}
+	}
+	return false
+}
+
 func (v *VehicleClient) loadExistingCertsAndToken() (string, bool) {
 	certPEM, err := os.ReadFile("certificates/operational-cert.pem")
 	if err != nil {
@@ -169,6 +186,16 @@ func (v *VehicleClient) loadExistingCertsAndToken() (string, bool) {
 	}
 	if time.Until(cert.NotAfter) < 60*time.Second {
 		log.Printf("Operational certificate expired at %s", cert.NotAfter.Format(time.RFC3339))
+		return "", false
+	}
+
+	// The stored files carry no VIN in their names, so a client started for a
+	// different VIN in the same directory would otherwise adopt this identity
+	// and publish under someone else's name. Checked here rather than by
+	// renaming the files, so an existing checkout keeps working.
+	if !certificateBelongsToVIN(cert.Subject.CommonName, v.VIN) {
+		log.Printf("Existing operational certificate belongs to %q, not to %s — registering anew",
+			cert.Subject.CommonName, v.VIN)
 		return "", false
 	}
 
@@ -209,6 +236,22 @@ func (v *VehicleClient) loadExistingCertsAndToken() (string, bool) {
 }
 
 // jwtExpiry decodes the exp claim from a JWT without verifying the signature.
+// dialContextResolving returns a DialContext that connects to resolveIP instead of
+// resolving addr's hostname, keeping addr's port. Returns nil (falling back to the
+// default resolver) when resolveIP is empty.
+func dialContextResolving(resolveIP string) func(ctx context.Context, network, addr string) (net.Conn, error) {
+	if resolveIP == "" {
+		return nil
+	}
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		_, port, err := net.SplitHostPort(addr)
+		if err != nil {
+			return nil, err
+		}
+		return (&net.Dialer{}).DialContext(ctx, network, net.JoinHostPort(resolveIP, port))
+	}
+}
+
 func jwtExpiry(token string) time.Time {
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
@@ -257,36 +300,9 @@ func (v *VehicleClient) Register() error {
 		return fmt.Errorf("failed to load factory certificate: %w", err)
 	}
 
-	// Load CA certificate for the registration server
-	regServerCA, err := os.ReadFile("certificates/REGISTRATION_SERVER_TLS_CERT.pem")
+	client, err := newMTLSClient(factoryCert, "certificates/REGISTRATION_SERVER_TLS_CERT.pem", v.pkiStrategy == "local", "Server", v.RegistrationResolveIP)
 	if err != nil {
-		return fmt.Errorf("failed to load registration server CA: %w", err)
-	}
-	caCertPool := x509.NewCertPool()
-	caCertPool.AppendCertsFromPEM(regServerCA)
-
-	// Configure mTLS client
-	tlsConfig := &tls.Config{
-		Certificates:       []tls.Certificate{factoryCert},
-		InsecureSkipVerify: v.pkiStrategy == "local", // Verify the server certificate
-		RootCAs:            caCertPool,
-		MinVersion:         tls.VersionTLS12,
-		MaxVersion:         tls.VersionTLS13,
-		// Use classic key exchange curves to avoid post-quantum compatibility issues
-		// between Go's crypto/tls and rustls's X25519MLKEM768 implementation
-		CurvePreferences: []tls.CurveID{tls.X25519, tls.CurveP256, tls.CurveP384},
-		// Force client certificate to be sent
-		GetClientCertificate: func(info *tls.CertificateRequestInfo) (*tls.Certificate, error) {
-			log.Println("  Server requested client certificate")
-			return &factoryCert, nil
-		},
-	}
-
-	client := &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: tlsConfig,
-		},
-		Timeout: 30 * time.Second,
+		return fmt.Errorf("failed to configure mTLS client: %w", err)
 	}
 
 	// Send CSR to registration server
@@ -411,35 +427,9 @@ func (v *VehicleClient) AuthenticateWithKeycloak() (string, error) {
 		return "", fmt.Errorf("failed to create X509 key pair: %w", err)
 	}
 
-	// Load CA certificate for the Keycloak server
-	keycloakCA, err := os.ReadFile("certificates/KEYCLOAK_TLS_CRT.pem")
+	client, err := newMTLSClient(cert, "certificates/KEYCLOAK_TLS_CRT.pem", false, "Keycloak", v.KeycloakResolveIP)
 	if err != nil {
-		return "", fmt.Errorf("failed to load Keycloak CA: %w", err)
-	}
-	caCertPool := x509.NewCertPool()
-	caCertPool.AppendCertsFromPEM(keycloakCA)
-
-	// Configure mTLS client
-	tlsConfig := &tls.Config{
-		Certificates:       []tls.Certificate{cert},
-		InsecureSkipVerify: false, // Verify the server certificate
-		RootCAs:            caCertPool,
-		MinVersion:         tls.VersionTLS12,
-		MaxVersion:         tls.VersionTLS13,
-		// Use classic key exchange curves to avoid post-quantum compatibility issues
-		CurvePreferences: []tls.CurveID{tls.X25519, tls.CurveP256, tls.CurveP384},
-		// Force client certificate to be sent
-		GetClientCertificate: func(info *tls.CertificateRequestInfo) (*tls.Certificate, error) {
-			log.Println("  Keycloak requested client certificate")
-			return &cert, nil
-		},
-	}
-
-	client := &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: tlsConfig,
-		},
-		Timeout: 30 * time.Second,
+		return "", fmt.Errorf("failed to configure mTLS client: %w", err)
 	}
 
 	// Request JWT token from Keycloak
@@ -542,118 +532,26 @@ func (v *VehicleClient) buildTelemetrySubject(sensor string) string {
 	if prefix != "" {
 		return fmt.Sprintf("telemetry-generic.%s.%s.%s", prefix, v.VIN, sensor)
 	}
-	return fmt.Sprintf("telemetry-generic.%s.%s", v.VIN, sensor)
+	return fmt.Sprintf("telemetry.%s.%s", v.VIN, sensor)
 }
 
 // buildMetricsReportSubject constructs the NATS subject for MetricsReport publishing
 // Format: telemetry.{VIN}
 func (v *VehicleClient) buildMetricsReportSubject() string {
-	return fmt.Sprintf("telemetry.%s", v.VIN)
-}
-
-// PublishTelemetry sends sample telemetry data to NATS
-func (v *VehicleClient) PublishTelemetry() error {
-	log.Println("Publishing telemetry data...")
-
-	// For telemetry publishing, we need a fresh NATS connection
-	jwt, err := v.AuthenticateWithKeycloak()
-	if err != nil {
-		return fmt.Errorf("failed to get JWT for telemetry: %w", err)
-	}
-
-	nc, err := nats.Connect(v.natsURL,
-		nats.Token(jwt),
-	)
-	if err != nil {
-		return fmt.Errorf("failed to connect to NATS: %w", err)
-	}
-	defer nc.Close()
-
-	// Publish sample telemetry
-	subject := v.buildTelemetrySubject("battery")
-	data := map[string]interface{}{
-		"vin":             v.VIN,
-		"timestamp":       time.Now().Unix(),
-		"battery_voltage": 12.6,
-		"battery_current": 45.2,
-		"battery_soc":     85.5,
-		"battery_temp":    25.3,
-	}
-
-	payload, err := json.Marshal(data)
-	if err != nil {
-		return fmt.Errorf("failed to marshal telemetry: %w", err)
-	}
-
-	if err := nc.Publish(subject, payload); err != nil {
-		return fmt.Errorf("failed to publish telemetry: %w", err)
-	}
-
-	log.Printf("  Published telemetry to subject: %s", subject)
-	log.Printf("  Payload: %s", string(payload))
-
-	// Flush to ensure message is sent
-	if err := nc.Flush(); err != nil {
-		return fmt.Errorf("failed to flush NATS connection: %w", err)
-	}
-
-	return nil
+	return fmt.Sprintf("telemetry-generic.%s", v.VIN)
 }
 
 // PublishTelemetryContinuously sends telemetry data to NATS continuously
 // Supports two message types: "telemetry" (TelemetryMessage) and "metrics_report" (MetricsReport)
 func (v *VehicleClient) PublishTelemetryContinuously(intervalSeconds int) error {
-	// Initial battery state
-	batteryVoltage := 12.6
-	batteryCurrent := 45.2
-	batterySoC := 85.5
-	batteryTemp := 25.3
+	sim := NewVehicleSimulator()
+	conn := &telemetryConnection{}
 
-	// Engine state (for metrics reports)
-	enginePower := 50.0
-	engineRPM := 1000.0
-	fuelLevel := 50.0
-	velocity := 0.0
-	steeringAngle := 0.0
-	acceleratorPct := 0.0
-	brakePct := 0.0
-
-	// JWT refresh parameters
-	var nc *nats.Conn
-	var jwtExpiry time.Time
-	refreshBuffer := 60 * time.Second // Refresh JWT 60 seconds before expiry
-
-	// Helper function to get fresh connection
-	refreshConnection := func() error {
-		if nc != nil {
-			nc.Close()
-		}
-
-		log.Println("Establishing telemetry NATS connection (re-authenticating with Keycloak)...")
-		jwt, err := v.AuthenticateWithKeycloak()
-		if err != nil {
-			return fmt.Errorf("failed to get JWT: %w", err)
-		}
-
-		// JWT expires in 2 weeks (1209600 seconds, matching Keycloak realm config)
-		jwtExpiry = time.Now().Add(1209600 * time.Second)
-		log.Printf("JWT refreshed, expires at: %s", jwtExpiry.Format(time.RFC3339))
-
-		nc, err = nats.Connect(v.natsURL, nats.Token(jwt))
-		if err != nil {
-			return fmt.Errorf("failed to connect to NATS: %w", err)
-		}
-		log.Println("  Telemetry NATS connection established")
-
-		return nil
-	}
-
-	// Initial connection
 	log.Println("Establishing initial telemetry NATS connection...")
-	if err := refreshConnection(); err != nil {
+	if err := conn.refresh(v); err != nil {
 		return err
 	}
-	defer nc.Close()
+	defer conn.nc.Close()
 
 	ticker := time.NewTicker(time.Duration(intervalSeconds) * time.Second)
 	defer ticker.Stop()
@@ -661,220 +559,42 @@ func (v *VehicleClient) PublishTelemetryContinuously(intervalSeconds int) error 
 	messageCount := 0
 
 	for range ticker.C {
-		// Check if JWT needs refresh
-		if time.Until(jwtExpiry) < refreshBuffer {
-			log.Println("JWT expiring soon, refreshing connection...")
-			if err := refreshConnection(); err != nil {
-				log.Printf("Failed to refresh connection: %v", err)
-				continue
-			}
-		}
-
-		// Simulate realistic battery variations
-		batteryVoltage += (mathrand.Float64() - 0.5) * 0.2 // ±0.1V
-		batteryCurrent += (mathrand.Float64() - 0.5) * 5.0 // ±2.5A
-		batterySoC -= mathrand.Float64() * 0.1             // Slowly discharge
-		batteryTemp += (mathrand.Float64() - 0.5) * 1.0    // ±0.5°C
-
-		// Simulate engine variations (for metrics reports)
-		enginePower += (mathrand.Float64() - 0.5) * 10.0
-		engineRPM += (mathrand.Float64() - 0.5) * 100.0
-		fuelLevel -= mathrand.Float64() * 0.05 // Slowly consume fuel
-		velocity += (mathrand.Float64() - 0.5) * 5.0
-		steeringAngle += (mathrand.Float64() - 0.5) * 2.0
-		acceleratorPct += (mathrand.Float64() - 0.5) * 5.0
-		brakePct += (mathrand.Float64() - 0.5) * 5.0
-
-		// Keep battery values in realistic ranges
-		if batteryVoltage < 11.0 {
-			batteryVoltage = 11.0
-		}
-		if batteryVoltage > 14.5 {
-			batteryVoltage = 14.5
-		}
-		if batteryCurrent < 0 {
-			batteryCurrent = 0
-		}
-		if batteryCurrent > 100 {
-			batteryCurrent = 100
-		}
-		if batterySoC < 10 {
-			batterySoC = 90.0 // Reset to charged state
-		}
-		if batteryTemp < 15 {
-			batteryTemp = 15
-		}
-		if batteryTemp > 45 {
-			batteryTemp = 45
-		}
-
-		// Keep engine values in realistic ranges
-		if enginePower < 0 {
-			enginePower = 0
-		}
-		if enginePower > 150 {
-			enginePower = 150
-		}
-		if engineRPM < 0 {
-			engineRPM = 0
-		}
-		if engineRPM > 6000 {
-			engineRPM = 6000
-		}
-		if fuelLevel < 5 {
-			fuelLevel = 60 // Reset fuel
-		}
-		if velocity < 0 {
-			velocity = 0
-		}
-		if velocity > 200 {
-			velocity = 200
-		}
-		if steeringAngle < -45 {
-			steeringAngle = -45
-		}
-		if steeringAngle > 45 {
-			steeringAngle = 45
-		}
-		if acceleratorPct < 0 {
-			acceleratorPct = 0
-		}
-		if acceleratorPct > 100 {
-			acceleratorPct = 100
-		}
-		if brakePct < 0 {
-			brakePct = 0
-		}
-		if brakePct > 100 {
-			brakePct = 100
-		}
-
-		now := time.Now()
-
-		// Build and publish message based on message type
-		var subject string
-		var payload []byte
-		var err error
-
-		if v.MessageType == "telemetry" {
-			// Publish TelemetryMessage
-			subject = v.buildTelemetrySubject("battery")
-
-			msg := &pb.TelemetryMessage{
-				MessageId:     uuid.New().String(),
-				SchemaVersion: 1,
-				DeviceId:      v.VIN,
-				SensorData: []*pb.SensorReading{
-					{
-						Timestamp: timestamppb.New(now),
-						Value:     fmt.Sprintf("%.2f", batteryVoltage),
-						DataType:  pb.DataType_DYNAMIC,
-						Sensor:    "battery.voltage",
-					},
-					{
-						Timestamp: timestamppb.New(now),
-						Value:     fmt.Sprintf("%.2f", batteryCurrent),
-						DataType:  pb.DataType_DYNAMIC,
-						Sensor:    "battery.current",
-					},
-					{
-						Timestamp: timestamppb.New(now),
-						Value:     fmt.Sprintf("%.2f", batterySoC),
-						DataType:  pb.DataType_DYNAMIC,
-						Sensor:    "battery.soc",
-					},
-					{
-						Timestamp: timestamppb.New(now),
-						Value:     fmt.Sprintf("%.2f", batteryTemp),
-						DataType:  pb.DataType_DYNAMIC,
-						Sensor:    "battery.temp",
-					},
-				},
-			}
-
-			payload, err = proto.Marshal(msg)
-			if err != nil {
-				log.Printf("Failed to marshal TelemetryMessage: %v", err)
-				continue
-			}
-
-		} else if v.MessageType == "metrics_report" {
-			// Publish MetricsReport with VehicleTelemetryData
-			subject = v.buildMetricsReportSubject()
-
-			// Build the inner VehicleTelemetryData payload
-			ignitionState := engineRPM > 0
-			gpsLat := float32(0.0)
-			gpsLon := float32(0.0)
-
-			vehicleData := &pbVehicle.VehicleTelemetryData{
-				ENGINE_POWER:   float32(enginePower),
-				ENGINE_RPM:     float32(engineRPM),
-				FUEL_CAPACITY:  50.0, // Static value
-				FUEL_LEVEL:     float32(fuelLevel),
-				TIRE_PRESSURE:  2.2, // Static value
-				VELOCITY:       float32(velocity),
-				IGNITION_STATE: &ignitionState,
-				GPS_LATITUDE:   &gpsLat,
-				GPS_LONGITUDE:  &gpsLon,
-				VehicleDynamics: &pbVehicle.CarlaVehicleDynamics{
-					SteeringAngleDeg:    steeringAngle,
-					AcceleratorPedalPct: acceleratorPct,
-					BrakePedalPct:       brakePct,
-				},
-				GearStatus: &pbVehicle.CarlaVehicleGearStatus{
-					Gear: pbVehicle.CarlaVehicleGearStatus_NEUTRAL,
-				},
-			}
-
-			// Marshal inner payload to Any
-			anyPayload, err := anypb.New(vehicleData)
-			if err != nil {
-				log.Printf("Failed to create Any payload: %v", err)
-				continue
-			}
-
-			// Build the outer MetricsReport
-			report := &pbMetrics.MetricsReport{
-				ReportNumber:         int32(messageCount) + 1,
-				ReportTimestamp:      timestamppb.New(now),
-				ReportReason:         pbMetrics.MetricsReport_REGULAR,
-				MetricsConfigUuid:    uuid.New().String(),
-				MetricsConfigVersion: 1,
-				ReportConfigName:     "default",
-				ReportData:           anyPayload,
-				ReportUuid:           uuid.New().String(),
-			}
-
-			payload, err = proto.Marshal(report)
-			if err != nil {
-				log.Printf("Failed to marshal MetricsReport: %v", err)
-				continue
-			}
-		} else {
-			log.Printf("Unknown message type: %s", v.MessageType)
+		if err := conn.refreshIfNeeded(v); err != nil {
+			log.Printf("Failed to refresh connection: %v", err)
 			continue
 		}
 
-		// Publish to NATS
-		if err := nc.Publish(subject, payload); err != nil {
+		sim.Tick()
+
+		subject, payload, err := buildPayload(v, sim, messageCount+1, time.Now())
+		if err != nil {
+			log.Printf("Failed to build message: %v", err)
+			continue
+		}
+
+		if err := conn.nc.Publish(subject, payload); err != nil {
 			log.Printf("Failed to publish: %v", err)
 			// Try to reconnect on publish error
-			if err := refreshConnection(); err != nil {
+			if err := conn.refresh(v); err != nil {
 				log.Printf("Failed to reconnect: %v", err)
 			}
 			continue
 		}
 
 		messageCount++
-		if v.MessageType == "telemetry" {
-			log.Printf("[%d] Published TelemetryMessage to %s: SoC=%.1f%%, Voltage=%.2fV, Current=%.2fA, Temp=%.1f°C",
-				messageCount, subject, batterySoC, batteryVoltage, batteryCurrent, batteryTemp)
-		} else {
-			log.Printf("[%d] Published MetricsReport to %s: Power=%.1fW, RPM=%.0f, Speed=%.1fkm/h, Fuel=%.1f%%",
-				messageCount, subject, enginePower, engineRPM, velocity, fuelLevel)
-		}
+		logPublished(v, messageCount, subject, sim)
 	}
 
 	return nil
+}
+
+// logPublished prints the per-message-type summary line after a successful publish.
+func logPublished(v *VehicleClient, count int, subject string, sim *VehicleSimulator) {
+	if v.MessageType == "telemetry" {
+		log.Printf("[%d] Published TelemetryMessage to %s: SoC=%.1f%%, Voltage=%.2fV, Current=%.2fA, Temp=%.1f°C",
+			count, subject, sim.BatterySoC, sim.BatteryVoltage, sim.BatteryCurrent, sim.BatteryTemp)
+	} else {
+		log.Printf("[%d] Published MetricsReport to %s: Power=%.1fW, RPM=%.0f, Speed=%.1fkm/h, Fuel=%.1f%%",
+			count, subject, sim.EnginePower, sim.EngineRPM, sim.Velocity, sim.FuelLevel)
+	}
 }

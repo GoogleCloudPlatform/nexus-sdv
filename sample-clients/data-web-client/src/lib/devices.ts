@@ -1,4 +1,5 @@
 import { getTelemetryTable } from './bigtable';
+import { readRowsReversed } from './bigtable-reversed';
 import type { DeviceRow } from '@/types/telemetry';
 
 export async function getDevices(allowedVehicleIds?: string[]): Promise<DeviceRow[]> {
@@ -24,19 +25,15 @@ export async function getDevices(allowedVehicleIds?: string[]): Promise<DeviceRo
     });
   }
 
-  // Pass 2: reversed scan per device — first result = latest row.
-  // Range [{deviceId}#, {deviceId}$) covers all timestamps for that device.
-  // '$' (ASCII 36) > '#' (ASCII 35), so the range is tight and won't bleed into other devices.
+  // Pass 2: the newest row of each device.
   const devices: DeviceRow[] = [];
 
   for (const deviceId of deviceIds) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const getRowsResult = await (table.getRows as any)({
-      ranges: [{ start: `${deviceId}#`, end: `${deviceId}$` }],
-      limit: 1,
-      reversed: true,
-    }) as [import('@google-cloud/bigtable').Row[], object, object];
-    const rows = getRowsResult[0];
+    // readRowsReversed, not table.getRows({reversed: true}): the high-level API
+    // silently drops `reversed`, which is what made this function return each
+    // device's OLDEST row. The helper next door builds the raw gRPC request and
+    // is what the device detail page has used all along.
+    const rows = await readRowsReversed(table, `${deviceId}#`, `${deviceId}$`, false, 1);
 
     if (!rows?.length) continue;
 

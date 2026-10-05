@@ -1,0 +1,49 @@
+# Node architecture. Injected by the deploy pipeline via
+# --state-values-set arch=${_ARCH}; the image is built for exactly this
+# platform, so a pod scheduled elsewhere cannot pull it.
+arch: arm64
+
+replicaCount: 1
+
+image:
+  name: factory-helper
+  pullPolicy: Always
+
+baseDomain: ""
+gcpProjectId: ""
+gcpRegion: ""
+caPool: ""
+keycloakIssuer: ""
+# vin-registry base URL. Empty => do not report at all; the registry is an
+# optional companion, never a dependency.
+vinRegistryUrl: ""
+# Lifetime of issued factory certificates, in days. Empty => the service default
+# (730, two years). The factory identity is the vehicle's way back to a defined
+# state, so it must outlive every operational certificate derived from it.
+certValidityDays: ""
+
+service:
+  type: LoadBalancer
+  port: 8443
+
+certificates:
+  serverCert: ""
+  serverKey: ""
+  # Keycloak's TLS cert (trust anchor for the JWKS fetch — issued by Nexus's own
+  # server CA, not a public root)
+  keycloakCa: ""
+
+livenessProbe:
+  httpGet: { path: /health, port: 8443, scheme: HTTPS }
+  initialDelaySeconds: 10
+  periodSeconds: 15
+readinessProbe:
+  httpGet: { path: /health, port: 8443, scheme: HTTPS }
+  initialDelaySeconds: 5
+  periodSeconds: 10
+
+# Resource requests/limits — explicit values prevent GKE Autopilot from
+# assigning its defaults (500m CPU / 2Gi memory per pod).
+resources:
+  requests: { cpu: 100m, memory: 128Mi }
+  limits: { memory: 256Mi }

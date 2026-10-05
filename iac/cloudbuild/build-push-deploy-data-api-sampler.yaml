@@ -1,9 +1,9 @@
 steps:
   # ============================================================================
-  # 1. SETUP & AUTHENTICATION (Kubeconfig für kubectl und Helmfile)
+  # 1. SETUP & AUTHENTICATION (kubeconfig for kubectl and Helmfile)
   # ============================================================================
   - id: 'get-gke-credentials'
-    name: 'gcr.io/cloud-builders/gcloud'
+    name: 'gcr.io/cloud-builders/gcloud@sha256:abcad906c9fa0dd063c4b6e570994f34024673486b17e9f4c99c720165e03ae5'
     entrypoint: 'bash'
     args:
       - '-c'
@@ -29,7 +29,7 @@ steps:
   # anonymous pulls of maven / eclipse-temurin base images.
   # ============================================================================
   - id: 'configure-ar'
-    name: 'gcr.io/cloud-builders/gcloud'
+    name: 'gcr.io/cloud-builders/gcloud@sha256:abcad906c9fa0dd063c4b6e570994f34024673486b17e9f4c99c720165e03ae5'
     entrypoint: 'bash'
     args:
       - '-c'
@@ -67,36 +67,6 @@ steps:
     waitFor: ['configure-ar']
 
   # ============================================================================
-  # 4. GET DATA API IP (Dynamische Ermittlung der IP)
-  # ============================================================================
-  - id: 'get-data-api-ip'
-    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
-    entrypoint: 'bash'
-    args:
-      - '-c'
-      - |
-        echo "Waiting for Data API IP..."
-        
-        for i in {1..15}; do
-          DATA_API_IP=$$(kubectl get svc data-api -n base-services -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
-        
-          if [[ -n "$$DATA_API_IP" ]]; then
-            echo "DATA API IP found: $$DATA_API_IP"
-            echo "$$DATA_API_IP" > data_api_ip.txt
-            break
-          fi
-        
-          echo "Waiting for IP... ($i/15)"
-          sleep 10
-        done
-
-        if [[ ! -f "data_api_ip.txt" ]]; then
-          echo "::error::Data API IP not found after timeout."
-          exit 1
-        fi
-    waitFor: ['get-gke-credentials']
-
-  # ============================================================================
   # 4. DEPLOY DATA-API SAMPLER (Helmfile)
   # ============================================================================
   - id: 'deploy-data-api-sampler'
@@ -105,14 +75,11 @@ steps:
     args:
       - '-c'
       - |
-        if [[ ! -f "data_api_ip.txt" ]]; then
-           echo "Error: data_api_ip.txt not found!"
-           exit 1
-        fi
-        
-        EXTRACTED_IP=$$(cat data_api_ip.txt)
-        export DATA_API_URL="$${EXTRACTED_IP}:8080"
-        
+        # Cluster DNS, not the service's external address: the Data API is
+        # ClusterIP, so there is no external address to wait for. This is the
+        # same name trip-analyzer already uses.
+        export DATA_API_URL="data-api.base-services.svc.cluster.local:8080"
+
         echo "Using DATA_API_URL: $$DATA_API_URL"
         
         export GCP_PROJECT_ID="$PROJECT_ID"
@@ -139,7 +106,7 @@ steps:
         fi
 
     secretEnv: ['GCP_REGION', 'IMAGE_REPO']
-    waitFor: ['build-push-data-api-sampler', 'get-data-api-ip']
+    waitFor: ['build-push-data-api-sampler', 'get-gke-credentials']
 
 # ============================================================================
 # SUBSTITUTIONS & SECRETS CONFIG

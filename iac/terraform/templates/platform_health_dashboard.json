@@ -1,0 +1,259 @@
+{
+  "displayName": "Platform Health Check",
+  "dashboardFilters": [
+    {
+      "filterType": "METRIC_LABEL",
+      "labelKey": "environment",
+      "templateVariable": "environment"
+    }
+  ],
+  "mosaicLayout": {
+    "columns": 12,
+    "tiles": [
+      {
+        "xPos": 0,
+        "yPos": 0,
+        "width": 4,
+        "height": 4,
+        "widget": {
+          "title": "Passes (latest run)",
+          "scorecard": {
+            "timeSeriesQuery": {
+              "timeSeriesFilter": {
+                "filter": "metric.type=\"custom.googleapis.com/platform_health/pass_count\" resource.type=\"global\" metric.label.section=\"all\"",
+                "aggregation": {
+                  "alignmentPeriod": "28800s",
+                  "perSeriesAligner": "ALIGN_NEXT_OLDER",
+                  "crossSeriesReducer": "REDUCE_SUM",
+                  "groupByFields": []
+                }
+              }
+            },
+            "sparkChartView": {
+              "sparkChartType": "SPARK_LINE"
+            }
+          }
+        }
+      },
+      {
+        "xPos": 4,
+        "yPos": 0,
+        "width": 4,
+        "height": 4,
+        "widget": {
+          "title": "Warnings (latest run)",
+          "scorecard": {
+            "timeSeriesQuery": {
+              "timeSeriesFilter": {
+                "filter": "metric.type=\"custom.googleapis.com/platform_health/warn_count\" resource.type=\"global\" metric.label.section=\"all\"",
+                "aggregation": {
+                  "alignmentPeriod": "28800s",
+                  "perSeriesAligner": "ALIGN_NEXT_OLDER",
+                  "crossSeriesReducer": "REDUCE_SUM",
+                  "groupByFields": []
+                }
+              }
+            },
+            "sparkChartView": {
+              "sparkChartType": "SPARK_LINE"
+            },
+            "thresholds": [
+              {
+                "label": "Warnings present",
+                "value": 0,
+                "color": "YELLOW",
+                "direction": "ABOVE"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "xPos": 8,
+        "yPos": 0,
+        "width": 4,
+        "height": 4,
+        "widget": {
+          "title": "Failures (latest run)",
+          "scorecard": {
+            "timeSeriesQuery": {
+              "timeSeriesFilter": {
+                "filter": "metric.type=\"custom.googleapis.com/platform_health/fail_count\" resource.type=\"global\" metric.label.section=\"all\"",
+                "aggregation": {
+                  "alignmentPeriod": "28800s",
+                  "perSeriesAligner": "ALIGN_NEXT_OLDER",
+                  "crossSeriesReducer": "REDUCE_SUM",
+                  "groupByFields": []
+                }
+              }
+            },
+            "sparkChartView": {
+              "sparkChartType": "SPARK_LINE"
+            },
+            "thresholds": [
+              {
+                "label": "Failing",
+                "value": 0,
+                "color": "RED",
+                "direction": "ABOVE"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "xPos": 0,
+        "yPos": 4,
+        "width": 12,
+        "height": 4,
+        "widget": {
+          "title": "Passes / warnings / failures (per run)",
+          "xyChart": {
+            "dataSets": [
+              {
+                "timeSeriesQuery": {
+                  "timeSeriesFilter": {
+                    "filter": "metric.type=\"custom.googleapis.com/platform_health/fail_count\" resource.type=\"global\" metric.label.section=\"all\"",
+                    "aggregation": {
+                      "alignmentPeriod": "60s",
+                      "perSeriesAligner": "ALIGN_NEXT_OLDER",
+                      "crossSeriesReducer": "REDUCE_SUM",
+                      "groupByFields": ["metric.label.environment"]
+                    }
+                  }
+                },
+                "plotType": "LINE",
+                "legendTemplate": "fail: ${metric.label.environment}"
+              },
+              {
+                "timeSeriesQuery": {
+                  "timeSeriesFilter": {
+                    "filter": "metric.type=\"custom.googleapis.com/platform_health/warn_count\" resource.type=\"global\" metric.label.section=\"all\"",
+                    "aggregation": {
+                      "alignmentPeriod": "60s",
+                      "perSeriesAligner": "ALIGN_NEXT_OLDER",
+                      "crossSeriesReducer": "REDUCE_SUM",
+                      "groupByFields": ["metric.label.environment"]
+                    }
+                  }
+                },
+                "plotType": "LINE",
+                "legendTemplate": "warn: ${metric.label.environment}"
+              },
+              {
+                "timeSeriesQuery": {
+                  "timeSeriesFilter": {
+                    "filter": "metric.type=\"custom.googleapis.com/platform_health/pass_count\" resource.type=\"global\" metric.label.section=\"all\"",
+                    "aggregation": {
+                      "alignmentPeriod": "60s",
+                      "perSeriesAligner": "ALIGN_NEXT_OLDER",
+                      "crossSeriesReducer": "REDUCE_SUM",
+                      "groupByFields": ["metric.label.environment"]
+                    }
+                  }
+                },
+                "plotType": "LINE",
+                "legendTemplate": "pass: ${metric.label.environment}"
+              }
+            ],
+            "yAxis": {
+              "label": "count",
+              "scale": "LINEAR"
+            }
+          }
+        }
+      },
+      {
+        "xPos": 0,
+        "yPos": 8,
+        "width": 12,
+        "height": 5,
+        "widget": {
+          "title": "Passes / warnings / failures (latest run, per section)",
+          "timeSeriesTable": {
+            "dataSets": [
+              {
+                "timeSeriesQuery": {
+                  "timeSeriesFilter": {
+                    "filter": "metric.type=\"custom.googleapis.com/platform_health/pass_count\" resource.type=\"global\" metric.label.section!=\"all\"",
+                    "aggregation": {
+                      "alignmentPeriod": "604800s",
+                      "perSeriesAligner": "ALIGN_NEXT_OLDER",
+                      "crossSeriesReducer": "REDUCE_NONE",
+                      "groupByFields": []
+                    }
+                  }
+                }
+              },
+              {
+                "timeSeriesQuery": {
+                  "timeSeriesFilter": {
+                    "filter": "metric.type=\"custom.googleapis.com/platform_health/warn_count\" resource.type=\"global\" metric.label.section!=\"all\"",
+                    "aggregation": {
+                      "alignmentPeriod": "604800s",
+                      "perSeriesAligner": "ALIGN_NEXT_OLDER",
+                      "crossSeriesReducer": "REDUCE_NONE",
+                      "groupByFields": []
+                    }
+                  }
+                }
+              },
+              {
+                "timeSeriesQuery": {
+                  "timeSeriesFilter": {
+                    "filter": "metric.type=\"custom.googleapis.com/platform_health/fail_count\" resource.type=\"global\" metric.label.section!=\"all\"",
+                    "aggregation": {
+                      "alignmentPeriod": "604800s",
+                      "perSeriesAligner": "ALIGN_NEXT_OLDER",
+                      "crossSeriesReducer": "REDUCE_NONE",
+                      "groupByFields": []
+                    }
+                  }
+                }
+              }
+            ],
+            "columnSettings": [
+              { "column": "metric.label.environment", "displayName": "Environment", "visible": true },
+              { "column": "metric.label.section", "displayName": "Section", "visible": true },
+              { "column": "value", "displayName": "Passes", "visible": true },
+              { "column": "value-1", "displayName": "Warnings", "visible": true },
+              { "column": "value-2", "displayName": "Failures", "visible": true }
+            ]
+          }
+        }
+      },
+      {
+        "xPos": 0,
+        "yPos": 13,
+        "width": 12,
+        "height": 3,
+        "widget": {
+          "title": "Failures (Status: 1 = latest run, 0 = old run)",
+          "timeSeriesTable": {
+            "dataSets": [
+              {
+                "timeSeriesQuery": {
+                  "timeSeriesFilter": {
+                    "filter": "metric.type=\"custom.googleapis.com/platform_health/fail_detail\" resource.type=\"global\"",
+                    "aggregation": {
+                      "alignmentPeriod": "28800s",
+                      "perSeriesAligner": "ALIGN_NEXT_OLDER",
+                      "crossSeriesReducer": "REDUCE_NONE",
+                      "groupByFields": []
+                    }
+                  }
+                }
+              }
+            ],
+            "columnSettings": [
+              { "column": "metric.label.environment", "displayName": "Environment", "visible": true },
+              { "column": "metric.label.section", "displayName": "Section", "visible": true },
+              { "column": "metric.label.message", "displayName": "Failure", "visible": true },
+              { "column": "value", "displayName": "Status", "visible": true }
+            ]
+          }
+        }
+      }
+    ]
+  }
+}

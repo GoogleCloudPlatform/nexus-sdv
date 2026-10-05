@@ -5,13 +5,18 @@ import KeycloakProvider from 'next-auth/providers/keycloak';
 declare module 'next-auth' {
   interface Session {
     groups: string[];
+    roles: string[];
   }
 }
 declare module 'next-auth/jwt' {
   interface JWT {
     groups?: string[];
+    roles?: string[];
   }
 }
+
+/** Realm role that sees every vehicle identity, not just its own group's. */
+export const ADMIN_ROLE = 'nexus-admin';
 
 export const authOptions: NextAuthOptions = {
   providers: [
@@ -28,12 +33,18 @@ export const authOptions: NextAuthOptions = {
     jwt({ token, profile }) {
       // profile is only present on first sign-in; persist groups into JWT.
       if (profile) {
-        token.groups = (profile as { groups?: string[] }).groups ?? [];
+        const p = profile as { groups?: string[]; realm_access?: { roles?: string[] } };
+        token.groups = p.groups ?? [];
+        // Realm roles reach the ID token through a dedicated protocol mapper —
+        // Keycloak puts them in the access token by default, not here. The mapper
+        // is created by keycloak-provision-fleet-user.sh.
+        token.roles = p.realm_access?.roles ?? [];
       }
       return token;
     },
     session({ session, token }) {
       session.groups = token.groups ?? [];
+      session.roles = token.roles ?? [];
       return session;
     },
   },
