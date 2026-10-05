@@ -2,11 +2,20 @@ apiVersion: v1
 kind: Service
 metadata:
   name: {{ include "keycloak.fullname" . | trim }}
+  {{- if eq .Values.pkiStrategy "remote" }}
   annotations:
-    {{- if eq .Values.pkiStrategy "remote" }}
+    # keycloak.<baseDomain> points HERE, at the LoadBalancer on 8443 — not at the
+    # Ingress. Keycloak authenticates vehicles by their client certificate
+    # (clientAuthenticatorType client-x509), and an L7 load balancer that
+    # terminates TLS cannot forward one. Machine clients therefore need a direct
+    # TLS connection to Keycloak. Browsers use keycloak-ui.<baseDomain> instead.
     external-dns.alpha.kubernetes.io/hostname: keycloak.{{ .Values.baseDomain }}
     external-dns.alpha.kubernetes.io/ttl: "300"
-    {{- end }}
+    # Links the BackendConfig to this Service. Without it GKE falls back to its
+    # default health check (GET / on the serving port), which Keycloak answers with
+    # a redirect — the Ingress backend then stays UNHEALTHY and serves 502.
+    cloud.google.com/backend-config: '{"default": "{{ include "keycloak.fullname" . | trim }}-backendconfig"}'
+  {{- end }}
   labels:
 {{ include "keycloak.labels" . | indent 4 }}
 spec:

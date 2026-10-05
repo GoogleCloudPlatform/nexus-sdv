@@ -14,9 +14,10 @@ $(PROTO_OUT): $(PROTO_SRC)
 proto: $(PROTO_OUT)
 
 downloadcerts:
+	@[ -n "$(GCP_PROJECT_ID)" ] || { echo "Set GCP_PROJECT_ID, e.g. make downloadcerts GCP_PROJECT_ID=<project>"; exit 1; }
 	mkdir -p certificates
-	gcloud secrets versions access latest --project=sdv-demo-474513 --secret="REGISTRATION_SERVER_TLS_CERT" > certificates/REGISTRATION_SERVER_TLS_CERT.pem
-	gcloud secrets versions access latest --project=sdv-demo-474513 --secret="KEYCLOAK_TLS_CRT" > certificates/KEYCLOAK_TLS_CRT.pem
+	gcloud secrets versions access latest --project=$(GCP_PROJECT_ID) --secret="REGISTRATION_SERVER_TLS_CERT" > certificates/REGISTRATION_SERVER_TLS_CERT.pem
+	gcloud secrets versions access latest --project=$(GCP_PROJECT_ID) --secret="KEYCLOAK_TLS_CRT" > certificates/KEYCLOAK_TLS_CRT.pem
 
 run: proto
 	uv run main.py $(ARGS)

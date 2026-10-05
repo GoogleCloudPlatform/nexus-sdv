@@ -15,14 +15,29 @@ service:
   httpPort: 8080
   httpsPort: 8443
 
+# Probes hit /health on the TLS server (8443), not the separate plain-HTTP health
+# server (8888): a probe on 8888 stays green even if only the 8443 TLS accept path
+# wedges (the failure mode behind the "manual restart" hangs). scheme HTTPS makes
+# the kubelet complete a real TLS handshake; client auth is optional so no cert is
+# needed. kubelet does not verify the server cert for HTTPS probes.
 livenessProbe:
   httpGet:
     path: /health
-    port: 8888
+    port: 8443
+    scheme: HTTPS
+  initialDelaySeconds: 15
+  periodSeconds: 15
+  timeoutSeconds: 5
+  failureThreshold: 3
 readinessProbe:
   httpGet:
     path: /health
-    port: 8888
+    port: 8443
+    scheme: HTTPS
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
 
 # GCP Project ID for Workload Identity
 gcpProjectId: ""
@@ -32,6 +47,11 @@ gcpProjectId: ""
 # - Server certs (serverCert/serverKey): Generated via GCP CAS in remote mode, or local OpenSSL in local mode
 # - Registration CA (caCert/caKey): Always uses local key pair for signing vehicle CSRs
 # - Factory CA (factoryCaCert): Trusted CA certificate for authenticating factory-issued vehicle certificates
+# Lifetime of the operational certificates this server issues, as <n><s|m|h|d>.
+# Empty => the service default (90d). It must stay well below the lifetime of
+# the factory certificate a vehicle re-registers with, or renewal is impossible.
+operationalCertValidity: ""
+
 certificates:
   serverCert: ""
   serverKey: ""
@@ -52,3 +72,5 @@ resources:
 urls:
   nats: ""
   keycloak: ""
+  # vin-registry base URL. Empty => do not report at all.
+  vinRegistry: ""

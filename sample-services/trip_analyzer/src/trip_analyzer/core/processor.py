@@ -23,7 +23,7 @@ class Processor:
         request = GetTelemetryDataRequest(
             vehicle_id=id, data_types=["dynamic:VELOCITY"],
             # time_range=TimeRange(start=start, end=end)
-            last_duration=timedelta(seconds=settings.data_poll_interval)
+            last_duration=timedelta(seconds=settings.scoring_window_seconds)
         )
 
         input_list = []

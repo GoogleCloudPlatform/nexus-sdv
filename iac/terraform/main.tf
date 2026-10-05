@@ -39,15 +39,22 @@ locals {
     "container.googleapis.com",
     "secretmanager.googleapis.com",
     "sqladmin.googleapis.com",
-    "servicenetworking.googleapis.com",
-    "artifactregistry.googleapis.com"
+    "monitoring.googleapis.com",
+    "cloudscheduler.googleapis.com",
+    "bigtableadmin.googleapis.com"
   ]
 }
 
 resource "google_project_service" "project_apis" {
-  for_each           = toset(local.project_apis)
-  service            = each.value
-  disable_on_destroy = true
+  for_each = toset(local.project_apis)
+  service  = each.value
+
+  # The teardown deletes Secret Manager entries, CA pools and DNS records AFTER
+  # terraform destroy. Disabling the APIs here made every one of those calls
+  # fail, so the next bootstrap in the same project inherited the previous
+  # environment's secrets (ENV, GKE_CLUSTER_NAME) and deployed against a cluster
+  # that no longer existed.
+  disable_on_destroy = false
 }
 
 data "google_project" "project" {

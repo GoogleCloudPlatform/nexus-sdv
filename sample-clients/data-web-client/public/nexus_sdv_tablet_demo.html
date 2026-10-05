@@ -504,7 +504,7 @@
         <div class="brand-mark"></div>
         <div class="brand-copy">
           <h1>Nexus SDV Driving Score</h1>
-          <p>Tablet-first live scoring demo for Google Automotive Partner Bootcamp 2026</p>
+          <p>Tablet-first live scoring demo</p>
         </div>
       </div>
 
@@ -541,7 +541,7 @@
 
           <div class="hint-summary">
             <div class="hint-summary-label">Hint status</div>
-            <div class="hint-summary-text">Only these four hints can occur in this demo: too fast driving, too fast accelerations, too fast brakes, and too aggressive driving.</div>
+            <div class="hint-summary-text">Only these four hints can occur in this demo: speeding, hard acceleration, hard braki, and aggressive driving.</div>
           </div>
         </div>
       </section>
@@ -825,6 +825,23 @@
         const trend = numericScore - state.score;
         el.scoreTrend.textContent = `${trend >= 0 ? '+' : ''}${trend}`;
         state.score = numericScore;
+
+        // Activate the four fixed hints from the live suggestions. parts[2] is
+        // the comma-separated suggestion list (empty when the score is perfect).
+        // Map the scorer's exact output strings (trip_analyzer scorer.py) to the
+        // demo's hint keys.
+        const SUGGESTION_TO_HINT = {
+          'speeding': 'tooFastDriving',
+          'accelerating too fast': 'tooFastAccelerations',
+          'hard braking': 'tooFastBrakes',
+          'aggressive driving': 'tooAggressiveDriving'
+        };
+        hintKeys.forEach((k) => { state.hints[k] = false; });
+        (parts[2] || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean).forEach((s) => {
+          const key = SUGGESTION_TO_HINT[s];
+          if (key) state.hints[key] = true;
+        });
+
         render();
       };
       scoringStream.onerror = () => closeScoringStream();

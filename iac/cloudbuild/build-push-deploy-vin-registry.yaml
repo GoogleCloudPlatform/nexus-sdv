@@ -1,0 +1,142 @@
+steps:
+  # ============================================================================
+  # 0. SETUP & AUTHENTICATION
+  # ============================================================================
+  - id: 'get-gke-credentials'
+    name: 'gcr.io/cloud-builders/gcloud@sha256:abcad906c9fa0dd063c4b6e570994f34024673486b17e9f4c99c720165e03ae5'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        gcloud container clusters get-credentials "$$GKE_CLUSTER_NAME" \
+          --region="$$GCP_REGION" \
+          --project="$PROJECT_ID"
+
+        echo "Injecting Cloud Build Access Token into Kubeconfig..."
+        TOKEN=$$(gcloud auth print-access-token)
+        kubectl config set-credentials build-user --token="$${TOKEN}"
+        CONTEXT=$$(kubectl config current-context)
+        kubectl config set-context "$${CONTEXT}" --user=build-user
+        echo "$$GCP_REGION" > gcp_region.txt
+    secretEnv: ['GKE_CLUSTER_NAME', 'GCP_REGION']
+
+  - id: 'configure-ar'
+    name: 'gcr.io/cloud-builders/gcloud@sha256:abcad906c9fa0dd063c4b6e570994f34024673486b17e9f4c99c720165e03ae5'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        TOKEN=$$(gcloud auth print-access-token)
+        AUTH=$$(printf '%s' "oauth2accesstoken:$$TOKEN" | base64 -w0)
+        mkdir -p /root/.docker
+        echo '{"auths":{"europe-west4-docker.pkg.dev":{"auth":"'$$AUTH'"}}}' \
+          > /root/.docker/config.json
+        echo "Artifact Registry auth configured (token-based, no credential helper)."
+    waitFor: ['-']
+
+  # ============================================================================
+  # 1. BUILD & PUSH VIN REGISTRY
+  # ============================================================================
+  - id: 'build-push-vin-registry'
+    name: 'gcr.io/cloud-builders/docker'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        docker buildx create --name builder --use
+
+        SHA="${_COMMIT_SHA}"
+        if [ -z "$$SHA" ] || [ "$$SHA" == "manual" ]; then
+           if [ -n "$COMMIT_SHA" ]; then SHA="$COMMIT_SHA"; else SHA="manual-latest"; fi
+        fi
+        echo "$$SHA" > commit_sha.txt
+        echo "Building for Commit SHA: $$SHA (Platform: linux/${_ARCH})"
+
+        IMAGE_URI="$${IMAGE_REPO}/vin-registry"
+        docker buildx build \
+          --platform linux/${_ARCH} \
+          --build-arg DOCKER_HUB_MIRROR="$${IMAGE_REPO%/artifact-registry}/docker-hub" \
+          --file ./base-services/vin-registry/Dockerfile \
+          --tag "$${IMAGE_URI}:$${SHA}" \
+          --tag "$${IMAGE_URI}:latest" \
+          --cache-from "type=registry,ref=$${IMAGE_URI}:buildcache" \
+          --cache-to "type=inline" \
+          --push \
+          ./base-services/vin-registry
+    secretEnv: [ 'IMAGE_REPO' ]
+    waitFor: ['configure-ar']
+
+  # ============================================================================
+  # 2. DEPLOY
+  #
+  # The service creates its own table on first start, so there is no separate
+  # schema step: it shares the nexus_acl database with FleetView because that is
+  # where vehicle_groups already lives.
+  # ============================================================================
+  - id: 'deploy-vin-registry'
+    name: 'ghcr.io/helmfile/helmfile:latest'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        if [[ ! -f "commit_sha.txt" ]]; then
+          echo "::error::commit_sha.txt from the build step not found."
+          exit 1
+        fi
+        export COMMIT_SHA=$$(cat commit_sha.txt)
+        export GCP_PROJECT_ID="$PROJECT_ID"
+        export GCP_REGION=$$(cat gcp_region.txt)
+
+        cd iac/helm/helmfile.d
+        if ! helmfile --file vin-registry.yaml.gotmpl ${_HELM_ACTION} --wait \
+            --args "--timeout 4m0s" \
+            --state-values-set arch=${_ARCH} \
+            --state-values-set image.tag="$${COMMIT_SHA}"; then
+
+            echo "❌ Deployment Failed! Fetching Pod Logs for Debugging..."
+            if ! command -v kubectl &> /dev/null; then
+                curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+                chmod +x kubectl && mv kubectl /usr/local/bin/
+            fi
+            echo "--- POD STATUS ---"
+            kubectl get pods -n base-services -l app.kubernetes.io/name=vin-registry
+            echo "--- LOGS ---"
+            kubectl logs -n base-services -l app.kubernetes.io/name=vin-registry --tail=50 --all-containers
+            exit 1
+        fi
+    secretEnv: [ 'IMAGE_REPO', 'DATA_API_BIGTABLE_CONNECTOR_GCP_SERVICE_ACCOUNT', 'WEBCLIENT_DB_PASSWORD', 'CLOUD_SQL_INSTANCE_CONNECTION_NAME' ]
+    waitFor: [ 'build-push-vin-registry', 'get-gke-credentials' ]
+
+# ============================================================================
+# SUBSTITUTIONS & SECRETS CONFIG
+# ============================================================================
+substitutions:
+  # The target is chosen by --project and by the GKE_CLUSTER_NAME / GCP_REGION
+  # secrets, not from here. _ENVIRONMENT, _CLUSTER_NAME and _REGION used to sit
+  # in this block with "sandbox" defaults, looked like they selected the
+  # environment, and were read by nothing.
+  _ARCH: "arm64"
+  _COMMIT_SHA: "manual"
+  _HELM_ACTION: "sync"
+
+availableSecrets:
+  secretManager:
+    - versionName: projects/$PROJECT_ID/secrets/GCP_REGION/versions/latest
+      env: 'GCP_REGION'
+    - versionName: projects/$PROJECT_ID/secrets/GKE_CLUSTER_NAME/versions/latest
+      env: 'GKE_CLUSTER_NAME'
+    - versionName: projects/$PROJECT_ID/secrets/IMAGE_REPO/versions/latest
+      env: 'IMAGE_REPO'
+    - versionName: projects/$PROJECT_ID/secrets/DATA_API_BIGTABLE_CONNECTOR_GCP_SERVICE_ACCOUNT/versions/latest
+      env: 'DATA_API_BIGTABLE_CONNECTOR_GCP_SERVICE_ACCOUNT'
+    - versionName: projects/$PROJECT_ID/secrets/WEBCLIENT_DB_PASSWORD/versions/latest
+      env: 'WEBCLIENT_DB_PASSWORD'
+    - versionName: projects/$PROJECT_ID/secrets/CLOUD_SQL_INSTANCE_CONNECTION_NAME/versions/latest
+      env: 'CLOUD_SQL_INSTANCE_CONNECTION_NAME'
+
+timeout: '2400s'
+
+options:
+  machineType: 'E2_HIGHCPU_8'
+  logging: CLOUD_LOGGING_ONLY
+  substitutionOption: 'ALLOW_LOOSE'

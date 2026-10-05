@@ -9,12 +9,13 @@ import { Steps } from '@astrojs/starlight/components';
 
 This guide helps Nexus engineers and admins interact with the platform via clients. We assume you have a running Nexus instance, following the deployment steps covered earlier.
 
+### Security
+
 All client interaction with Nexus is secured via **mutual TLS (mTLS)**. During the deployment of Nexus, all required cryptographic materials were created, and the platform is ready to use.
 
 To interact with the Nexus platform, every client follows a standardized four-stage lifecycle. This sequence ensures that all data transmissions are secure, authenticated, and authorized.
 
-![Nexus Client Communication Flow](assets/gs-client-overview-steps.png)
-
+<br/>
 
 <Steps>
 
@@ -46,13 +47,15 @@ These clients are designed for simplicity and can be executed via a single main 
 The clients rely on the environment configuration created during the bootstrapping process. They automatically look for the `.bootstrap_env` file (located in `iac/bootstrapping/`) to retrieve essential platform metadata such as your **GCP Project ID**, **NATS Hostnames**, and **Registration URLs**. Ensure this file is present and populated from your previous deployment steps.
 :::
 
-### Prerequisites and Setup
+### Prerequisites
 
-* **Go (1.21+):** Required to build and run the Go vehicle client via make.
-* **Python 3.13+:** The recommended version for the Python client.
-* **uv:** The primary tool for managing Python dependencies and running the client script.
-* **Protobuf Compiler (protoc):** The Protobuf compiler must be installed for data transmission.
-* **GCloud CLI:** Essential for retrieving TLS certificates from the Google Cloud Secret Manager
+| Tool | Purpose |
+| :--- | :--- |
+| [Google Cloud CLI (`gcloud`)](https://docs.cloud.google.com/sdk/docs/install-sdk/) | Essential for retrieving TLS certificates from the Google Cloud Secret Manager. |
+| [Protobuf Compiler (`protoc`)](https://protobuf.dev/installation/) | The Protobuf compiler must be installed for data transmission. |
+| [Go 1.25+ (`go`)](https://go.dev/doc/install/) | Required to build and run the Go vehicle client via make. |
+| [Python 3.13+ (`python`)](https://www.python.org/downloads/) | Required to run the python vehicle client. |
+| [uv (`uv`)](https://docs.astral.sh/uv/getting-started/installation/) | The primary tool for managing Python dependencies and running the client script. |
 
 ### Running the Go Client
 
@@ -62,76 +65,41 @@ To start the Go vehicle client, navigate to the client directory and execute the
 
 ```bash
 # Navigate to the Go client directory
-cd sample-clients/vehicle-client/
+$ cd sample-clients/vehicle-client/
 
 # Build and run the client
-make all
+$ make all
 ```
 
 When you run the command, you should see a sequence of logs detailing the build process, certificate retrieval, and the multi-step registration flow:
 
-```
+```bash
 go mod download
 go mod verify
 all modules verified
 Generating protobuf code from ../../proto/telemetry.proto...
-protoc --proto_path=../../proto --go_out=telemetry --go_opt=paths=source_relative telemetry.proto
-go build -v -o vehicle-client .
-mkdir -p certificates
+...
 gcloud secrets versions access latest --secret="REGISTRATION_SERVER_TLS_CERT" > certificates/REGISTRATION_SERVER_TLS_CERT.pem
 gcloud secrets versions access latest --secret="KEYCLOAK_TLS_CRT" > certificates/KEYCLOAK_TLS_CRT.pem
-./run-vehicle-client.sh
-==========================================
-Check for environment file
-==========================================
+...
 Found environment file at ../../iac/bootstrapping/.bootstrap_env
 ...
-...
-...
-1. Generating private key...
-2. Creating certificate signing request...
-3. Signing certificate with GCP CAS Factory CA...
-4. Downloading Factory CA certificate...
-5. Creating certificate chain...
-
 ✓ Certificate generation complete!
 ...
-...
-...
 2026/01/15 14:07:01 Starting vehicle client for VIN: VEHICLE001
-2026/01/15 14:07:01 Telemetry interval: 5 seconds
-2026/01/15 14:07:01 Step 1: Generating operational key pair...
-2026/01/15 14:07:01 Step 2: Creating Certificate Signing Request (CSR)...
-2026/01/15 14:07:01 Step 3: Loading factory-issued certificate for mTLS...
-2026/01/15 14:07:01 Step 4: Sending CSR to registration server at https://registration.sdv-dae.net:8080...
-2026/01/15 14:07:01   Server requested client certificate
-2026/01/15 14:07:01 Step 5: Parsing operational certificate...
-2026/01/15 14:07:01   Keycloak URL: https://keycloak.sdv-dae.net:8443
-2026/01/15 14:07:01   NATS URL: nats://nats.sdv-dae.net:4222
-2026/01/15 14:07:01   Certificate valid until: 2027-01-15 13:07:01 +0000 UTC
-2026/01/15 14:07:01   Saved operational certificate to operational-cert.pem
-2026/01/15 14:07:01   Saved operational key to operational-key.pem
+...
 2026/01/15 14:07:01 ✓ Successfully registered and obtained operational certificate
-2026/01/15 14:07:01 Step 1: Configuring mTLS with operational certificate...
-2026/01/15 14:07:01 Step 2: Requesting JWT from Keycloak at https://keycloak.sdv-dae.net:8443...
-2026/01/15 14:07:01   Keycloak requested client certificate
-2026/01/15 14:07:02   Token expires in: 300 seconds
+...
 2026/01/15 14:07:02 ✓ Successfully authenticated with Keycloak and obtained JWT
-2026/01/15 14:07:02 Connecting to NATS at nats://nats.sdv-dae.net:4222 with JWT...
-2026/01/15 14:07:02   Connected to NATS successfully
+...
 2026/01/15 14:07:03 ✓ Successfully connected to NATS
 2026/01/15 14:07:03 Starting continuous telemetry publishing...
-2026/01/15 14:07:03 Step 1: Configuring mTLS with operational certificate...
-2026/01/15 14:07:03 Step 2: Requesting JWT from Keycloak at https://keycloak.sdv-dae.net:8443...
-2026/01/15 14:07:03   Keycloak requested client certificate
-2026/01/15 14:07:03   Token expires in: 300 seconds
-2026/01/15 14:07:03 JWT refreshed, expires at: 2026-01-15T14:22:03+01:00
 ...
 ```
 
 Once the client successfully registers and connects, it transitions into the operational phase, where you will see the continuous data transmission logs:
 
-```
+```bash
 ...
 2026/01/15 14:07:08 [1] Published protobuf to telemetry.VEHICLE001.battery: SoC=85.4%, Voltage=12.67V, Current=44.58A, Temp=25.6°C
 2026/01/15 14:07:13 [2] Published protobuf to telemetry.VEHICLE001.battery: SoC=85.3%, Voltage=12.72V, Current=45.71A, Temp=25.9°C
@@ -145,25 +113,24 @@ Once the client successfully registers and connects, it transitions into the ope
 ...
 ```
 
-Once the client successfully registers and connects, it transitions into the operational phase, where you will see the continuous data transmission logs:  
 
 ### Running the Python Client
 
 The Python client is executed via a dedicated shell script that loads environment variables from the bootstrapping configuration and prepares the identity verification (PKI). Execution is handled efficiently using **uv**.
 
-To start the Python vehicle client, navigate to the directory and run the launcher script:
+Just like the Go client, the Python vehicle client can be run using a Makefile. Navigate to the directory and execute the `all` target:
 
 ```bash
 # Navigate to the Python client directory
-cd sample-clients/python/
+$ cd sample-clients/python/
 
 # Execute the script with the desired PKI strategy
-make all
+$ make all
 ```
 
 The terminal output is similar to that of the Go Client. A successful run will conclude with the following logs in your shell:
 
-```
+```bash
 ...
 Successfully registered and received operational certificate.
   Keycloak URL: https://...
@@ -183,6 +150,21 @@ Telemetry published (6/7).
 Telemetry published (7/7).
 Successfully sent test telemetry data.
 ```
+
+### What the clients publish
+
+Each client sends a protobuf message to a NATS subject that carries the VIN. The
+BigTable connector subscribes to these subjects and writes what arrives.
+
+| Client | Message | Subject |
+| :--- | :--- | :--- |
+| **Go Client** | `TelemetryMessage` — individual sensor readings | `telemetry.<VIN>.<sensor>` |
+| **Go Client** with `-message-type metrics_report` | `MetricsReport` — a vehicle metrics report | `telemetry-generic.<VIN>` |
+| **Python Client** | `TelemetryMessage` — individual sensor readings | `telemetry.prod.bigtable.<VIN>` |
+
+The message definitions live in [`proto/`](https://github.com/GoogleCloudPlatform/nexus-sdv/tree/main/proto):
+`telemetry.proto` for `TelemetryMessage`, `metrics_report.proto` for
+`MetricsReport`.
 
 Now that both clients are successfully sending data to Nexus, you can verify the data ingestion in the platform.
 
@@ -229,19 +211,3 @@ We are only at the beginning of the Nexus journey. The two sample clients are de
 :::tip[Join the Journey]
 Nexus thrives on real-world use cases. If you have feedback on the client communication flow or require specific features for your OEM production process, we encourage you to reach out or contribute to the development of our next-gen vehicle platform.
 :::
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

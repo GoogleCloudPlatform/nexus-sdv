@@ -5,7 +5,7 @@
   "defaultSignatureAlgorithm": "RS256",
   "revokeRefreshToken": false,
   "refreshTokenMaxReuse": 0,
-  "accessTokenLifespan": 1209600,
+  "accessTokenLifespan": 43200,
   "accessTokenLifespanForImplicitFlow": 1209600,
   "ssoSessionIdleTimeout": 1209600,
   "ssoSessionMaxLifespan": 1209600,
@@ -806,6 +806,21 @@
         "organization",
         "offline_access",
         "microprofile-jwt"
+      ],
+      "protocolMappers": [
+        {
+          "name": "groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "consentRequired": false,
+          "config": {
+            "full.path": "false",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "claim.name": "groups"
+          }
+        }
       ]
     },
     {

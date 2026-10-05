@@ -6,13 +6,30 @@
 # ==============================================================================
 
 # Source .bootstrap_env if it exists. Sets ENV_FILE variable.
+# Usage: load_bootstrap_env [environment]
+# With an environment name given, uses iac/bootstrapping/<environment>.bootstrap_env
+# instead of the default iac/bootstrapping/.bootstrap_env.
 load_bootstrap_env() {
-    ENV_FILE="iac/bootstrapping/.bootstrap_env"
+    local environment="${1:-}"
+    if [ -n "$environment" ]; then
+        ENV_FILE="iac/bootstrapping/${environment}.bootstrap_env"
+    else
+        ENV_FILE="iac/bootstrapping/.bootstrap_env"
+    fi
     if [ -f "$ENV_FILE" ]; then
         log_info "Loading saved configuration from $ENV_FILE..."
         # shellcheck source=/dev/null
         source "$ENV_FILE"
     fi
+}
+
+# Derive the CA pool names Terraform creates when no existing pool is reused.
+# Requires DEPLOYMENT_SUFFIX to be set. Sets CREATED_SERVER_CA_POOL,
+# CREATED_FACTORY_CA_POOL, CREATED_REG_CA_POOL.
+derive_ca_pool_names() {
+    CREATED_SERVER_CA_POOL="server-ca-pool-${DEPLOYMENT_SUFFIX}"
+    CREATED_FACTORY_CA_POOL="factory-ca-pool-${DEPLOYMENT_SUFFIX}"
+    CREATED_REG_CA_POOL="registration-ca-pool-${DEPLOYMENT_SUFFIX}"
 }
 
 # Load all GitHub environment variables into the current shell.
@@ -60,6 +77,7 @@ enable_gcp_apis() {    # List of APIs required before Terraform runs
         "serviceusage.googleapis.com"           # For enabling other APIs
         "servicenetworking.googleapis.com"
         "artifactregistry.googleapis.com"
+        "bigtableadmin.googleapis.com"          # terraform creates the instance and table
     )
 
     # Add PKI-strategy-specific APIs

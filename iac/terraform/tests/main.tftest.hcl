@@ -11,21 +11,21 @@ variables {
   keycloak_hostname     = "keycloak"
   nats_hostname         = "nats"
   registration_hostname = "registration"
-  base_domain           = "sdv-dae.net"
+  base_domain           = "example.com"
   wif_pool_id           = "wifpoolci"
 }
 # Set Provider Configuration inside the test file explicitly to avoid project not reached error
 override_data {
   target = data.google_project.current
   values = {
-    number = "1091310547571" # Mock the data so it doesn't try to call the API
+    number = "123456789012" # Mock the data so it doesn't try to call the API
   }
 }
 
 override_data {
   target = data.google_project.project
   values = {
-    number = "1091310547571"
+    number = "123456789012"
   }
 }
 

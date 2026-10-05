@@ -123,8 +123,8 @@ export default function DevicePage({ params }: { params: Promise<{ id: string }>
       <div className="space-y-4">
         {/* Breadcrumb */}
         <nav aria-label="Breadcrumb" className="text-sm text-gray-500">
-          <Link href="/fleet" className="hover:text-gray-900">
-            Fleet
+          <Link href="/telemetry" className="hover:text-gray-900">
+            Telemetry
           </Link>
           <span className="mx-2">›</span>
           <span className="text-gray-900">{id}</span>

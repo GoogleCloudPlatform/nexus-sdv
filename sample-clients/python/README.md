@@ -27,8 +27,11 @@ uv run simple-sim
 
 To run the vss examples, you will need a Kuksa broker:
 ```bash
-docker run -it --rm -p 56789:55555 ghcr.io/eclipse/kuksa.val/databroker
+docker run -it --rm -p 56789:55555 ghcr.io/eclipse-kuksa/kuksa-databroker:0.7.1
 ```
+
+The older `eclipse/kuksa.val/databroker` path stops at 0.4.3. Verified with
+broker 0.7.1 and `kuksa-client` 0.4.3.
 
 This bridge combines simulation (producer) and cloud relay (consumer) in one process:
 ```bash
@@ -68,5 +71,5 @@ curl -X POST http://localhost:8080/start-simulation/sick-battery
 
 Telemetry examples are located in apps/...
 
-For detailed documentation, architecture diagrams, and BigTable SQL queries, visit [docs.nexus-sdv.io](docs.nexus-sdv.io)
+For detailed documentation, architecture diagrams, and BigTable SQL queries, visit [docs.nexus-sdv.io](https://docs.nexus-sdv.io)
 

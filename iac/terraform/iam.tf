@@ -68,6 +68,16 @@ resource "google_service_account_iam_member" "workload_identity_user_data_web_cl
   depends_on         = [google_container_cluster.gke_cluster]
 }
 
+# vin-registry needs Cloud SQL access only, which this account already carries
+# (roles/cloudsql.client above) — so it reuses it instead of adding another
+# service account and another role binding.
+resource "google_service_account_iam_member" "workload_identity_user_vin_registry" {
+  service_account_id = google_service_account.data_api_bigtable_connector.name
+  role               = "roles/iam.workloadIdentityUser"
+  member             = "serviceAccount:${var.project_id}.svc.id.goog[base-services/vin-registry-ksa]"
+  depends_on         = [google_container_cluster.gke_cluster]
+}
+
 resource "google_service_account" "external_secrets_gsa" {
   account_id   = "external-secrets-gsa"
   display_name = "External Secrets Operator Service Account"
@@ -112,6 +122,34 @@ resource "google_service_account_iam_member" "workload_identity_user_registratio
   service_account_id = google_service_account.registration_gsa.name
   role               = "roles/iam.workloadIdentityUser"
   member             = "serviceAccount:${var.project_id}.svc.id.goog[base-services/registration-ksa]"
+  depends_on         = [google_container_cluster.gke_cluster]
+}
+
+resource "google_service_account" "factory_helper_gsa" {
+  account_id   = "factory-helper-gsa"
+  display_name = "Factory Helper Service Account"
+  depends_on   = [google_project_service.project_apis]
+}
+
+# The ONLY permission: request certificates from the factory CA pool.
+# No Secret Manager access, no other roles — this isolation is the security model.
+resource "google_privateca_ca_pool_iam_member" "factory_helper_requester" {
+  # CA pools exist only with remote PKI (pki.tf creates them when is_remote).
+  # With local PKI the pool path below resolves to nothing and the binding
+  # fails with a 404, taking the whole bootstrap down.
+  count = local.is_remote ? 1 : 0
+
+  # The provider requires the fully-qualified pool path here — a bare pool name
+  # plus separate location/project attributes is rejected.
+  ca_pool = "projects/${var.project_id}/locations/${var.region}/caPools/${var.existing_factory_ca_pool != "" ? var.existing_factory_ca_pool : var.created_factory_ca_pool}"
+  role    = "roles/privateca.certificateRequester"
+  member  = "serviceAccount:${google_service_account.factory_helper_gsa.email}"
+}
+
+resource "google_service_account_iam_member" "workload_identity_user_factory_helper" {
+  service_account_id = google_service_account.factory_helper_gsa.name
+  role               = "roles/iam.workloadIdentityUser"
+  member             = "serviceAccount:${var.project_id}.svc.id.goog[factory/factory-helper-ksa]"
   depends_on         = [google_container_cluster.gke_cluster]
 }
 

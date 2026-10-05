@@ -17,6 +17,13 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        # Base-image source. The Dockerfile deliberately has no default — it is
+        # built by the Cloud Build pipelines, which pass the deploying project's
+        # own Artifact Registry. Compose is the other caller, so it supplies one
+        # here: Docker Hub, which works on any host (CI runners, local dev).
+        # Override with DOCKER_HUB_MIRROR to use a project-local mirror.
+        DOCKER_HUB_MIRROR: ${DOCKER_HUB_MIRROR:-docker.io/library}
     ports:
       - "8080:8080"
     environment:

@@ -41,3 +41,50 @@ resource "google_project_iam_member" "compute_sa_owner" {
     prevent_destroy = true
   }
 }
+
+# platform-health-check is Terraform-managed, unlike the other manual
+# triggers (still created by setup-cloudbuild-triggers.sh), since it has no
+# bootstrapping-order dependency on this Terraform run.
+# Skipped when the repository path is unknown — see variables.tf. Creating the
+# trigger with an empty repository would produce an opaque GCP API error, and
+# failing the whole bootstrap over an optional monitoring trigger would be worse
+# still. run_terraform_apply() warns when this is skipped.
+resource "google_cloudbuild_trigger" "platform_health_check" {
+  count       = var.cloudbuild_repo_resource == "" ? 0 : 1
+  project     = var.project_id
+  location    = var.region
+  name        = "platform-health-check"
+  description = "Run the platform health check (APIs, infra, PKI, endpoints, base services, optional e2e)"
+  tags        = ["health-check", "generic"]
+
+  service_account = "projects/${var.project_id}/serviceAccounts/${local.default_compute_sa}"
+
+  source_to_build {
+    repository = var.cloudbuild_repo_resource
+    ref        = "refs/heads/main"
+    repo_type  = "GITHUB"
+  }
+
+  git_file_source {
+    path       = "iac/cloudbuild/platform-health-check.yaml"
+    repository = var.cloudbuild_repo_resource
+    revision   = "refs/heads/main"
+    repo_type  = "GITHUB"
+  }
+
+  # scheduler.tf's scheduled invocation only overrides _RUN_E2E/_REPORT_METRICS.
+  substitutions = {
+    _TARGET_MODE            = "dir"
+    _BOOTSTRAP_ENV_GCS_PATH = "gs://${var.project_id}-bootstrap-envs/.bootstrap_env"
+    _BOOTSTRAP_ENVS_DIR     = "gs://${var.project_id}-bootstrap-envs/"
+    _TARGET_PROJECT         = var.project_id
+    # Off by default: a console "Run trigger" click prefills these, and _RUN_E2E=Y
+    # submits a real end-to-end build per environment in the bucket — minutes of
+    # runtime and real cost. Opt in deliberately; scheduler.tf overrides per run.
+    _RUN_E2E        = "N"
+    _STRICT         = "N"
+    _REPORT_METRICS = "Y"
+  }
+
+  depends_on = [google_project_service.project_apis]
+}

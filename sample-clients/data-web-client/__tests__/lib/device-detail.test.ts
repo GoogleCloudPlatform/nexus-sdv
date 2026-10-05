@@ -1,7 +1,16 @@
-import { getDeviceTimeSeries, DEFAULT_PAGE_SIZE } from '@/lib/device-detail';
+import { getDeviceTimeSeries } from '@/lib/device-detail';
 import { getTelemetryTable } from '@/lib/bigtable';
+import { readRowsReversed } from '@/lib/bigtable-reversed';
 
 jest.mock('@/lib/bigtable');
+// The reversed scan goes through BigTable's raw gRPC stream (see
+// bigtable-reversed.ts). Mocking it at that seam keeps these tests about
+// getDeviceTimeSeries' own logic — scan bounds, paging and row shaping — rather
+// than about the SDK's internal chunk format.
+jest.mock('@/lib/bigtable-reversed', () => ({ readRowsReversed: jest.fn() }));
+
+const mockReadRowsReversed = readRowsReversed as jest.Mock;
+const mockTable = { name: 'telemetry' };
 
 function makeRow(id: string, data: Record<string, Record<string, Buffer>>) {
   return {
@@ -18,11 +27,13 @@ function makeRow(id: string, data: Record<string, Record<string, Buffer>>) {
 }
 
 describe('getDeviceTimeSeries', () => {
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => {
+    jest.clearAllMocks();
+    (getTelemetryTable as jest.Mock).mockReturnValue(mockTable);
+  });
 
   it('returns empty rows and columns when no data found', async () => {
-    const mockTable = { getRows: jest.fn().mockResolvedValue([[]]) };
-    (getTelemetryTable as jest.Mock).mockReturnValue(mockTable);
+    mockReadRowsReversed.mockResolvedValue([]);
 
     const result = await getDeviceTimeSeries('dev-001', '1h');
 
@@ -30,12 +41,10 @@ describe('getDeviceTimeSeries', () => {
   });
 
   it('extracts rows and unions column names across all rows', async () => {
-    const mockRows = [
+    mockReadRowsReversed.mockResolvedValue([
       makeRow('dev-001#2024-01-01T00:00:00.000Z', { dynamic: { temp: Buffer.from('25.0') } }),
       makeRow('dev-001#2024-01-01T00:01:00.000Z', { dynamic: { temp: Buffer.from('26.0'), soc: Buffer.from('85') } }),
-    ];
-    const mockTable = { getRows: jest.fn().mockResolvedValue([mockRows]) };
-    (getTelemetryTable as jest.Mock).mockReturnValue(mockTable);
+    ]);
 
     const result = await getDeviceTimeSeries('dev-001', '1h');
 
@@ -47,35 +56,31 @@ describe('getDeviceTimeSeries', () => {
     expect(result.rows[1].values['dynamic:soc']).toBe('85');
   });
 
-  it('constructs row-key bounds correctly including the # separator', async () => {
-    const mockTable = { getRows: jest.fn().mockResolvedValue([[]]) };
-    (getTelemetryTable as jest.Mock).mockReturnValue(mockTable);
+  it('scans the requested window, from one hour ago up to now', async () => {
+    mockReadRowsReversed.mockResolvedValue([]);
 
     const before = new Date();
     await getDeviceTimeSeries('dev-001', '1h');
     const after = new Date();
 
-    const callArgs = mockTable.getRows.mock.calls[0][0];
-    const range = callArgs.ranges[0];
+    const [table, rangeLow, rangeHigh, cursorExclusive] = mockReadRowsReversed.mock.calls[0];
+    expect(table).toBe(mockTable);
+    expect(rangeLow).toMatch(/^dev-001#/);
+    expect(rangeHigh).toMatch(/^dev-001#/);
+    expect(cursorExclusive).toBe(false);
 
-    // start is now an object { value, inclusive }
-    const startValue: string = typeof range.start === 'object' ? range.start.value : range.start;
-    expect(startValue).toMatch(/^dev-001#/);
-    expect(range.end).toMatch(/^dev-001#/);
-
-    const startTs = new Date(startValue.slice('dev-001#'.length));
-    const endTs = new Date(range.end.slice('dev-001#'.length));
-
-    expect(before.getTime() - startTs.getTime()).toBeGreaterThanOrEqual(60 * 60 * 1000 - 1000);
-    expect(before.getTime() - startTs.getTime()).toBeLessThanOrEqual(60 * 60 * 1000 + 1000);
-    expect(endTs.getTime()).toBeGreaterThanOrEqual(before.getTime());
-    expect(endTs.getTime()).toBeLessThanOrEqual(after.getTime());
+    const lowTs = new Date(rangeLow.slice('dev-001#'.length));
+    const highTs = new Date(rangeHigh.slice('dev-001#'.length));
+    expect(before.getTime() - lowTs.getTime()).toBeGreaterThanOrEqual(60 * 60 * 1000 - 1000);
+    expect(before.getTime() - lowTs.getTime()).toBeLessThanOrEqual(60 * 60 * 1000 + 1000);
+    expect(highTs.getTime()).toBeGreaterThanOrEqual(before.getTime());
+    expect(highTs.getTime()).toBeLessThanOrEqual(after.getTime());
   });
 
   it('returns hasMore=false and nextCursor=null when fewer rows than limit', async () => {
-    const mockRows = [makeRow('dev-001#2024-01-01T00:00:00.000Z', { dynamic: { temp: Buffer.from('25') } })];
-    const mockTable = { getRows: jest.fn().mockResolvedValue([mockRows]) };
-    (getTelemetryTable as jest.Mock).mockReturnValue(mockTable);
+    mockReadRowsReversed.mockResolvedValue([
+      makeRow('dev-001#2024-01-01T00:00:00.000Z', { dynamic: { temp: Buffer.from('25') } }),
+    ]);
 
     const result = await getDeviceTimeSeries('dev-001', '1h', undefined, 25);
 
@@ -84,49 +89,38 @@ describe('getDeviceTimeSeries', () => {
     expect(result.rows).toHaveLength(1);
   });
 
-  it('returns hasMore=true and nextCursor when limit+1 rows are returned', async () => {
+  it('returns hasMore=true and a base64 nextCursor when limit+1 rows come back', async () => {
     const pageSize = 2;
-    // Bigtable returns limit+1 = 3 rows
-    const mockRows = [
+    mockReadRowsReversed.mockResolvedValue([
       makeRow('dev-001#2024-01-01T00:00:00.000Z', { dynamic: { temp: Buffer.from('1') } }),
       makeRow('dev-001#2024-01-01T00:01:00.000Z', { dynamic: { temp: Buffer.from('2') } }),
       makeRow('dev-001#2024-01-01T00:02:00.000Z', { dynamic: { temp: Buffer.from('3') } }),
-    ];
-    const mockTable = { getRows: jest.fn().mockResolvedValue([mockRows]) };
-    (getTelemetryTable as jest.Mock).mockReturnValue(mockTable);
+    ]);
 
     const result = await getDeviceTimeSeries('dev-001', '1h', undefined, pageSize);
 
     expect(result.hasMore).toBe(true);
     expect(result.rows).toHaveLength(pageSize); // extra row stripped
-    expect(result.nextCursor).not.toBeNull();
-    // nextCursor is base64 of the last row key
     const decoded = Buffer.from(result.nextCursor!, 'base64').toString('utf8');
     expect(decoded).toBe('dev-001#2024-01-01T00:01:00.000Z');
   });
 
-  it('passes decoded cursor as exclusive start key', async () => {
-    const mockTable = { getRows: jest.fn().mockResolvedValue([[]]) };
-    (getTelemetryTable as jest.Mock).mockReturnValue(mockTable);
-
+  it('uses the cursor as the exclusive upper bound of the reversed scan', async () => {
+    mockReadRowsReversed.mockResolvedValue([]);
     const rawCursor = 'dev-001#2024-01-01T01:00:00.000Z';
-    const encodedCursor = Buffer.from(rawCursor).toString('base64');
 
     await getDeviceTimeSeries('dev-001', '1h', rawCursor, 25);
 
-    const callArgs = mockTable.getRows.mock.calls[0][0];
-    const range = callArgs.ranges[0];
-    expect(range.start.value).toBe(rawCursor);
-    expect(range.start.inclusive).toBe(false);
+    const [, , rangeHigh, cursorExclusive] = mockReadRowsReversed.mock.calls[0];
+    expect(rangeHigh).toBe(rawCursor);
+    expect(cursorExclusive).toBe(true);
   });
 
-  it('requests limit+1 rows from Bigtable', async () => {
-    const mockTable = { getRows: jest.fn().mockResolvedValue([[]]) };
-    (getTelemetryTable as jest.Mock).mockReturnValue(mockTable);
+  it('requests limit+1 rows so it can tell whether another page exists', async () => {
+    mockReadRowsReversed.mockResolvedValue([]);
 
     await getDeviceTimeSeries('dev-001', '1h', undefined, 10);
 
-    const callArgs = mockTable.getRows.mock.calls[0][0];
-    expect(callArgs.limit).toBe(11);
+    expect(mockReadRowsReversed.mock.calls[0][4]).toBe(11);
   });
 });

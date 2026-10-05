@@ -1,23 +1,23 @@
 #!/bin/bash
-# ==============================================================================
+# =================================================================================
 # Setup Cloud Build Triggers for Bootstrap & Teardown Pipelines
 #
-# Creates fully automated CodePipeline-style triggers for each environment:
+# Creates manual triggers for the platform lifecycle:
+#   bootstrap-platform
+#   teardown-platform
+#   test-environments
+#   run-sample-clients
 #
-#   bootstrap-<env>-auto   Branch push trigger: push to env/<env>   → bootstrap
-#   teardown-<env>-auto    Branch push trigger: push to teardown/<env> → teardown
-#   bootstrap-<env>        Manual console trigger (no form — one click)
-#   teardown-<env>         Manual console trigger (no form — one click)
-#
-# Plus generic parameterised triggers for ad-hoc use:
-#   bootstrap-platform     Manual, prompts for _BOOTSTRAP_ENV_GCS_PATH
-#   teardown-platform      Manual, prompts for _BOOTSTRAP_ENV_GCS_PATH
+# The platform-health-check trigger is created by Terraform instead
+# (iac/terraform/cloudbuild.tf).
 #
 # Usage:
-#   bash iac/bootstrapping/tools/setup-cloudbuild-triggers.sh [env1] [env2] ...
-#   bash iac/bootstrapping/tools/setup-cloudbuild-triggers.sh sandbox dev staging
+#   ./iac/bootstrapping/tools/setup-cloudbuild-triggers.sh [--env-file PATH]
 #
-# Defaults to 'sandbox' if no environment names are provided.
+#   --env-file PATH   Path to the .bootstrap_env file to source locally and
+#                      push to the bootstrap-envs GCS bucket.
+#                      If omitted, defaults to
+#                      iac/bootstrapping/.bootstrap_env.
 #
 # Prerequisites:
 #   1. gcloud authenticated with sufficient permissions
@@ -25,14 +25,7 @@
 #   3. The GitHub repo connected to Cloud Build:
 #      GCP Console → Cloud Build → Repositories → Connect Repository
 #
-# GitOps workflow after setup:
-#   git checkout -b env/sandbox && git push origin env/sandbox     # bootstrap
-#   git checkout -b teardown/sandbox && git push origin teardown/sandbox  # teardown
-#
-# .bootstrap_env files are stored in GCS (not in git). Upload them with:
-#   gsutil cp iac/bootstrapping/.bootstrap_env \
-#     gs://${GCP_PROJECT_ID}-bootstrap-envs/sandbox.bootstrap_env
-# ==============================================================================
+# =================================================================================
 
 set -euo pipefail
 
@@ -51,22 +44,48 @@ log_ok()      { echo -e "${COLOR_GREEN}[OK]${COLOR_NC}   $*"; }
 log_section() { echo -e "\n${COLOR_BLUE}=== $* ===${COLOR_NC}"; }
 
 # ---------------------------------------------------------------------------
-# Parse arguments — environment names
+# Parse arguments
 # ---------------------------------------------------------------------------
-ENVIRONMENTS=("$@")
-if [ ${#ENVIRONMENTS[@]} -eq 0 ]; then
-    ENVIRONMENTS=("sandbox")
+ENV_FILE_DEFAULT="iac/bootstrapping/.bootstrap_env"
+ENV_FILE=""
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --env-file)
+            [ $# -ge 2 ] || log_error "--env-file requires a value"
+            ENV_FILE="$2"
+            shift 2
+            ;;
+        --env-file=*)
+            ENV_FILE="${1#*=}"
+            shift
+            ;;
+        -h|--help)
+            echo "Usage: $0 [--env-file PATH]"
+            exit 0
+            ;;
+        *)
+            log_error "Unknown argument: $1"
+            ;;
+    esac
+done
+
+if [ -z "$ENV_FILE" ]; then
+    ENV_FILE="$ENV_FILE_DEFAULT"
 fi
 
 # ---------------------------------------------------------------------------
 # Load configuration
 # ---------------------------------------------------------------------------
-ENV_FILE="iac/bootstrapping/.bootstrap_env"
-if [ -f "$ENV_FILE" ]; then
-    log_info "Loading configuration from $ENV_FILE..."
-    # shellcheck source=/dev/null
-    source "$ENV_FILE"
+if [ ! -f "$ENV_FILE" ]; then
+    log_info "No .bootstrap_env found at ${ENV_FILE} — creating a new one..."
+    "$(dirname "$0")/create-bootstrap-env.sh"
+    ENV_FILE="$ENV_FILE_DEFAULT"
 fi
+
+log_info "Loading configuration from $ENV_FILE..."
+# shellcheck source=/dev/null
+source "$ENV_FILE"
 
 GCP_PROJECT_ID="${GCP_PROJECT_ID:-}"
 GCP_REGION="${GCP_REGION:-europe-west3}"
@@ -84,8 +103,25 @@ if [ -z "$GITHUB_REPO" ]; then
 fi
 
 GITHUB_REPO_NAME="${GITHUB_REPO##*/}"
-CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
+# A trigger outlives the shell that made it, so the branch it is pinned to has
+# to be a branch that lasts.
+#
+# `git rev-parse --abbrev-ref HEAD` returns the literal string "HEAD" on a
+# detached checkout, and it returns it *successfully* — so the `|| echo main`
+# fallback that used to stand here never fired, and the triggers were created
+# against refs/heads/HEAD. Cloud Build accepts that at creation time and fails
+# at every run with "Couldn't read commit", which is how a teardown trigger was
+# once found to have never worked, health check included.
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+if [ -z "$CURRENT_BRANCH" ] || [ "$CURRENT_BRANCH" = "HEAD" ]; then
+    log_error "Detached HEAD: there is no branch to pin these triggers to. Check out the branch you want them to build (usually main) and run this again."
+fi
+if [ "$CURRENT_BRANCH" != "main" ]; then
+    log_warn "Triggers will be pinned to '${CURRENT_BRANCH}', not main."
+    log_warn "They keep building that branch for as long as they exist, and stop working if it is deleted."
+fi
 BOOTSTRAP_ENVS_BUCKET="${GCP_PROJECT_ID}-bootstrap-envs"
+BOOTSTRAP_ENV_GCS_PATH="gs://${BOOTSTRAP_ENVS_BUCKET}/.bootstrap_env"
 
 # Triggers must specify a serviceAccount explicitly or the API returns
 # INVALID_ARGUMENT without explanation (org policy enforcement in this org).
@@ -101,7 +137,8 @@ log_info "Region:         ${GCP_REGION}"
 log_info "GitHub repo:    ${GITHUB_REPO}"
 log_info "Source branch:  ${CURRENT_BRANCH} (used for manual triggers)"
 log_info "Envs bucket:    gs://${BOOTSTRAP_ENVS_BUCKET}"
-log_info "Environments:   ${ENVIRONMENTS[*]}"
+log_info "Env GCS PATH:   ${BOOTSTRAP_ENV_GCS_PATH}"
+log_info "Env file:       ${ENV_FILE}"
 log_info "Build SA:       ${CLOUDBUILD_SA}"
 
 # ---------------------------------------------------------------------------
@@ -216,6 +253,19 @@ if [ -z "$REPO_RESOURCE" ]; then
 fi
 log_ok "Repository connected: ${REPO_RESOURCE}"
 
+# Persist the discovered resource path so Terraform does not have to rediscover
+# it. The connection name is operator-chosen and cannot be derived, so this
+# search is the only way to find it — but it belongs here, where it already
+# happens, rather than a second time inside a Terraform `external` data source.
+if [ -n "${ENV_FILE:-}" ] && [ -f "$ENV_FILE" ]; then
+    # Drop any previous line and append the current one. Written without
+    # `sed -i`, whose syntax differs between GNU and BSD/macOS.
+    grep -v '^CLOUDBUILD_REPO_RESOURCE=' "$ENV_FILE" > "${ENV_FILE}.tmp"
+    echo "CLOUDBUILD_REPO_RESOURCE=\"${REPO_RESOURCE}\"" >> "${ENV_FILE}.tmp"
+    mv "${ENV_FILE}.tmp" "$ENV_FILE"
+    log_info "Recorded CLOUDBUILD_REPO_RESOURCE in ${ENV_FILE}"
+fi
+
 # ---------------------------------------------------------------------------
 # Create bootstrap-envs GCS bucket
 # ---------------------------------------------------------------------------
@@ -234,8 +284,31 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Helper: upsert a Cloud Build trigger from an inline YAML definition
+# Push .bootstrap_env to the GCS bucket
 # ---------------------------------------------------------------------------
+log_section "Pushing ${ENV_FILE} to the GCS bucket"
+
+if $GCLOUD storage ls "${BOOTSTRAP_ENV_GCS_PATH}" \
+        --project="$GCP_PROJECT_ID" &>/dev/null; then
+    log_warn "\".bootstrap_env\" already exists in bucket, overwriting it."
+fi
+
+gsutil cp "$ENV_FILE" \
+    "${BOOTSTRAP_ENV_GCS_PATH}"
+
+if ! $GCLOUD storage ls "${BOOTSTRAP_ENV_GCS_PATH}" \
+    --project="$GCP_PROJECT_ID" &>/dev/null; then
+    log_error "\".bootstrap_env\" could not be pushed to the GCS bucket to path: ${BOOTSTRAP_ENV_GCS_PATH}."
+    log_error "To push it manually run:"
+    log_error "  gsutil cp ${ENV_FILE} \\"
+    log_error "     ${BOOTSTRAP_ENV_GCS_PATH}"
+fi
+
+# ---------------------------------------------------------------------------
+# Create Cloud Build triggers
+# ---------------------------------------------------------------------------
+log_section "Creating Cloud Build triggers"
+
 upsert_trigger() {
     local NAME="$1"
     local TRIGGER_YAML="$2"
@@ -258,107 +331,11 @@ upsert_trigger() {
     log_ok "  Trigger ready: ${NAME}"
 }
 
-# ---------------------------------------------------------------------------
-# Per-environment triggers
-# ---------------------------------------------------------------------------
-for ENV_NAME in "${ENVIRONMENTS[@]}"; do
-    log_section "Environment: ${ENV_NAME}"
-
-    ENV_GCS_PATH="gs://${BOOTSTRAP_ENVS_BUCKET}/${ENV_NAME}.bootstrap_env"
-
-    # --- bootstrap-<env>-auto: branch push trigger ---
-    upsert_trigger "bootstrap-${ENV_NAME}-auto" "$(cat <<EOF
-name: bootstrap-${ENV_NAME}-auto
-description: "Auto-bootstrap ${ENV_NAME} — push to env/${ENV_NAME} to trigger"
-tags:
-  - bootstrap
-  - ${ENV_NAME}
-  - auto
-filename: iac/cloudbuild/bootstrap-platform.yaml
-serviceAccount: ${CLOUDBUILD_SA}
-repositoryEventConfig:
-  repository: ${REPO_RESOURCE}
-  push:
-    branch: ^env/${ENV_NAME}$
-substitutions:
-  _BOOTSTRAP_ENV_GCS_PATH: ${ENV_GCS_PATH}
-EOF
-)"
-
-    # --- teardown-<env>-auto: branch push trigger ---
-    upsert_trigger "teardown-${ENV_NAME}-auto" "$(cat <<EOF
-name: teardown-${ENV_NAME}-auto
-description: "Auto-teardown ${ENV_NAME} — push to teardown/${ENV_NAME} to trigger"
-tags:
-  - teardown
-  - ${ENV_NAME}
-  - auto
-filename: iac/cloudbuild/teardown-platform.yaml
-serviceAccount: ${CLOUDBUILD_SA}
-repositoryEventConfig:
-  repository: ${REPO_RESOURCE}
-  push:
-    branch: ^teardown/${ENV_NAME}$
-substitutions:
-  _BOOTSTRAP_ENV_GCS_PATH: ${ENV_GCS_PATH}
-  _PRESERVE_CAS: "Y"
-  _PRESERVE_DNS: "Y"
-EOF
-)"
-
-    # --- bootstrap-<env>: manual console trigger ---
-    upsert_trigger "bootstrap-${ENV_NAME}" "$(cat <<EOF
-name: bootstrap-${ENV_NAME}
-description: "Manual bootstrap ${ENV_NAME} — click Run Trigger in the console"
-tags:
-  - bootstrap
-  - ${ENV_NAME}
-  - manual
-filename: iac/cloudbuild/bootstrap-platform.yaml
-serviceAccount: ${CLOUDBUILD_SA}
-sourceToBuild:
-  repository: ${REPO_RESOURCE}
-  ref: refs/heads/${CURRENT_BRANCH}
-  repoType: GITHUB
-substitutions:
-  _BOOTSTRAP_ENV_GCS_PATH: ${ENV_GCS_PATH}
-EOF
-)"
-
-    # --- teardown-<env>: manual console trigger ---
-    upsert_trigger "teardown-${ENV_NAME}" "$(cat <<EOF
-name: teardown-${ENV_NAME}
-description: "Manual teardown ${ENV_NAME} — click Run Trigger in the console"
-tags:
-  - teardown
-  - ${ENV_NAME}
-  - manual
-filename: iac/cloudbuild/teardown-platform.yaml
-serviceAccount: ${CLOUDBUILD_SA}
-sourceToBuild:
-  repository: ${REPO_RESOURCE}
-  ref: refs/heads/${CURRENT_BRANCH}
-  repoType: GITHUB
-substitutions:
-  _BOOTSTRAP_ENV_GCS_PATH: ${ENV_GCS_PATH}
-  _PRESERVE_CAS: "Y"
-  _PRESERVE_DNS: "Y"
-EOF
-)"
-
-done
-
-# ---------------------------------------------------------------------------
-# Generic parameterised triggers (once, env-agnostic)
-# ---------------------------------------------------------------------------
-log_section "Generic parameterised triggers"
-
 upsert_trigger "bootstrap-platform" "$(cat <<EOF
 name: bootstrap-platform
-description: "Bootstrap any environment"
+description: "Bootstrap platform"
 tags:
   - bootstrap
-  - generic
 filename: iac/cloudbuild/bootstrap-platform.yaml
 serviceAccount: ${CLOUDBUILD_SA}
 sourceToBuild:
@@ -366,17 +343,16 @@ sourceToBuild:
   ref: refs/heads/${CURRENT_BRANCH}
   repoType: GITHUB
 substitutions:
-  _BOOTSTRAP_ENV_GCS_PATH: ""
+  _BOOTSTRAP_ENV_GCS_PATH: ${BOOTSTRAP_ENV_GCS_PATH}
   _SKIP_TERRAFORM: "false"
 EOF
 )"
 
 upsert_trigger "teardown-platform" "$(cat <<EOF
 name: teardown-platform
-description: "Teardown any environment "
+description: "Teardown platform "
 tags:
   - teardown
-  - generic
 filename: iac/cloudbuild/teardown-platform.yaml
 serviceAccount: ${CLOUDBUILD_SA}
 sourceToBuild:
@@ -384,7 +360,7 @@ sourceToBuild:
   ref: refs/heads/${CURRENT_BRANCH}
   repoType: GITHUB
 substitutions:
-  _BOOTSTRAP_ENV_GCS_PATH: ""
+  _BOOTSTRAP_ENV_GCS_PATH: ${BOOTSTRAP_ENV_GCS_PATH}
   _PRESERVE_CAS: "Y"
   _PRESERVE_DNS: "Y"
 EOF
@@ -392,7 +368,7 @@ EOF
 
 upsert_trigger "test-environments" "$(cat <<EOF
 name: test-environments
-description: "Bootstrap then teardown every env in a GCS directory"
+description: "Bootstrap then teardown multiple environments from a GCS directory"
 tags:
   - test
   - generic
@@ -403,9 +379,26 @@ sourceToBuild:
   ref: refs/heads/${CURRENT_BRANCH}
   repoType: GITHUB
 substitutions:
-  _BOOTSTRAP_ENVS_DIR: ""
+  _BOOTSTRAP_ENVS_DIR: "gs://${BOOTSTRAP_ENVS_BUCKET}/"
   _PRESERVE_CAS: "Y"
   _PRESERVE_DNS: "Y"
+EOF
+)"
+
+upsert_trigger "run-sample-clients" "$(cat <<EOF
+name: run-sample-clients
+description: "Run the sample-client smoke tests (python + vehicle) and verify BigTable writes"
+tags:
+  - smoke-test
+  - generic
+filename: iac/cloudbuild/run-sample-clients.yaml
+serviceAccount: ${CLOUDBUILD_SA}
+sourceToBuild:
+  repository: ${REPO_RESOURCE}
+  ref: refs/heads/${CURRENT_BRANCH}
+  repoType: GITHUB
+substitutions:
+  _BOOTSTRAP_ENV_GCS_PATH: ${BOOTSTRAP_ENV_GCS_PATH}
 EOF
 )"
 
@@ -421,20 +414,3 @@ log_ok "=================================================================="
 echo ""
 log_info "View triggers in the console:"
 log_info "  ${CONSOLE_URL}"
-echo ""
-log_info "Next — upload a .bootstrap_env file for each environment:"
-for ENV_NAME in "${ENVIRONMENTS[@]}"; do
-    log_info "  gsutil cp iac/bootstrapping/.bootstrap_env \\"
-    log_info "    gs://${BOOTSTRAP_ENVS_BUCKET}/${ENV_NAME}.bootstrap_env"
-done
-echo ""
-log_info "GitOps workflow:"
-for ENV_NAME in "${ENVIRONMENTS[@]}"; do
-    log_info "  Bootstrap ${ENV_NAME}:  git checkout -b env/${ENV_NAME} && git push origin env/${ENV_NAME}"
-    log_info "  Teardown  ${ENV_NAME}:  git checkout -b teardown/${ENV_NAME} && git push origin teardown/${ENV_NAME}"
-done
-echo ""
-log_info "Or use the manual triggers in the console — no form to fill in:"
-for ENV_NAME in "${ENVIRONMENTS[@]}"; do
-    log_info "  bootstrap-${ENV_NAME}  /  teardown-${ENV_NAME}"
-done

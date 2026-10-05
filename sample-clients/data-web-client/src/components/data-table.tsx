@@ -101,8 +101,17 @@ export default function DataTable({ columnKeys, data, onRowClick, serverPaginati
 
   return (
     <div className="flex flex-col rounded border border-gray-200 overflow-hidden">
-      {/* Fixed-height scrollable body with sticky header */}
-      <div className="overflow-auto" style={{ maxHeight: '360px' }}>
+      {/* Scrollable body with a sticky header. The cap follows the window rather
+          than a fixed 360px, which showed nine rows on any screen and left the
+          rest of the page empty. 280px is the chrome above and below: page
+          padding, breadcrumb, title and the pager.
+
+          This is a max-height, so it only ever caps. A table with two rows stays
+          two rows tall — the registry views are unaffected. */}
+      <div
+        className="overflow-auto"
+        style={{ maxHeight: 'max(240px, calc(100vh - 280px))' }}
+      >
         <table className="w-full text-sm">
           <thead className="bg-gray-50 sticky top-0 z-10">
             {table.getHeaderGroups().map((headerGroup) => (

@@ -17,15 +17,16 @@ data:
     # This connector handles three distinct protobuf message types published on
     # different NATS subjects:
     #
-    #   telemetry.>         — structured Android SDV metrics reports
-    #                         (google.sdv.telemetry.MetricsReport) published by
-    #                         the Android Telemetry Service. The inner payload is
-    #                         com.android.sdv.telemetry.VehicleTelemetryData
-    #                         wrapped in a google.protobuf.Any field.
+    #   telemetry.>         — flat sensor readings, decoded as
+    #                         telemetry.TelemetryMessage (message_id, device_id,
+    #                         repeated SensorReading). Published by Nexus SDK
+    #                         vehicle clients.
     #                         Subject pattern: telemetry.<VIN>
     #
-    #   telemetry-generic.> — flat sensor readings (telemetry.TelemetryMessage)
-    #                         published by vehicle clients using the Nexus SDK.
+    #   telemetry-generic.> — structured SDV metrics report, decoded as
+    #                         google.sdv.telemetry.MetricsReport (report_timestamp
+    #                         + flat report_data: VELOCITY, ENGINE_RPM, GPS, ...).
+    #                         Published by the Go vehicle client.
     #                         Subject pattern: telemetry-generic.<VIN>.<sensor>
     #
     #   local.telemetry.>   — AAOS vehicle telemetry from leaf-node connected
@@ -75,7 +76,7 @@ data:
       processors:
         - try:
             - switch:
-                - check: metadata("nats_subject").has_prefix("telemetry.")
+                - check: metadata("nats_subject").has_prefix("telemetry-generic.")
                   processors:
                     - protobuf:
                         operator: to_json
@@ -111,7 +112,7 @@ data:
                     - unarchive:
                         format: json_array
 
-                - check: metadata("nats_subject").has_prefix("telemetry-generic.")
+                - check: metadata("nats_subject").has_prefix("telemetry.")
                   processors:
                     - protobuf:
                         operator: to_json
@@ -124,7 +125,7 @@ data:
                         message: "TelemetryMessage decoded"
                         fields_mapping: 'root = this'
 
-                    - mapping: "root = this.sensor_data.map_each(reading -> {\n  \"device_id\": this.device_id,\n  \"timestamp_str\": reading.timestamp.ts_format(\"2006-01-02T15:04:05.000000000Z07:00\"),\n  \"family\": match reading.data_type {\n    \"DYNAMIC\" => \"dynamic\",\n    1 => \"dynamic\",\n    \"STATIC\" => \"static\",\n    0 => \"static\",\n    null => \"static\",\n    _ => \"static\"\n  },\n  \"sensor\": reading.sensor,\n  \"value\": reading.value\n})"
+                    - mapping: "root = this.sensor_data.map_each(reading -> {\n  \"device_id\": this.device_id,\n  \"timestamp_str\": reading.timestamp.ts_format(\"2006-01-02T15:04:05.000000000Z07:00\"),\n  \"family\": match reading.data_type {\n    \"DYNAMIC\" => \"dynamic\",\n    1 => \"dynamic\",\n    \"STATIC\" => \"static\",\n    0 => \"static\",\n    null => \"static\",\n    _ => \"static\"\n  },\n  \"sensor\": reading.sensor,\n  \"value\": reading.value.number().catch(reading.value)\n})"
 
                     - unarchive:
                         format: json_array

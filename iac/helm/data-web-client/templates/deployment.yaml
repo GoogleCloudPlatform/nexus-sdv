@@ -75,6 +75,12 @@ spec:
               value: {{ .Values.database.password | quote }}
             - name: DB_NAME
               value: {{ .Values.database.name | quote }}
+            {{- if .Values.vinRegistryUrl }}
+            # Optional companion service: with this unset the Vehicle Registry view
+            # explains that no registry is configured instead of erroring.
+            - name: VIN_REGISTRY_URL
+              value: {{ .Values.vinRegistryUrl | quote }}
+            {{- end }}
             # Keycloak uses a certificate signed by a custom CA.
             # Node.js must skip TLS verification when talking to Keycloak
             # (token exchange happens server-side inside the cluster).

@@ -91,11 +91,27 @@ spec:
               value: {{ .Values.keycloak.adminPassword | quote }}
             - name: KC_HTTP_ENABLED
               value: "true"
+            {{- if eq .Values.pkiStrategy "remote" }}
+            # The GCE Ingress terminates TLS and forwards plain HTTP to port 8080.
+            # Without this Keycloak sees scheme=http, rejects admin/token requests
+            # (sslRequired=external) and builds http:// URLs.
+            - name: KC_PROXY_HEADERS
+              value: "xforwarded"
+            {{- end }}
             - name: KC_HTTP_MANAGEMENT_PORT
               value: "9000"
             - name: KC_HOSTNAME
               {{- if and (eq .Values.pkiStrategy "remote") .Values.baseDomain }}
-              value: "keycloak.{{ .Values.baseDomain }}"
+              # Full URL, and deliberately the browser-facing name: this string
+              # becomes the OIDC issuer, so it must be publicly trusted and
+              # reachable — token validators fetch the discovery document and the
+              # keys from it, and the browser is redirected there to sign in. Only
+              # the Ingress satisfies that. Vehicles fetch their tokens directly
+              # from keycloak.<baseDomain>:8443 and receive this same issuer, so
+              # every consumer compares one identical string.
+              value: "https://keycloak-ui.{{ .Values.baseDomain }}"
+              {{- else if .Values.keycloak.frontendUrl }}
+              value: {{ .Values.keycloak.frontendUrl | quote }}
               {{- else }}
               value: "keycloak"
               {{- end }}

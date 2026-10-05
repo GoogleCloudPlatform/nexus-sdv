@@ -3,7 +3,7 @@ steps:
   # 1. SETUP & AUTHENTICATION
   # ============================================================================
   - id: 'get-gke-credentials'
-    name: 'gcr.io/cloud-builders/gcloud'
+    name: 'gcr.io/cloud-builders/gcloud@sha256:abcad906c9fa0dd063c4b6e570994f34024673486b17e9f4c99c720165e03ae5'
     entrypoint: 'bash'
     args:
       - '-c'
@@ -31,7 +31,7 @@ steps:
   # Secret Manager) and exposed to the browser via the /api/maps-config route.
   # ============================================================================
   - id: 'configure-ar'
-    name: 'gcr.io/cloud-builders/gcloud'
+    name: 'gcr.io/cloud-builders/gcloud@sha256:abcad906c9fa0dd063c4b6e570994f34024673486b17e9f4c99c720165e03ae5'
     entrypoint: 'bash'
     args:
       - '-c'
@@ -76,7 +76,7 @@ steps:
   # before the Helmfile sync so the schema is ready before the app starts.
   # ============================================================================
   - id: 'init-webclient-db'
-    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:575.0.0'
     entrypoint: 'bash'
     args:
       - '-c'
@@ -137,11 +137,12 @@ steps:
   # Skipped silently when PKI_STRATEGY=local.
   # ============================================================================
   - id: 'generate-fleetview-tls-cert'
-    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:575.0.0'
     entrypoint: 'bash'
     args:
       - '-c'
       - |
+        apt-get update -q && apt-get install -y -q openssl
         if [ "$$PKI_STRATEGY" != "remote" ]; then echo "Skipping TLS cert generation (local mode)."; exit 0; fi
 
         HOSTNAME="$$FLEETVIEW_HOSTNAME.$$BASE_DOMAIN"
@@ -187,7 +188,7 @@ steps:
   # Skipped silently when PKI_STRATEGY=local.
   # ============================================================================
   - id: 'update-nextauth-url'
-    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:575.0.0'
     entrypoint: 'bash'
     args:
       - '-c'
@@ -204,30 +205,34 @@ steps:
     waitFor: ['generate-fleetview-tls-cert', 'build-push-data-web-client', 'get-gke-credentials']
 
   # ============================================================================
-  # 5. ENSURE KEYCLOAK WEB CLIENT SECRETS EXIST
+  # 5. ENSURE THE KEYCLOAK WEB CLIENT IS CORRECTLY REGISTERED
   #
-  # Idempotent prerequisite for step 6: creates KEYCLOAK_CLIENT_ID_WEB_CLIENT,
-  # KEYCLOAK_CLIENT_SECRET_WEB_CLIENT, and KEYCLOAK_ISSUER in Secret Manager
-  # (and registers the client in Keycloak) when they are missing — i.e. on first
-  # deployment or when deploy-keycloak.yaml has not yet completed its
-  # create-web-client-secrets step.  Safe to run on every build because it exits
-  # immediately when the secrets already exist.
+  # Creates KEYCLOAK_CLIENT_ID_WEB_CLIENT, KEYCLOAK_CLIENT_SECRET_WEB_CLIENT and
+  # KEYCLOAK_ISSUER in Secret Manager if they are missing, and then always
+  # reconciles the client in Keycloak — secret, redirect URIs and web origins —
+  # against FleetView's actual URL.
+  #
+  # The reconciliation must not be skipped just because the secrets are already
+  # there: deploy-keycloak creates those secrets earlier in deploy-all, so on
+  # every fresh bootstrap this step would skip and leave the redirect URIs at the
+  # realm import's "/*". That is a relative URI resolved against an empty
+  # rootUrl, so it matches nothing and sign-in fails with "Invalid parameter:
+  # redirect_uri". Both halves are idempotent, so running them every time is safe.
   # ============================================================================
   - id: 'ensure-keycloak-web-client'
-    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:575.0.0'
     entrypoint: 'bash'
     args:
       - '-c'
       - |
-        apt-get install -y -q jq
+        apt-get update -q && apt-get install -y -q jq openssl
 
-        if gcloud secrets versions access latest --secret="KEYCLOAK_CLIENT_ID_WEB_CLIENT" \
-             --project="$PROJECT_ID" &>/dev/null; then
-          echo "✓ Keycloak web-client secrets already exist — skipping."
-          exit 0
-        fi
-
-        echo "Keycloak web-client secrets not found — provisioning..."
+        # No early exit on "secrets already exist": that guard also skipped the
+        # client reconciliation below, so the redirect URIs kept whatever the realm
+        # import set ("/*", which resolves against an empty rootUrl and matches
+        # nothing) and FleetView sign-in failed with "Invalid parameter:
+        # redirect_uri". The reconciliation is idempotent, so it runs every time.
+        echo "Reconciling the Keycloak web client..."
 
         KEYCLOAK_ADMIN_PASSWORD=$$(gcloud secrets versions access latest \
           --secret="KEYCLOAK_ADMIN_PASSWORD" --project="$PROJECT_ID")
@@ -239,16 +244,46 @@ steps:
         if [ "$$PKI_STRATEGY" == "remote" ]; then
           FLEETVIEW_HOSTNAME=$$(gcloud secrets versions access latest \
             --secret="FLEETVIEW_HOSTNAME" --project="$PROJECT_ID")
-          KEYCLOAK_BASE_URL="https://keycloak.$${BASE_DOMAIN}"
+          # keycloak-ui, not keycloak: this string becomes KEYCLOAK_ISSUER, and the
+          # issuer must be the browser-facing Ingress name — publicly trusted and
+          # reachable for discovery. keycloak.<domain> is the LoadBalancer on 8443
+          # that vehicles use for mutual TLS.
+          #
+          # NOTE: deploy-keycloak.yaml derives the same value independently in its
+          # create-web-client-secrets step. Whichever pipeline runs last wins, so
+          # the two must stay in step. Worth collapsing into one source.
+          KEYCLOAK_BASE_URL="https://keycloak-ui.$${BASE_DOMAIN}"
           FLEETVIEW_URL="https://$${FLEETVIEW_HOSTNAME}.$${BASE_DOMAIN}"
+          # …but the admin API is called over the plain LoadBalancer. keycloak-ui
+          # is a GKE Ingress with a Google-managed certificate, which routinely
+          # takes 15 to 25 minutes to provision — the step below would wait for a
+          # certificate that only browsers need. keycloak.<domain>:8443 serves the
+          # same Keycloak, answers within a couple of minutes, and its certificate
+          # comes from the platform's own CA, so -k is used as the local branch
+          # already does over the LoadBalancer IP.
+          KEYCLOAK_ADMIN_URL="https://keycloak.$${BASE_DOMAIN}:8443"
         else
           KEYCLOAK_BASE_URL="https://keycloak"
           FLEETVIEW_URL="http://localhost:3000"
+          KEYCLOAK_ADMIN_URL="https://keycloak"
         fi
 
         ISSUER="$${KEYCLOAK_BASE_URL}/realms/sdv-telemetry"
         CLIENT_ID="data-web-client"
-        CLIENT_SECRET=$$(openssl rand -hex 32)
+        # Reuse the stored secret: the running pod baked it in at deploy time, so
+        # regenerating it here would rotate it out from under the pod and break
+        # sign-in (same reasoning as create-web-client-secrets in deploy-keycloak).
+        if EXISTING_SECRET=$$(gcloud secrets versions access latest \
+             --secret="KEYCLOAK_CLIENT_SECRET_WEB_CLIENT" --project="$PROJECT_ID" 2>/dev/null) \
+           && [ -n "$$EXISTING_SECRET" ]; then
+          CLIENT_SECRET="$$EXISTING_SECRET"
+          SECRET_IS_NEW=false
+          echo "Reusing existing KEYCLOAK_CLIENT_SECRET_WEB_CLIENT."
+        else
+          CLIENT_SECRET=$$(openssl rand -hex 32)
+          SECRET_IS_NEW=true
+          echo "No existing web-client secret found — generating a new one."
+        fi
         REDIRECT_URI="$${FLEETVIEW_URL}/*"
         WEB_ORIGIN="$${FLEETVIEW_URL}"
 
@@ -261,48 +296,105 @@ steps:
         }
 
         add_secret "KEYCLOAK_CLIENT_ID_WEB_CLIENT"     "$$CLIENT_ID"
-        add_secret "KEYCLOAK_CLIENT_SECRET_WEB_CLIENT" "$$CLIENT_SECRET"
+        if [ "$$SECRET_IS_NEW" = "true" ]; then
+          add_secret "KEYCLOAK_CLIENT_SECRET_WEB_CLIENT" "$$CLIENT_SECRET"
+        fi
         add_secret "KEYCLOAK_ISSUER"                   "$$ISSUER"
 
         echo "Secrets stored. Registering client in Keycloak..."
 
-        CURL="curl -s -f"
+        CURL="curl -s -f -k"   # -k: the admin LoadBalancer serves the platform's own CA
 
-        TOKEN_RESPONSE=$$($$CURL -X POST \
-          "$${KEYCLOAK_BASE_URL}/realms/master/protocol/openid-connect/token" \
-          -H "Content-Type: application/x-www-form-urlencoded" \
-          -d "client_id=admin-cli" \
-          -d "username=admin" \
-          -d "password=$${KEYCLOAK_ADMIN_PASSWORD}" \
-          -d "grant_type=password" || echo "{}")
-
-        ADMIN_TOKEN=$$(echo "$$TOKEN_RESPONSE" | jq -r '.access_token // ""' 2>/dev/null || true)
-
-        if [[ -z "$$ADMIN_TOKEN" ]]; then
-          echo "::warning::Could not reach Keycloak admin API — secrets stored, client will be registered on next deploy-keycloak run."
+        # --data-urlencode for the password: the generated admin password is
+        # base64 and contains '+', which plain -d sends as a literal '+' — the
+        # server decodes that to a space and the login fails with "Invalid user
+        # credentials". The step then logged a warning and skipped the client
+        # registration, leaving the redirect URIs unset.
+        # On local PKI this step cannot reach Keycloak at all: KEYCLOAK_BASE_URL
+        # is the in-cluster service name, which a Cloud Build worker does not
+        # resolve. That is by design — reconcile-local-auth-urls does the work
+        # further down, over the LoadBalancer IP. So the waiting and the failure
+        # below apply to remote only; on local this has always been, and stays,
+        # a quiet skip.
+        if [ "$$PKI_STRATEGY" != "remote" ]; then
+          echo "Local PKI — the admin API is not reachable from here by design; reconcile-local-auth-urls sets the redirect URIs later."
           exit 0
         fi
 
-        ADMIN_URL="$${KEYCLOAK_BASE_URL}/admin/realms/sdv-telemetry"
+        # Keycloak is reached through a freshly created Ingress, which does not
+        # forward until its backend health check has passed. A single attempt
+        # here measures that window rather than Keycloak. Retry for five minutes
+        # before giving up.
+        ADMIN_TOKEN=""
+        for attempt in $$(seq 1 30); do
+          TOKEN_RESPONSE=$$($$CURL -X POST \
+            "$${KEYCLOAK_ADMIN_URL}/realms/master/protocol/openid-connect/token" \
+            -H "Content-Type: application/x-www-form-urlencoded" \
+            -d "client_id=admin-cli" \
+            -d "grant_type=password" \
+            --data-urlencode "username=admin" \
+            --data-urlencode "password=$${KEYCLOAK_ADMIN_PASSWORD}" || echo "{}")
+          ADMIN_TOKEN=$$(echo "$$TOKEN_RESPONSE" | jq -r '.access_token // ""' 2>/dev/null || true)
+          [[ -n "$$ADMIN_TOKEN" ]] && break
+          echo "  waiting for the Keycloak admin API ($$attempt/30)..."
+          sleep 10
+        done
 
-        EXISTING=$$(curl -s "$${ADMIN_URL}/clients?clientId=$${CLIENT_ID}" \
+        if [[ -z "$$ADMIN_TOKEN" ]]; then
+          # Not a warning. Without this registration the client keeps the realm
+          # import's redirectUris of ["/*"], which Keycloak reads relative to a
+          # rootUrl that is empty — so no absolute address matches and every
+          # FleetView login ends in "Invalid parameter: redirect_uri". The
+          # platform then looks healthy and its web interface cannot be used.
+          # Nothing re-runs this on its own: deploy-keycloak reconciles only the
+          # secret for a client that already exists, not its redirect URIs.
+          echo "::error::Keycloak admin API unreachable after 5 minutes on remote PKI — the web client was not registered, and FleetView login would be broken. Failing rather than leaving a platform that looks healthy."
+          exit 1
+        fi
+
+        ADMIN_URL="$${KEYCLOAK_ADMIN_URL}/admin/realms/sdv-telemetry"
+
+        # $$CURL, not a bare curl: the admin LoadBalancer serves the platform's own
+        # CA, so an unverified GET fails TLS, the `|| echo "[]"` turns that into
+        # "no such client", and the create branch below runs against a client that
+        # already exists. That is exactly how a remote platform ended up with the
+        # realm import's placeholder redirect URI and an unusable FleetView login.
+        EXISTING=$$($$CURL "$${ADMIN_URL}/clients?clientId=$${CLIENT_ID}" \
           -H "Authorization: Bearer $${ADMIN_TOKEN}" || echo "[]")
         CLIENT_UUID=$$(echo "$$EXISTING" | jq -r '.[0].id // ""' 2>/dev/null || true)
 
         if [[ -n "$$CLIENT_UUID" ]]; then
-          $$CURL -X POST "$${ADMIN_URL}/clients/$${CLIENT_UUID}/client-secret" \
-            -H "Authorization: Bearer $${ADMIN_TOKEN}" -H "Content-Type: application/json" \
-            -d "{\"type\":\"secret\",\"value\":\"$${CLIENT_SECRET}\"}"
-          $$CURL -X PUT "$${ADMIN_URL}/clients/$${CLIENT_UUID}" \
-            -H "Authorization: Bearer $${ADMIN_TOKEN}" -H "Content-Type: application/json" \
-            -d "{\"clientId\":\"$${CLIENT_ID}\",\"redirectUris\":[\"$${REDIRECT_URI}\"],\"webOrigins\":[\"$${WEB_ORIGIN}\"]}"
-          echo "✓ Updated existing Keycloak client '$${CLIENT_ID}'."
+          # Set the exact secret + redirect URIs via GET-modify-PUT. POST
+          # .../client-secret would REGENERATE a random secret (ignoring the body)
+          # and diverge from Secret Manager, so it is not used.
+          CLIENT_JSON=$$($$CURL "$${ADMIN_URL}/clients/$${CLIENT_UUID}" -H "Authorization: Bearer $${ADMIN_TOKEN}")
+          echo "$$CLIENT_JSON" | jq --arg s "$$CLIENT_SECRET" --arg r "$${REDIRECT_URI}" --arg w "$${WEB_ORIGIN}" \
+            '.secret = $$s | .redirectUris = [$$r] | .webOrigins = [$$w]' \
+            | $$CURL -X PUT "$${ADMIN_URL}/clients/$${CLIENT_UUID}" \
+                -H "Authorization: Bearer $${ADMIN_TOKEN}" -H "Content-Type: application/json" -d @-
+          echo "✓ Updated existing Keycloak client '$${CLIENT_ID}' (secret + redirect URIs)."
         else
           $$CURL -X POST "$${ADMIN_URL}/clients" \
             -H "Authorization: Bearer $${ADMIN_TOKEN}" -H "Content-Type: application/json" \
             -d "{\"clientId\":\"$${CLIENT_ID}\",\"name\":\"$${CLIENT_ID}\",\"enabled\":true,\"clientAuthenticatorType\":\"client-secret\",\"secret\":\"$${CLIENT_SECRET}\",\"redirectUris\":[\"$${REDIRECT_URI}\"],\"webOrigins\":[\"$${WEB_ORIGIN}\"],\"standardFlowEnabled\":true,\"serviceAccountsEnabled\":false,\"publicClient\":false,\"protocol\":\"openid-connect\"}"
           echo "✓ Created Keycloak client '$${CLIENT_ID}'."
         fi
+
+        # Read the client back and check the address is actually there. Neither
+        # branch above fails the step on its own: this one has no `set -e`, so a
+        # rejected POST — a duplicate clientId, say — leaves the success line
+        # above printed and the build green. Verifying the outcome catches that
+        # and every other way this can go wrong, including ones not thought of.
+        FINAL=$$($$CURL "$${ADMIN_URL}/clients?clientId=$${CLIENT_ID}" \
+          -H "Authorization: Bearer $${ADMIN_TOKEN}" || echo "[]")
+        if ! echo "$$FINAL" | jq -e --arg r "$${REDIRECT_URI}" \
+             '.[0].redirectUris // [] | index($$r)' >/dev/null 2>&1; then
+          echo "::error::The Keycloak client '$${CLIENT_ID}' does not carry the redirect URI $${REDIRECT_URI}."
+          echo "::error::FleetView sign-in would fail with \"Invalid parameter: redirect_uri\". Current value:"
+          echo "$$FINAL" | jq -r '.[0].redirectUris // "client not found"' 2>/dev/null || echo "  (unreadable response)"
+          exit 1
+        fi
+        echo "✓ Verified: redirect URI is $${REDIRECT_URI}."
 
         echo "✅ Keycloak web-client provisioning complete."
     waitFor: ['get-gke-credentials']
@@ -311,7 +403,7 @@ steps:
   # 6. ROLLOUT RESTART (force pods to pull the new :latest image)
   # ============================================================================
   - id: 'rollout-restart'
-    name: 'gcr.io/cloud-builders/gcloud'
+    name: 'gcr.io/cloud-builders/gcloud@sha256:abcad906c9fa0dd063c4b6e570994f34024673486b17e9f4c99c720165e03ae5'
     entrypoint: 'bash'
     args:
       - '-c'
@@ -382,6 +474,92 @@ steps:
                 'PKI_STRATEGY', 'BASE_DOMAIN', 'FLEETVIEW_HOSTNAME',
                 'EXTERNAL_SECRETS_OPERATOR_GCP_SERVICE_ACCOUNT']
     waitFor: ['rollout-restart', 'init-webclient-db', 'update-nextauth-url', 'ensure-keycloak-web-client']
+
+  # ============================================================================
+  # 7. RECONCILE LOCAL-MODE AUTH URLS (local PKI only)
+  #
+  # In local PKI there is no DNS: the browser reaches Keycloak and the web client
+  # only via their Service LoadBalancer IPs. Those IPs are not known until the
+  # Services exist, so the earlier steps fall back to the in-cluster name
+  # ("https://keycloak") and "http://localhost:3000", which the browser cannot use.
+  # After the deploy, resolve the real LB IPs and set the browser-facing values:
+  #   KEYCLOAK_ISSUER = https://<keycloak-LB-IP>:8443/realms/sdv-telemetry
+  #   NEXTAUTH_URL    = http://<data-web-client-LB-IP>:3000
+  # Persist them to Secret Manager (so the next deploy reads them), re-point the
+  # Keycloak client redirect/web-origin at the web-client IP, and roll the values
+  # into the running pod. No-op for remote PKI (DNS hostnames are already correct).
+  # ============================================================================
+  - id: 'reconcile-local-auth-urls'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:575.0.0'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        if [ "$$PKI_STRATEGY" = "remote" ]; then
+          echo "Remote PKI — Keycloak/fleetview use DNS hostnames already; nothing to reconcile."
+          exit 0
+        fi
+        apt-get update -q && apt-get install -y -q jq
+
+        gcloud container clusters get-credentials "$$GKE_CLUSTER_NAME" --region="$$GCP_REGION" --project="$PROJECT_ID"
+
+        get_ip() { kubectl get svc "$$1" -n "$$2" -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true; }
+        echo "Resolving Keycloak + data-web-client LoadBalancer IPs..."
+        KC_IP=""; DWC_IP=""
+        for i in {1..30}; do
+          [ -z "$$KC_IP" ]  && KC_IP=$$(get_ip keycloak base-services)
+          [ -z "$$DWC_IP" ] && DWC_IP=$$(get_ip data-web-client sample-services)
+          { [ -n "$$KC_IP" ] && [ -n "$$DWC_IP" ]; } && break
+          echo "  waiting (keycloak='$$KC_IP' data-web-client='$$DWC_IP')... ($i/30)"
+          sleep 10
+        done
+        if [ -z "$$KC_IP" ] || [ -z "$$DWC_IP" ]; then
+          echo "::error::Could not resolve LoadBalancer IPs (keycloak='$$KC_IP' data-web-client='$$DWC_IP')."
+          exit 1
+        fi
+
+        ISSUER="https://$${KC_IP}:8443/realms/sdv-telemetry"
+        NEXTAUTH_URL="http://$${DWC_IP}:3000"
+        echo "KEYCLOAK_ISSUER = $$ISSUER"
+        echo "NEXTAUTH_URL    = $$NEXTAUTH_URL"
+
+        upd() {
+          if ! gcloud secrets describe "$$1" --project="$PROJECT_ID" &>/dev/null; then
+            gcloud secrets create "$$1" --replication-policy="automatic" --project="$PROJECT_ID"
+          fi
+          printf '%s' "$$2" | gcloud secrets versions add "$$1" --data-file=- --project="$PROJECT_ID"
+        }
+        upd KEYCLOAK_ISSUER "$$ISSUER"
+        upd NEXTAUTH_URL    "$$NEXTAUTH_URL"
+
+        # Re-point the Keycloak client redirect/web-origin at the data-web-client IP.
+        ADMIN_PW=$$(gcloud secrets versions access latest --secret="KEYCLOAK_ADMIN_PASSWORD" --project="$PROJECT_ID")
+        CALL="https://$${KC_IP}:8443"
+        TOKEN=$$(curl -k -s -X POST "$${CALL}/realms/master/protocol/openid-connect/token" \
+          -H "Content-Type: application/x-www-form-urlencoded" \
+          -d client_id=admin-cli -d username=admin --data-urlencode "password=$${ADMIN_PW}" -d grant_type=password \
+          | jq -r '.access_token // empty')
+        if [ -n "$$TOKEN" ]; then
+          ADMIN="$${CALL}/admin/realms/sdv-telemetry"
+          UUID=$$(curl -k -s "$${ADMIN}/clients?clientId=data-web-client" -H "Authorization: Bearer $${TOKEN}" | jq -r '.[0].id // empty')
+          if [ -n "$$UUID" ]; then
+            curl -k -s -o /dev/null -w "  keycloak client redirect update: %{http_code}\n" -X PUT "$${ADMIN}/clients/$${UUID}" \
+              -H "Authorization: Bearer $${TOKEN}" -H "Content-Type: application/json" \
+              -d "{\"redirectUris\":[\"$${NEXTAUTH_URL}/*\"],\"webOrigins\":[\"$${NEXTAUTH_URL}\"]}"
+          else
+            echo "::warning::data-web-client client not found in Keycloak — skipping redirect update."
+          fi
+        else
+          echo "::warning::Could not obtain Keycloak admin token — secrets updated, but skipped Keycloak redirect update."
+        fi
+
+        # Roll the corrected URLs into the running pod (helm reads the updated secrets next deploy).
+        kubectl set env deployment/data-web-client -n sample-services \
+          KEYCLOAK_ISSUER="$$ISSUER" NEXTAUTH_URL="$$NEXTAUTH_URL"
+        kubectl rollout status deployment/data-web-client -n sample-services --timeout=300s || true
+        echo "Local-mode auth URLs reconciled to LoadBalancer IPs (keycloak=$$KC_IP, data-web-client=$$DWC_IP)."
+    secretEnv: ['PKI_STRATEGY', 'GCP_REGION', 'GKE_CLUSTER_NAME']
+    waitFor: ['deploy-data-web-client']
 
 # ============================================================================
 # SUBSTITUTIONS & SECRETS CONFIG

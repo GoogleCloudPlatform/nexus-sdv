@@ -16,6 +16,8 @@ releases:
         value: {{ .StateValues.pkiStrategy | default "local" }}
       - name: baseDomain
         value: {{ .StateValues.baseDomain | default "" }}
+      - name: keycloak.frontendUrl
+        value: '{{ env "KEYCLOAK_FRONTEND_URL" | default "" }}'
       - name: keycloak.tls.cert
         value: '{{ requiredEnv "KEYCLOAK_TLS_CRT" }}'
       - name: keycloak.tls.key

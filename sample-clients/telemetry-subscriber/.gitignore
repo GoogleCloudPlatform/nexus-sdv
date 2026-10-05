@@ -1,0 +1,3 @@
+# Compiled binary from `go build ./cmd/publish-test` — rebuildable from
+# cmd/publish-test/main.go, and 13 MB of it does not belong in the repository.
+/publish-test

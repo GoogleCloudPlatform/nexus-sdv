@@ -4,9 +4,13 @@ env:
   - name: NATS_PORT
     value: "4222"
   - name: DATA_POLL_INTERVAL
+    value: "8"
+  - name: SCORING_WINDOW_SECONDS
     value: "15"
   - name: ENV
     value: "GCP"
+  - name: SCHEDULED_VINS
+    value: "VEHICLE001,VEHICLE002,VEHICLE003,VEHICLE004,VEHICLE005,VEHICLE006,VEHICLE007,VEHICLE008,VEHICLE009,VEHICLE010,vin1,vin2,vin3,vin4,vin5,vin6,vin7,vin8,vin9,vin10"
 
 replicaCount: 1
 

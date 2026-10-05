@@ -14,7 +14,7 @@
 set -e
 
 # --- Parse flags ---
-VIN_VALUE="VEHICLE001"
+VIN_VALUE="VEHICLE002"
 INTERVAL_VALUE="5"
 
 while [[ $# -gt 0 ]]; do

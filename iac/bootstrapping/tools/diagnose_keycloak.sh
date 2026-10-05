@@ -1,8 +1,11 @@
 #!/bin/bash
 # Keycloak Pod Diagnostic Script for Remote PKI Strategy
-# Project: horizon-sdv-lal
-# Environment: dev-lal
-# PKI Strategy: remote (Google CAS)
+#
+# Configuration comes from the environment, or from iac/bootstrapping/.bootstrap_env
+# when run inside a checkout that has one:
+#   GCP_PROJECT_ID, GCP_REGION   required
+#   GKE_CLUSTER_NAME             default: <ENV>-gke
+#   NAMESPACE                    default: base-services
 
 set -euo pipefail
 
@@ -19,10 +22,13 @@ log_error() { echo -e "${COLOR_RED}[ERROR]${COLOR_NC} $*"; }
 log_success() { echo -e "${COLOR_GREEN}[SUCCESS]${COLOR_NC} $*"; }
 
 # Configuration
-PROJECT_ID="horizon-sdv-lal"
-REGION="us-central1"
-CLUSTER_NAME="dev-lal-gke"
-NAMESPACE="base-services"
+ENV_FILE="$(dirname "${BASH_SOURCE[0]}")/../.bootstrap_env"
+# shellcheck source=/dev/null
+if [ -f "$ENV_FILE" ]; then source "$ENV_FILE"; fi
+PROJECT_ID="${GCP_PROJECT_ID:?set GCP_PROJECT_ID, or run from a checkout with iac/bootstrapping/.bootstrap_env}"
+REGION="${GCP_REGION:?set GCP_REGION}"
+CLUSTER_NAME="${GKE_CLUSTER_NAME:-${ENV:?set GKE_CLUSTER_NAME, or ENV to derive <ENV>-gke}-gke}"
+NAMESPACE="${NAMESPACE:-base-services}"
 
 log_info "=========================================="
 log_info "Keycloak Pod Diagnostics - Remote PKI"

@@ -1,0 +1,16 @@
+releases:
+  - name: vin-registry
+    namespace: base-services
+    createNamespace: true
+    chart: ../vin-registry
+    values:
+      - ../vin-registry/values.yaml
+      - arch: '{{ .StateValues.arch | default "arm64" }}'
+        image:
+          repository: '{{ requiredEnv "IMAGE_REPO" }}'
+          tag: '{{ .StateValues.image.tag | default "latest" }}'
+        gcpProjectId: '{{ env "GCP_PROJECT_ID" }}'
+        gcpServiceAccountEmail: '{{ requiredEnv "DATA_API_BIGTABLE_CONNECTOR_GCP_SERVICE_ACCOUNT" }}'
+        database:
+          password: '{{ requiredEnv "WEBCLIENT_DB_PASSWORD" }}'
+          instanceConnectionName: '{{ requiredEnv "CLOUD_SQL_INSTANCE_CONNECTION_NAME" }}'

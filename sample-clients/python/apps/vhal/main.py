@@ -58,8 +58,8 @@ async def start_simulation(dataset: str):
     if not app.nexus_vehicle:
         raise HTTPException(status_code=500, detail="Nexus SDK not initialized")
 
-    # Wir starten die Simulation in einem Hintergrund-Task, 
-    # damit der API-Call sofort "Started" zurückgeben kann.
+    # Start the simulation in a background task so the API call can
+    # return "Started" straight away.
     asyncio.create_task(run_simulation_task(dataset))
 
     return {
@@ -80,13 +80,13 @@ async def run_simulation_task(dataset: str):
         )
         
         try:
-            # Einzeln senden, damit jeder Punkt einen eigenen Zeitstempel bekommt
+            # Send them one at a time so each point gets its own timestamp
             await app.nexus_vehicle.send_telemetry_batch([reading])
             logger.info(f"DATA: Sent {SENSOR} = {value}")
         except Exception as e:
             logger.error(f"❌ ERROR sending sample: {e}")
         
-        # 1 Sekunde Pause zwischen den Werten für eine schöne Kurve im Bigtable Studio
+        # One second between values, which gives a readable curve in Bigtable Studio
         await asyncio.sleep(1)
 
     logger.info(f"🏁 Simulation completed: {dataset}")

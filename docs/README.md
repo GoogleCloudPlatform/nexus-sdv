@@ -26,6 +26,9 @@ Follow these four steps to deploy, connect, and extend your Nexus instance:
 
 * **[4. Resource Teardown](teardown.mdx)** Essential for PoCs: Learn how to efficiently decommission your environment and clean up GCP resources.
 
+Topics added in later releases — the Factory Helper, the FleetView fleet UI, day-to-day
+operating and the full architecture reference — are covered on the portal.
+
 ---
 
 ## Interactive Experience & Visuals
@@ -36,4 +39,4 @@ The online portal offers an enhanced user interface designed for architects and 
 | :--- | :--- |
 | ![Online Documentation Home](assets/Nexus-Online-Docs-Home.png) | ![Online Documentation Deployment](assets/Nexus-Online-Docs-Deploy.png) |
 
-> **Note on Content Rendering:** > This GitHub-based documentation is the source for our **Astro-based** portal. You may notice specific formatting tags (like `:::tip` or `<Tabs>`). These will appear as plain text here on GitHub but are rendered as professional, color-coded components at [docs.nexus-sdv.io](https://docs.nexus-sdv.io).
+> **Note on Content Rendering:** > These pages are kept in sync with our **Astro-based** portal. You may notice specific formatting tags (like `:::tip` or `<Tabs>`). These will appear as plain text here on GitHub but are rendered as professional, color-coded components at [docs.nexus-sdv.io](https://docs.nexus-sdv.io).

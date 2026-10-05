@@ -1,7 +1,11 @@
 image:
   repository: ghcr.io/wombatwisdom/wombat
   pullPolicy: IfNotPresent
-  tag: "latest"
+  # Pinned: with "latest", every deployment could pull a different connector
+  # version, and IfNotPresent let nodes keep whichever "latest" they had cached.
+  # 1.0.7 is what "latest" resolved to on 2026-09-18 (same digest), so pinning
+  # changes nothing at runtime today.
+  tag: "1.0.7"
 
 # Resource requests/limits — explicit values prevent GKE Autopilot from
 # assigning its defaults (500m CPU / 2Gi memory per pod).
@@ -21,9 +25,13 @@ nats:
   password: ""
   host: "nats.base-services.svc.cluster.local:4222"
 
+# Injected during CloudBuild deployment via helmfile (requiredEnv), so a missing
+# value fails the deploy instead of silently pointing somewhere else. Left empty
+# on purpose — a concrete default here named a project unrelated to the
+# deployment, which every chart rendered outside the pipeline would have used.
 gcp:
-  projectId: "horizon-sdv-lal"
-  serviceAccount: "bigtable-connector@horizon-sdv-lal.iam.gserviceaccount.com"
+  projectId: ""       # Injected: GCP_PROJECT_ID — SecretStore + Bigtable output
+  serviceAccount: ""  # Injected: BIGTABLE_CONNECTOR_GCP_SERVICE_ACCOUNT — WI annotation on the connector KSA
 
 # External Secrets Operator configuration
 # When enabled, the NATS password is synced from GCP Secret Manager instead of
@@ -50,5 +58,6 @@ externalSecrets:
   # Kubernetes service account used by the SecretStore for Workload Identity
   serviceAccountName: "external-secrets-ksa"
 
-  # GCP service account for external-secrets (bound to the KSA via Workload Identity)
-  gcpServiceAccount: "external-secrets-gsa@horizon-sdv-lal.iam.gserviceaccount.com"
+  # GCP service account annotated on the external-secrets KSA for Workload
+  # Identity. Injected like the two cluster values above, not configured here.
+  gcpServiceAccount: ""  # Injected: EXTERNAL_SECRETS_OPERATOR_GCP_SERVICE_ACCOUNT

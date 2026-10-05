@@ -1,6 +1,7 @@
 mod cert_reloader;
 mod certificates;
 mod csr;
+mod registry;
 mod listener;
 
 use std::env;
@@ -67,6 +68,8 @@ impl IntoResponse for AppError {
 #[derive(Debug)]
 struct AppState<'a, S: SigningKey> {
     issuer: Issuer<'a, S>,
+    /// Lifetime of the operational certificates this server issues.
+    cert_validity: time::Duration,
 }
 
 #[derive(Debug, Serialize)]
@@ -107,15 +110,19 @@ async fn registration<S: SigningKey + std::fmt::Debug>(
         return Err(AppError::Csr(anyhow!("csr and client certificate CN not matching")));
     }
 
-    csr_params.params = csr::set_csr_params(csr_params.params);
+    csr_params.params = csr::set_csr_params(csr_params.params, app_state.cert_validity);
     let issuer = &app_state.issuer;
     let certificate = sign_csr(csr_params, issuer).map_err(AppError::Signing)?;
 
-    let ca_cert_pem = std::fs::read_to_string("certificates/ca/ca.crt.pem")
+    let ca_cert_pem = tokio::fs::read_to_string("certificates/ca/ca.crt.pem")
+        .await
         .context("Failed to read CA certificate")
         .map_err(AppError::Signing)?;
 
     let cert_chain = format!("{}{}", certificate.pem(), ca_cert_pem);
+
+    // Fire-and-forget: see registry.rs — reporting never blocks registration.
+    registry::report_registered(&vehicle_info.vin);
 
     Ok(Json(RegistrationResponse {
         certificate: cert_chain,
@@ -147,8 +154,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .await?;
 
+    // Rejecting a malformed value here is deliberate: a certificate lifetime
+    // that silently falls back to a default is worse than a refused start.
+    let cert_validity = match env::var("OPERATIONAL_CERT_VALIDITY") {
+        Ok(spec) if !spec.trim().is_empty() => csr::parse_validity(&spec)?,
+        _ => csr::DEFAULT_VALIDITY,
+    };
+    info!("Operational certificates are issued for {cert_validity}");
+
     let app_state = Arc::new(AppState {
         issuer: read_signing_ca()?,
+        cert_validity,
     });
     let app = create_app(app_state);
     let health = Router::new().route("/health", get(health));
@@ -165,7 +181,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn create_app<S: SigningKey + std::fmt::Debug + Send + Sync + 'static>(app_state: Arc<AppState<'static, S>>) -> Router {
-    Router::new().route("/registration", post(registration)).with_state(app_state).layer(TraceLayer::new_for_http())
+    // /health is served on the TLS listener too (not only the 8888 plain-HTTP
+    // server) so a k8s liveness probe exercises the actual TLS accept path and
+    // detects a wedged listener.
+    Router::new()
+        .route("/registration", post(registration))
+        .route("/health", get(health))
+        .with_state(app_state)
+        .layer(TraceLayer::new_for_http())
 }
 
 fn init_tracing() {
@@ -206,7 +229,10 @@ mod tests {
         let ca_key_pair = KeyPair::generate().unwrap();
         let ca_cert = ca_params.self_signed(&ca_key_pair).unwrap();
         let issuer = Issuer::from_ca_cert_der(ca_cert.der(), ca_key_pair).unwrap();
-        let app = create_app(Arc::new(AppState { issuer }));
+        let app = create_app(Arc::new(AppState {
+            issuer,
+            cert_validity: csr::DEFAULT_VALIDITY,
+        }));
 
         // 4. Create CSR
         let cn_value = "VIN:123 DEVICE:456";

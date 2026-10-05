@@ -8,7 +8,7 @@
 # - Service Account with necessary roles
 # - IAM bindings to connect them
 #
-# Based on existing setup in horizon-sdv-lal project
+# Required: GCP_PROJECT_ID, GITHUB_ORG, GITHUB_REPO. Everything else has a default.
 
 set -euo pipefail
 
@@ -19,13 +19,15 @@ COLOR_YELLOW='\033[1;33m'
 COLOR_RED='\033[0;31m'
 COLOR_NC='\033[0m'
 
-# Default values (can be overridden by environment variables or script arguments)
-PROJECT_ID="${GCP_PROJECT_ID:-horizon-sdv-lal}"
+# Configuration from the environment. The project and the GitHub repository have
+# no default on purpose: a wrong one would grant another repository's workflows
+# access to your project.
+PROJECT_ID="${GCP_PROJECT_ID:?set GCP_PROJECT_ID}"
 POOL_ID="${WIF_POOL_ID:-github-pool}"
 PROVIDER_ID="${WIF_PROVIDER_ID:-github-provider}"
 SA_NAME="${SA_NAME:-github-sa}"
-GITHUB_ORG="${GITHUB_ORG:-DE-Nexus-SDV}"
-GITHUB_REPO="${GITHUB_REPO:-valtech-sdv-sandbox}"
+GITHUB_ORG="${GITHUB_ORG:?set GITHUB_ORG, the organisation that owns the repository}"
+GITHUB_REPO="${GITHUB_REPO:?set GITHUB_REPO}"
 
 # DNS Configuration (optional - set DNS_DOMAIN to enable DNS zone creation)
 DNS_DOMAIN="${DNS_DOMAIN:-}"  # e.g., "example.com"

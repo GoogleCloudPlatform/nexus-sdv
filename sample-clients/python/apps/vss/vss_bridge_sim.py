@@ -37,7 +37,7 @@ async def run():
                 soc = 85.0
                 while True:
                     try:
-                        # Geschwindigkeit steigt, fällt aber bei "Bremsen"
+                        # Speed rises, but drops while braking
                         is_braking = random.random() < 0.2  # 20% Chance zu bremsen
                         
                         if is_braking:
@@ -75,14 +75,14 @@ async def run():
             
             async for updates in client.subscribe_current_values(monitored_paths):
                 readings = []
-                # DEBUG: Zeige uns im Terminal, was Kuksa gerade wirklich schickt
+                # DEBUG: show in the terminal what Kuksa is actually sending
                 # print(f"DEBUG: Received from Kuksa: {list(updates.keys())}") 
 
                 for path, dp in updates.items():
-                    # WICHTIG: Prüfen, ob dp existiert UND einen Wert hat
+                    # IMPORTANT: check that dp exists AND carries a value
                     if dp is not None and dp.value is not None:
                         try:
-                            # Sicherstellen, dass wir alles zu String konvertieren
+                            # Make sure everything is converted to a string
                             val_str = f"{float(dp.value):.2f}"
                             
                             readings.append(telemetry.SensorReading(
@@ -91,7 +91,7 @@ async def run():
                                 data_type=telemetry.DataType.DYNAMIC
                             ))
                         except (ValueError, TypeError):
-                            # Falls ein Wert mal kein Float ist (z.B. Enum oder String)
+                            # In case a value is not a float (an enum or a string, for example)
                             readings.append(telemetry.SensorReading(
                                 sensor=path,
                                 value=str(dp.value),
@@ -101,7 +101,7 @@ async def run():
                 if readings:
                     try:
                         await nexus_vehicle.send_telemetry_batch(readings)
-                        # Präzises Logging, was rausging
+                        # Log exactly what was sent
                         sensors = [r.sensor.split('.')[-1] for r in readings]
                         print(f"DATA: Sent to Nexus -> {sensors}")
                     except Exception as e:

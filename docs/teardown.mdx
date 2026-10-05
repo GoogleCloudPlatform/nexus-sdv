@@ -8,12 +8,16 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
 
 ## 🎯 Getting Started
 
-This guide provides a structured process for **decommissioning a Nexus SDV instance**. Using the automated `teardown-platform.sh` script, you can securely remove infrastructure while having the option to preserve specific core components for future use.
+:::danger[Irreversible Action]
+The teardown process is **permanent** for your data. All records stored in BigTable or other storage components will be lost. Ensure you have backups before proceeding.
+:::
+
+This guide provides a structured process for **decommissioning a Nexus SDV instance**. Using the automated `teardown-platform.sh` script, you can securely remove infrastructure while having the option to preserve specific core components for future use. To go ahead, all you have to do is follow these steps:
 
 <Steps>
 
 1. **Verify Identity**
-   Ensure you are using the same Google Cloud and GitHub identity that was used for the initial bootstrapping.
+   Ensure you are using the same Google Cloud project and GitHub repository that was used for the initial bootstrapping.
 
 2. **Execute Teardown**
    Run the decommissioning script from your terminal:
@@ -27,7 +31,7 @@ This guide provides a structured process for **decommissioning a Nexus SDV insta
 It is strongly recommended that the **same operator** who performed the bootstrapping also executes the teardown. This ensures consistent access to the Terraform state and avoids permission issues or state lock errors.
 :::
 
-## Prerequisites and Setup
+## Prerequisites
 
 The teardown process requires the same environment stability as the deployment.
 
@@ -36,10 +40,10 @@ Ensure these tools are installed and authenticated before starting:
 
 | Tool | Purpose |
 | :--- | :--- |
-| [Google Cloud CLI](https://cloud.google.com/sdk/docs/) | Removing GCP resources and Secret Manager entries. |
+| [Google Cloud CLI (`gcloud`)](https://docs.cloud.google.com/sdk/docs/install-sdk/) | Removing GCP resources and Secret Manager entries. |
+| [Terraform CLI (`terraform`)](https://developer.hashicorp.com/terraform/install) | Executing the `terraform destroy` command for infrastructure removal. |
 | [GitHub CLI (`gh`)](https://cli.github.com/) | Deleting environment variables and cleaning up repository states. |
-| [Terraform CLI](https://developer.hashicorp.com/terraform/install) | Executing the `terraform destroy` command for infrastructure removal. |
-| [jq](https://jqlang.org/) | Processing JSON-based environment data from GitHub. |
+| [jq (`jq`)](https://jqlang.org/) | Processing JSON-based environment data from GitHub. |
 
 ## Launching the Script
 To initiate the decommissioning, execute the script from the project's root directory:
@@ -52,7 +56,7 @@ The script will attempt to log you into GCP and GitHub again. Keep your browser 
 :::
 
 ### Required User Inputs
-To target the correct resources, the script will prompt you for:
+In case a GitHub driven deployment was used, the script will prompt you for these inputs:
 1. **GitHub Repository Notation (`GITHUB_REPO`):** e.g., `owner/repo`.
 2. **GitHub Environment (`ENV`):** The name used during bootstrap (max. 15 chars).
 
@@ -69,8 +73,6 @@ The script asks if you want to preserve your Certificate Authority Pools.
 At the end, you are asked whether to delete the local configuration file.
 * **Recommendation:** **Do NOT delete (Type 'n').**
 * **Why:** This file contains your project configuration. Keeping it allows you to restart the platform later without re-entering all IDs and regions.
-
-
 
 ## The Decommissioning Flow
 
@@ -91,7 +93,15 @@ In the final stage, the script:
 ## Verifying Teardown Success
 
 A successful teardown is confirmed by the following message:
-> `Nexus SDV platform teardown successfully completed! 🧹`
+```bash
+$ bash iac/bootstrapping/teardown-platform.sh
+...
+[INFO] ==================================================================
+[INFO]   🎉 Nexus SDV platform teardown successfully completed! 🎉  
+[INFO] ==================================================================
+[INFO] Your Google Cloud project environment is now empty again.
+[INFO] Local files have been cleaned up.
+```
 
 ### Final Manual Check
 | Service | Expected State |
@@ -99,7 +109,3 @@ A successful teardown is confirmed by the following message:
 | **GKE** | No active clusters related to the environment. |
 | **Cloud Storage** | The `[gcp-project-name]-tfstate` bucket has been removed. |
 | **Secret Manager** | Environment-specific secrets are deleted. |
-
-:::danger[Irreversible Action]
-The teardown process is **permanent** for your data. All records stored in BigTable or other storage components will be lost. Ensure you have backups before proceeding.
-:::

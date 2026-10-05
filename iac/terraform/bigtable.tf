@@ -11,6 +11,11 @@ resource "google_bigtable_instance" "production_instance" {
     num_nodes    = 1
     storage_type = "HDD"
   }
+
+  # Without this the instance can be created in the same apply that enables
+  # bigtableadmin, and on a project where the API was off the create loses the
+  # race. Every other resource here already declares the dependency.
+  depends_on = [google_project_service.project_apis]
 }
 
 resource "google_bigtable_table" "table" {

@@ -1,9 +1,9 @@
 steps:
   # ============================================================================
-  # 1. SETUP & AUTHENTICATION (Kubeconfig für kubectl und Helmfile)
+  # 1. SETUP & AUTHENTICATION (kubeconfig for kubectl and Helmfile)
   # ============================================================================
   - id: 'get-gke-credentials'
-    name: 'gcr.io/cloud-builders/gcloud'
+    name: 'gcr.io/cloud-builders/gcloud@sha256:abcad906c9fa0dd063c4b6e570994f34024673486b17e9f4c99c720165e03ae5'
     entrypoint: 'bash'
     args:
       - '-c'
@@ -27,17 +27,21 @@ steps:
   # 2. BUILD & PUSH DOCKER IMAGE
   # ============================================================================
   - id: 'configure-ar'
-    name: 'gcr.io/cloud-builders/gcloud'
+    name: 'gcr.io/cloud-builders/gcloud@sha256:abcad906c9fa0dd063c4b6e570994f34024673486b17e9f4c99c720165e03ae5'
     entrypoint: 'bash'
     args:
       - '-c'
       - |
         TOKEN=$$(gcloud auth print-access-token)
         AUTH=$$(printf '%s' "oauth2accesstoken:$$TOKEN" | base64 -w0)
+        # Derive the registry host from IMAGE_REPO so this works in any region
+        # (previously hardcoded europe-west4, which broke pushes to other regions).
+        REGISTRY_HOST="$${IMAGE_REPO%%/*}"
         mkdir -p /root/.docker
-        echo '{"auths":{"europe-west4-docker.pkg.dev":{"auth":"'$$AUTH'"}}}' \
+        printf '{"auths":{"%s":{"auth":"%s"}}}' "$$REGISTRY_HOST" "$$AUTH" \
           > /root/.docker/config.json
-        echo "Artifact Registry auth configured (token-based, no credential helper)."
+        echo "Artifact Registry auth configured for $${REGISTRY_HOST} (token-based)."
+    secretEnv: [ 'IMAGE_REPO' ]
     waitFor: ['-']
 
   - id: 'build-push-trip-analyzer'

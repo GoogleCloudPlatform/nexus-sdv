@@ -376,6 +376,10 @@ main() {
     run_terraform_destroy
     # Step 11: Get user inputs for project configuration
     (( ++i ))
+    log_section_title "Step ${i}: Deleting the public PKI bucket"
+    delete_public_pki_bucket
+    (( ++i ))
+
     log_section_title "Step ${i}: Deleting GCS tfstate-bucket"
     delete_tfstate_bucket
     # Step 12: Cleaning up non-required GitHub environment variables
@@ -388,6 +392,9 @@ main() {
     (( ++i ))
     log_section_title "Step ${i}: Delete secrets from Secret Manager"
     delete_gcp_secrets
+    # The file is uploaded back to the bucket below; clear what belonged to this
+    # environment, or the next bootstrap reads it back in.
+    reset_env_file_hostnames
     # Step 14: Cleaning up local files
     (( ++i ))
     log_section_title "Step ${i}: Cleaning up local files"

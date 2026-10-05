@@ -3,7 +3,7 @@ steps:
   # 0. SETUP & AUTHENTICATION
   # ============================================================================
   - id: "get-gke-credentials"
-    name: "gcr.io/cloud-builders/gcloud"
+    name: "gcr.io/cloud-builders/gcloud@sha256:abcad906c9fa0dd063c4b6e570994f34024673486b17e9f4c99c720165e03ae5"
     entrypoint: "bash"
     args:
       - "-c"
@@ -58,7 +58,7 @@ steps:
 
   # 2b. Wait for External DNS to get ready
   - id: "pki-local-generate-certs"
-    name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+    name: "gcr.io/google.com/cloudsdktool/cloud-sdk:575.0.0"
     entrypoint: "bash"
     args:
       - "-c"

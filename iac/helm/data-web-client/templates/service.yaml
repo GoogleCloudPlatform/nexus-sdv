@@ -4,8 +4,14 @@ metadata:
   name: {{ include "data-web-client.fullname" . }}
   {{- if eq .Values.pkiStrategy "remote" }}
   annotations:
-    external-dns.alpha.kubernetes.io/hostname: {{ .Values.fleetviewHostname }}.{{ .Values.baseDomain }}
-    external-dns.alpha.kubernetes.io/ttl: "300"
+    # No external-dns annotation: the Ingress owns <fleetviewHostname>.<baseDomain> so
+    # Google's managed certificate can validate it. external-dns creates one A record
+    # per hostname, so only one object may claim the name. This LoadBalancer stays
+    # reachable by IP as a fallback.
+    #
+    # Links the BackendConfig to this Service. Without it GKE falls back to its default
+    # health check (GET / on the serving port) and the Ingress backend stays UNHEALTHY.
+    cloud.google.com/backend-config: '{"default": "{{ include "data-web-client.fullname" . }}-backendconfig"}'
   {{- end }}
   labels:
     {{- include "data-web-client.labels" . | nindent 4 }}
@@ -17,6 +23,14 @@ spec:
       targetPort: https
       protocol: TCP
       name: https
+    # The Ingress routes to port 3000 (the Next.js container, TLS terminated by the
+    # load balancer). Without this port on the Service the Ingress cannot bind a
+    # backend at all, so GCE never creates a load balancer and the managed
+    # certificate stays in PROVISIONING forever.
+    - port: {{ .Values.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
     {{- else }}
     - port: {{ .Values.service.port }}
       targetPort: http
