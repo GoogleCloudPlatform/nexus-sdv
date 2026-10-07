@@ -10,3 +10,10 @@ releases:
           tag: 'latest'
         dataApi:
           url: {{ requiredEnv "DATA_API_URL" }}
+        keycloak:
+          # Key set and token endpoint are reached inside the cluster over plain
+          # HTTP, like every internal call on the platform. The issuer is learned
+          # from Keycloak's discovery document (chart default).
+          jwkSetUri: 'http://keycloak.base-services.svc.cluster.local:8080/realms/sdv-telemetry/protocol/openid-connect/certs'
+          tokenUri: 'http://keycloak.base-services.svc.cluster.local:8080/realms/sdv-telemetry/protocol/openid-connect/token'
+          clientSecret: '{{ requiredEnv "FACTORY_OPERATOR_CLIENT_SECRET" }}'

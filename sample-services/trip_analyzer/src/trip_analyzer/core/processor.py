@@ -4,7 +4,8 @@ from datetime import datetime, timedelta
 
 from grpclib.exceptions import StreamTerminatedError
 
-from trip_analyzer.client.generated.dataapi.v1 import TelemetryDataApiStub, GetTelemetryDataRequest
+from trip_analyzer.client.DataApiConnector import DataApiConnector
+from trip_analyzer.client.generated.dataapi.v1 import GetTelemetryDataRequest
 from trip_analyzer.config.config import settings
 from trip_analyzer.config.logging import logger
 from trip_analyzer.client.nats_client import NatsConnector
@@ -13,8 +14,10 @@ from trip_analyzer.model.scoring_message import ScoringMessage
 
 
 class Processor:
-    def __init__(self, connector: TelemetryDataApiStub, nats: NatsConnector):
-        self._dataApi: TelemetryDataApiStub = connector
+    def __init__(self, connector: DataApiConnector, nats: NatsConnector):
+        # The connector, not a stub: a stub carries its token for its lifetime,
+        # and this object outlives any single token (#558).
+        self._dataApi: DataApiConnector = connector
         self._nats: NatsConnector = nats
 
     async def scoreDrivingStyle(self, id: str):
@@ -28,7 +31,8 @@ class Processor:
 
         input_list = []
         try:
-            async for point in self._dataApi.get_telemetry_data(request):
+            telemetry_stub = await self._dataApi.get_client()
+            async for point in telemetry_stub.get_telemetry_data(request):
                 temp_bytes = point.values.get("dynamic:VELOCITY")
                 velocity_m_s = float(temp_bytes.decode('utf-8').strip('"'))
                 velocity_km_h = velocity_m_s * 3.6

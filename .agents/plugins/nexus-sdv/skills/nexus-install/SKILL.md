@@ -28,6 +28,13 @@ You also need an authenticated `gcloud` and Application Default Credentials
 in step 1 checks all of this and names whatever is missing, so run it before
 installing anything by hand.
 
+The one thing the preflight cannot name is a `gcloud` that does not start. Current
+releases need **Python 3.10 or later**. macOS ships 3.9, and on Apple Silicon the
+`gcloud` wrapper ignores the Python bundled with the SDK (it uses it on x86_64
+only), so a fresh install dies with a `TypeError` in `urllib3`. Install a newer
+Python and point `CLOUDSDK_PYTHON` at it. Until then the preflight says no more
+than `gcloud not found`.
+
 ## 1. Check the project first — always
 
 ```bash
@@ -42,6 +49,11 @@ already running there, and the two manual prerequisites.
 | 0 | ready | continue |
 | 1 | blocked, or the project is on the do-not-touch list | fix what it names, or stop |
 | 2 | ready with reservations | read each WARN before continuing |
+
+Expect a FAIL for the **BigTable Admin API** in a fresh project: it is off, and
+nothing in the bootstrap enables it. Enabling it costs nothing, but it is still a
+change to the project — say so and get a yes before running the command the
+preflight prints.
 
 **Never skip this and bootstrap directly.** A bootstrap into a project that
 already holds a platform collides on resource names, and the teardown afterwards
@@ -218,11 +230,14 @@ fewer prerequisites.
 The schedule is the part people notice later. Without a trigger there is none,
 so the platform never checks itself again after the bootstrap.
 
-**Neither path avoids the `roles/owner` grant.** It is easy to assume the broad
-permission belongs to the trigger setup, and it does not: Terraform grants it to
-the Compute Engine default service account during the bootstrap itself, on both
-paths. Choosing direct submit to keep a project's IAM clean does not work, and
-saying so saves an argument later.
+**Neither path avoids the `roles/owner` grant.** Both run as the Compute Engine
+default service account, and the bootstrap needs that account to hold
+`roles/owner` **before** it starts: Terraform creates IAM bindings, which
+`roles/editor` — all a fresh project gives the account — cannot set. That includes
+`compute_sa_owner` in `iac/terraform/cloudbuild.tf`, so Terraform keeps the
+grant afterwards but cannot make it first. The trigger setup makes it; on direct
+submit it is a manual step. Choosing direct submit to keep a project's IAM clean
+does not work, and saying so saves an argument later.
 
 ### The rule, so nobody has to weigh this live
 
@@ -242,8 +257,8 @@ first.
 ### If a direct-submit build fails on permissions
 
 Which identity `gcloud builds submit` runs as depends on the project. Recent
-projects use the Compute Engine default service account, which is the one
-Terraform grants `roles/owner` to, and the build works. Older projects can still
+projects use the Compute Engine default service account — the one that needs
+`roles/owner` — and the build works once it has it. Older projects can still
 default to the legacy Cloud Build service agent, which is granted nothing here.
 
 Measured: in every project we have installed into, submitted builds ran as
@@ -253,11 +268,16 @@ installations succeeded. So do not add
 on the caller and can break a path that works.
 
 If a build does fail inside Terraform with permission errors, check which
-identity ran it before changing anything:
+identity ran it, and what that identity holds, before changing anything:
 
 ```bash
 gcloud builds describe <BUILD_ID> --region=<REGION> --format="value(serviceAccount)"
+gcloud projects get-iam-policy <PROJECT_ID> --flatten="bindings[].members" \
+  --filter="bindings.members:<THAT_ACCOUNT>" --format="value(bindings.role)"
 ```
+
+`roles/editor` without `roles/owner` is the missing upfront grant, not a wrong
+identity.
 
 ### Creating the triggers
 
@@ -303,15 +323,31 @@ ahead only when the person has said they want it anyway. A platform installed
 around broken triggers works, and then quietly has no scheduled health check and
 no console path for anyone else.
 
-**Say this before running it:** the bootstrap grants **`roles/owner`** on the
-project to the Compute Engine default service account. This happens on both
-paths, not only here. Cloud Build triggers run
+**Say this before running it:** the setup script grants **`roles/owner`** on the
+project to the Compute Engine default service account. Both paths need that
+grant, not only this one. Cloud Build runs
 as that account, and the bootstrap drives Terraform across every resource in the
 project. It is a broad grant and it persists — Terraform keeps the binding on
 later applies. Anyone installing into a project they do not own outright should
 know that before the command runs, not from the log afterwards.
 
-**Direct submit:**
+**Direct submit:** the setup script does not run on this path, and it is what
+makes the owner grant, creates the bucket `gs://<PROJECT_ID>-bootstrap-envs` and
+uploads `.bootstrap_env` into it. Make those three preparations by hand first,
+after saying the same thing about `roles/owner`:
+
+```bash
+gcloud projects add-iam-policy-binding <PROJECT_ID> \
+  --member="serviceAccount:<PROJECT_NUMBER>-compute@developer.gserviceaccount.com" \
+  --role="roles/owner" --condition=None
+gcloud storage buckets create gs://<PROJECT_ID>-bootstrap-envs \
+  --location=<REGION> --uniform-bucket-level-access --project=<PROJECT_ID>
+gcloud storage cp iac/bootstrapping/.bootstrap_env \
+  gs://<PROJECT_ID>-bootstrap-envs/.bootstrap_env --project=<PROJECT_ID>
+```
+
+The safety check can block the IAM grant for you even after the person has
+agreed. Hand that one command to the person then, as with the secrets cleanup.
 
 ```bash
 gcloud builds submit . --config=iac/cloudbuild/bootstrap-platform.yaml \

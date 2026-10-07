@@ -33,7 +33,7 @@ async def lifespan(app: FastAPI):
     await app.state.data_api.connect()
     await app.state.data_api.is_healthy()
 
-    processor = Processor(app.state.data_api.get_client(), app.state.nats_client)
+    processor = Processor(app.state.data_api, app.state.nats_client)
 
     scheduler = TripScheduler(processor)
     app.state.scheduler = scheduler

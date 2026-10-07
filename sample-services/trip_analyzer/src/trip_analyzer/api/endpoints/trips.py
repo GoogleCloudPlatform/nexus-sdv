@@ -16,7 +16,7 @@ router = APIRouter()
 @router.post(path="/{id}")
 async def calculateScore(request: Request, id: str, start_time: datetime = None, end_time: datetime = None):
     logger.info("Calculate Score for: ", vehicle_id=id, start_time=start_time, end_time=end_time)
-    telemetry_stub = request.app.state.data_api.get_client()
+    telemetry_stub = await request.app.state.data_api.get_client()
     nats_client = request.app.state.nats_client
 
     end_time, start_time = await normalize_timestamps(end_time, start_time)

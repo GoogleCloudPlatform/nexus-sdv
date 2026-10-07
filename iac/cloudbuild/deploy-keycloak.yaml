@@ -85,6 +85,25 @@ steps:
           echo "✓ Server CA fetched from GCP CAS"
         fi
 
+        # Publish the server CA to the public bucket, where any client can fetch
+        # it without a GCP credential. This is the anchor above every TLS
+        # endpoint the platform signs - Keycloak, Registration, the Data API,
+        # the sampler - so one object replaces one published certificate per
+        # endpoint, and it is the only form that works on both PKI strategies:
+        # SERVER_CA_CERT exists only on the local path, while the remote one
+        # keeps its root in Certificate Authority Service.
+        #
+        # Done here because this step already resolves the CA on both paths.
+        # One writer on purpose: a second pipeline publishing the same object is
+        # how two writers end up disagreeing with nobody deciding (F25).
+        #
+        # Non-fatal, like the certificate publishes further down: without it a
+        # caller falls back to Secret Manager or to CAS, which needs a GCP
+        # credential but still works.
+        source iac/bootstrapping/lib/public-pki.sh
+        publish_public_pki "$PROJECT_ID" "${_REGION}" "SERVER_CA.pem" "temp-certs/server-ca.crt.pem" \
+          || echo "WARNING: could not publish SERVER_CA.pem to the public PKI bucket - callers need a GCP credential for the trust anchor."
+
         echo "✓ All CA certificates fetched successfully"
     secretEnv: ['GCP_REGION', 'PKI_STRATEGY']
     waitFor: ['download-registration-ca-cert']

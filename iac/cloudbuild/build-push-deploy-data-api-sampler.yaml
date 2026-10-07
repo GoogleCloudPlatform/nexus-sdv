@@ -69,6 +69,26 @@ steps:
   # ============================================================================
   # 4. DEPLOY DATA-API SAMPLER (Helmfile)
   # ============================================================================
+# ============================================================================
+# COLLECT WHAT THE DEPLOY NEEDS FROM SECRET MANAGER
+#
+# The sampler checks a Keycloak token on /data/** and mints its own token to
+# call the Data API, so it needs the factory-operator client secret. It learns the
+# issuer from Keycloak at run time. It is cluster-internal and speaks
+# plain HTTP, so there is no certificate to issue.
+# ============================================================================
+  - id: 'collect-auth-config'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:575.0.0'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        set -e
+        # The helmfile container has no gcloud, so leave what it needs here.
+        gcloud secrets versions access latest --secret="FACTORY_OPERATOR_CLIENT_SECRET" --project="$PROJECT_ID" | tr -d '\n' > factory_operator_client_secret.txt
+        echo "✓ Client secret collected"
+    waitFor: ['-']
+
   - id: 'deploy-data-api-sampler'
     name: 'ghcr.io/helmfile/helmfile:latest'
     entrypoint: 'bash'
@@ -85,11 +105,14 @@ steps:
         export GCP_PROJECT_ID="$PROJECT_ID"
         export GCP_REGION="$$GCP_REGION"
         export IMAGE_REPO="$$IMAGE_REPO"
-        
+
+        # Written by collect-auth-config; this container has no gcloud.
+        export FACTORY_OPERATOR_CLIENT_SECRET="$(cat factory_operator_client_secret.txt)"
+
         cd iac/helm/helmfile.d
-        
+
         echo "Running Helmfile ${_HELM_ACTION}..."
-        
+
         if ! helmfile --file data-api-sampler.yaml.gotmpl ${_HELM_ACTION} \
              --state-values-set arch=${_ARCH}; then
             echo "❌ Deployment Failed! Fetching Pod Logs for Debugging..."
@@ -106,7 +129,7 @@ steps:
         fi
 
     secretEnv: ['GCP_REGION', 'IMAGE_REPO']
-    waitFor: ['build-push-data-api-sampler', 'get-gke-credentials']
+    waitFor: ['build-push-data-api-sampler', 'get-gke-credentials', 'collect-auth-config']
 
 # ============================================================================
 # SUBSTITUTIONS & SECRETS CONFIG
