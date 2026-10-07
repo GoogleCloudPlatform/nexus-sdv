@@ -11,3 +11,5 @@ releases:
           host: {{ requiredEnv "NATS_HOSTNAME" }}
           user: '{{ env "NATS_CONNECTOR_USER" | default "connector" }}'
           password: '{{ requiredEnv "NATS_CONNECTOR_PASSWORD" }}'
+        keycloak:
+          clientSecret: '{{ requiredEnv "FACTORY_OPERATOR_CLIENT_SECRET" }}'

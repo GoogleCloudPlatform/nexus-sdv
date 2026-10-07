@@ -16,5 +16,5 @@ releases:
           bigtableTable: "telemetry"
       - env:
           logLevel: "debug"
-      - service:
-          loadBalancerSourceRanges: []
+      - keycloak:
+          jwkB64: '{{ requiredEnv "KEYCLOAK_JWK_B64" }}'

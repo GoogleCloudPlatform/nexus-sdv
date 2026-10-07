@@ -13,6 +13,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+## [1.2.2] - 2026-10-07
+
+### Changed
+- **Data API and Data API Sampler** have gained authentication and are reachable from inside the cluster only.
+- **Trip Analyzer** is cluster-internal.
+- **Agent skill `nexus-operate`**: reading telemetry back out through the Data API and the sampler.
+- **Public PKI Trust Bucket**: the platform's server CA as `pki/SERVER_CA.pem`, covering every TLS endpoint the platform signs.
+
 ## [1.2.1] - 2026-10-02
 
 ### Added

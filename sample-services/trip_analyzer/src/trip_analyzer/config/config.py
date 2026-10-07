@@ -17,6 +17,10 @@ class Settings(BaseSettings):
     # gRPC Configuration
     data_api_url: str = Field(default="localhost:50051")
     data_api_timeout: int = 15
+    # The Data API requires a token since #558.
+    keycloak_token_uri: str = Field(default="setInEnv")
+    keycloak_client_id: str = Field(default="factory-operator")
+    keycloak_client_secret: str = Field(default="setInEnv")
     data_poll_interval: int = 5          # how often a score is produced (schedule cadence, seconds)
     scoring_window_seconds: int = 15     # how much recent telemetry each score looks at (seconds)
 
@@ -25,6 +29,10 @@ class Settings(BaseSettings):
     debug: bool = False
 
     scheduled_vins: str = "vin1"
+
+    @field_serializer("keycloak_client_secret")
+    def _redact_keycloak_client_secret(self, value: str, info):
+        return "***"
 
     @field_serializer("nats_password")
     def _redact_nats_password(self, value: str, info):

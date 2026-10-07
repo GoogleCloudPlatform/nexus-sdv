@@ -1,17 +1,37 @@
 image:
   repository: ""
-  pullPolicy: IfNotPresent
+  # Always, because the tag is "latest": with IfNotPresent a node keeps the
+  # image it cached first and never fetches a newer "latest". On 2026-10-07 that
+  # ran the TLS-requiring build against a chart that no longer supplies TLS, and
+  # the pod crash-looped (F5 is the same class). The sampler already uses Always.
+  pullPolicy: Always
   tag: "latest"
 
 service:
-  # Cluster-internal on purpose. The Data API is the in-cluster path to the
-  # telemetry: it speaks plaintext gRPC and authenticates nobody, so a
-  # LoadBalancer served a year of any vehicle's telemetry to anyone who knew a
-  # VIN — and a VIN is readable through a windscreen. Consumers reach it at
-  # data-api.base-services.svc.cluster.local:8080.
+  # Cluster-internal, plaintext gRPC, and a Keycloak token carrying the required
+  # realm role on every call. Consumers in the cluster use
+  # data-api.base-services.svc.cluster.local:8080; from a workstation the way in
+  # is a port forward, which is encrypted from the workstation to the pod:
+  #   kubectl port-forward -n base-services svc/data-api 8080:8080
+  #
+  # Keep it ClusterIP. Exposing it would put plaintext tokens on the wire - this
+  # service was a public LoadBalancer once by accident (#552).
   type: ClusterIP
   port: 8080
-  loadBalancerSourceRanges: []
+
+# Keycloak realm that issues the tokens this service accepts. The issuer must be
+# the string Keycloak actually mints (KC_HOSTNAME), not the in-cluster address.
+keycloak:
+  # Where the Data API learns the issuer it checks against: Keycloak's own
+  # discovery document, inside the cluster. The issuer differs by installation
+  # (keycloak-ui.<domain> on remote PKI, the load balancer address on local), so
+  # it is asked for rather than configured.
+  discoveryUrl: "http://keycloak.base-services.svc.cluster.local:8080/realms/sdv-telemetry/.well-known/openid-configuration"
+  jwkB64: ""
+  # The realm role a caller's token must carry. factory-operator is the role the
+  # factory-helper already requires, so a platform has one operator credential
+  # rather than three.
+  requiredRealmRole: "factory-operator"
 
 gcp:
   projectId: ""

@@ -427,9 +427,19 @@ delete_gcp_secrets() {
 
         # Written by the deploy pipelines rather than by add_secret, so a later
         # install does overwrite them. Removed anyway: a torn-down project
-        # should hold neither the leaf's private key nor Keycloak credentials.
+        # should hold neither a service's private key nor Keycloak credentials.
+        #
+        # The FleetView and Factory Helper pairs exist only with remote PKI, which
+        # is why they were missed the first time round: the environment that was
+        # checked then had been installed with local PKI, so they were not there
+        # to be seen. All 57 secret names written anywhere under iac/ are now on
+        # this list.
         "NATS_LEAF_TLS_CERT"
         "NATS_LEAF_TLS_KEY"
+        "FLEETVIEW_TLS_CRT"
+        "FLEETVIEW_TLS_KEY"
+        "FACTORY_HELPER_TLS_CERT"
+        "FACTORY_HELPER_TLS_KEY"
         "FACTORY_OPERATOR_CLIENT_SECRET"
         "NEXUS_FLEET_INITIAL_PASSWORD"
 

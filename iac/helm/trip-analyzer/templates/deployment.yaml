@@ -14,6 +14,11 @@ spec:
     metadata:
       labels:
         {{- include "trip-analyzer.selectorLabels" . | nindent 8 }}
+      annotations:
+        # A changed secret is not part of the pod-template hash, so without this
+        # the running pod keeps the old credential and the deploy still reports
+        # success (F26).
+        checksum/auth: {{ .Values.keycloak.clientSecret | sha256sum }}
     spec:
       containers:
         - name: {{ .Chart.Name }}
@@ -33,3 +38,4 @@ spec:
           livenessProbe: {{- toYaml .Values.livenessProbe | nindent 12 }}
           readinessProbe: {{- toYaml .Values.readinessProbe | nindent 12 }}
           resources: {{- toYaml .Values.resources | nindent 12 }}
+

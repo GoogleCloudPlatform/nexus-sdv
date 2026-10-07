@@ -6,7 +6,12 @@ image:
   tag: "latest"
 
 service:
-  type: LoadBalancer
+  # Cluster-internal, plain HTTP, and a Keycloak token carrying the required
+  # realm role on /data/**. Until #558 it was a LoadBalancer with permitAll on
+  # /data/**. From a workstation the way in is a port forward, which is
+  # encrypted from the workstation to the pod:
+  #   kubectl port-forward -n sample-services svc/data-api-sampler 8080:8080
+  type: ClusterIP
   httpPort: 8080
 
 resources:
@@ -34,3 +39,15 @@ readinessProbe:
   initialDelaySeconds: 15
   periodSeconds: 10
   timeoutSeconds: 3
+
+# Keycloak realm that issues the tokens this service accepts, and the client it
+# uses to mint its own token for the Data API.
+keycloak:
+  # The issuer is learned from Keycloak's discovery document, because it differs
+  # between remote and local PKI; see DiscoveredIssuerValidator.
+  discoveryUrl: "http://keycloak.base-services.svc.cluster.local:8080/realms/sdv-telemetry/.well-known/openid-configuration"
+  jwkSetUri: ""
+  tokenUri: ""
+  clientId: "factory-operator"
+  clientSecret: ""
+  requiredRealmRole: "factory-operator"

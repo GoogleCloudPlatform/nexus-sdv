@@ -118,6 +118,12 @@ gcloud builds submit . --config=iac/cloudbuild/run-sample-clients.yaml \
   --substitutions=_BOOTSTRAP_ENV_GCS_PATH=gs://<PROJECT_ID>-bootstrap-envs/<name>.bootstrap_env
 ```
 
+It produces two vehicles — **`VEHICLE001`** from the Go vehicle-client and
+**`VEHICLE002`** from the Python one (`run-sample-clients.yaml:278`) — and the
+pipeline checks BigTable itself. To see the data rather than take the build's
+word for it, read it back out through the API: *Reading the telemetry back out*,
+below.
+
 To onboard a vehicle by hand instead — useful when someone has no access to the
 Google Cloud project — the factory launchers walk the whole path. They need a
 Keycloak client secret and nothing else:
@@ -247,8 +253,127 @@ more vehicles on the platform*; it is not specific to Kuksa.
 :::
 
 **Note:** the `run-sample-clients` pipeline cannot help here — its two VINs are
-written into the build file (`run-sample-clients.yaml:262`), so it always
+written into the build file (`run-sample-clients.yaml:278`), so it always
 produces the same two vehicles. Further ones have to come from the launchers.
+
+## Reading the telemetry back out
+
+Two services serve the telemetry, and **both are cluster-internal and require a
+Keycloak token** — they read vehicle telemetry, and a VIN is readable through a
+windscreen. From a workstation the way in is a **port forward**, which needs the
+cluster credentials as well; the token is the second gate behind them. Both
+services speak plain HTTP and gRPC, like the platform's other internal
+services; the port forward itself is encrypted from the workstation to the pod.
+
+| Service | Inside the cluster | From a workstation | Speaks |
+|---|---|---|---|
+| Data API Sampler | `data-api-sampler.sample-services.svc.cluster.local:8080` | `http://localhost:8080` | REST |
+| Data API | `data-api.base-services.svc.cluster.local:8080` | `localhost:9090` | gRPC |
+
+Get the cluster credentials and start the forwards, each in its own terminal or
+in the background. The Data API goes to local port 9090 so the two do not
+collide. A `connection refused` on `localhost` means the forward is not running,
+not that the service is down:
+
+```bash
+gcloud container clusters get-credentials <ENV>-gke --region <REGION> \
+  --project <PROJECT_ID> --dns-endpoint
+kubectl port-forward -n sample-services svc/data-api-sampler 8080:8080
+kubectl port-forward -n base-services svc/data-api 9090:8080
+```
+
+The token comes from the Factory Helper's **`factory-operator`** client,
+deliberately not a second one. Its secret lives in Secret Manager. **Do not read
+it.** Give the person the command and let them run it in their own terminal, and
+say nothing about your own restraint:
+
+```bash
+gcloud secrets versions access latest \
+  --secret="FACTORY_OPERATOR_CLIENT_SECRET" --project=<PROJECT_ID>
+```
+
+With the secret in their shell, the token is one request. `keycloak-ui` carries a
+publicly trusted certificate, so no CA is needed — and **do not pass `--cacert`
+with the platform CA here**: it replaces curl's trust store, and on Linux the
+request then fails against the public certificate.
+
+```bash
+TOKEN=$(curl -s \
+  -d grant_type=client_credentials -d client_id=factory-operator \
+  -d client_secret="$FACTORY_OPERATOR_CLIENT_SECRET" \
+  https://keycloak-ui.<BASE_DOMAIN>/realms/sdv-telemetry/protocol/openid-connect/token \
+  | jq -r .access_token)
+
+curl -H "Authorization: Bearer $TOKEN" -w "\nHTTP %{http_code}\n" \
+  "http://localhost:8080/data/VEHICLE001/datatypes/dynamic:VELOCITY?lookback=1d"
+```
+
+**On local PKI** there is no `keycloak-ui` — the platform has no domain. Keycloak
+answers on its load balancer address, with a certificate from the platform's own
+server CA, which on this path is in Secret Manager as `SERVER_CA_CERT`. Here
+`--cacert` is right, because the certificate is not a public one:
+
+```bash
+KEYCLOAK_IP=$(kubectl get svc keycloak -n base-services \
+  -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+gcloud secrets versions access latest --secret=SERVER_CA_CERT \
+  --project=<PROJECT_ID> > server-ca.pem
+TOKEN=$(curl -s --cacert server-ca.pem \
+  -d grant_type=client_credentials -d client_id=factory-operator \
+  -d client_secret="$FACTORY_OPERATOR_CLIENT_SECRET" \
+  "https://$KEYCLOAK_IP:8443/realms/sdv-telemetry/protocol/openid-connect/token" \
+  | jq -r .access_token)
+```
+
+The two services accept either: they learn the issuer from Keycloak itself, so a
+token from the load balancer address is as valid on a local platform as one from
+`keycloak-ui` on a remote one.
+
+**Always print the status code.** The sampler answers a rejected request with
+**401 and an empty body**, so piping into `jq` makes a refusal look exactly like
+an empty result — the same blank line, no error. That is why `-w "%{http_code}"`
+is in the command above and not an afterthought: without it you cannot tell "not
+allowed" from "nothing there", and the two have opposite causes.
+
+**Query what the clients actually sent.** After `run-sample-clients` the two
+vehicles are `VEHICLE001` and `VEHICLE002`, and they do **not** write the same
+signals:
+
+| Vehicle | Written by | Data types |
+|---|---|---|
+| `VEHICLE001` | Go vehicle-client | `dynamic:VELOCITY`, `dynamic:ENGINE_RPM`; and in the **static** family `static:TIRE_PRESSURE`, `static:FUEL_CAPACITY` — the two values the client sends as constants (`sample-clients/vehicle-client/message_builder.go:62,64`) |
+| `VEHICLE002` | python-sdk-client | VSS paths — `dynamic:Vehicle.Speed`, `dynamic:Vehicle.Powertrain.Battery.StateOfCharge` (`sample-clients/python/apps/vss/config.py:12-13`) |
+
+Asking one of them for the other's signal names returns **200 with an empty
+list**, which reads like a broken platform and is not one. So when the answer is
+empty *and the status is 200*, check the data type before the cluster.
+
+The same read over gRPC, which is the Data API without the sampler in between.
+**Name the data types**: the client's default is what the devices-client and the
+iot-client write (`static:index`, `static:test_key`, `dynamic:time_passed`), not
+what a vehicle writes, so without `--datatypes` this returns nothing for
+VEHICLE001 and VEHICLE002.
+
+```bash
+cd base-services/data-api
+go run client/main.go --addr localhost:9090 --token "$TOKEN" \
+  --vin VEHICLE001 --datatypes dynamic:VELOCITY,dynamic:ENGINE_RPM
+```
+
+The client reports which data types it asked for, and says so again when the
+answer is empty — so a zero here names its own most likely cause.
+
+`/health` on the sampler stays open — the kubelet has no token — so a 200 there
+with a 401 on `/data/**` is the platform behaving correctly, not a fault.
+
+**Two things that look like a broken platform and are not:**
+
+- **401 on `/data/**`** means the token is missing, expired or lacks the
+  `factory-operator` realm role. The service says nothing more than that on
+  purpose.
+- **An empty answer with 200.** That is the time range, not the platform — the
+  same trap as FleetView's one-hour default. Try a longer `lookback` before
+  looking at the cluster.
 
 ## Which vehicles does the platform know?
 

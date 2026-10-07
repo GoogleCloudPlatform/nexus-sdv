@@ -13,6 +13,11 @@ spec:
     metadata:
       labels:
         {{- include "data-api.selectorLabels" . | nindent 8 }}
+      annotations:
+        # Roll the pods whenever the realm keys change. A secret is not part of
+        # the pod-template hash, so without this a changed key set never reaches
+        # the running pods and the deploy still reports success (F26).
+        checksum/auth: {{ .Values.keycloak.jwkB64 | sha256sum }}
     spec:
       serviceAccountName: data-api-ksa
       tolerations:
@@ -63,3 +68,12 @@ spec:
               value: {{ .Values.env.logLevel | quote }}
             - name: GRPC_ADDR
               value: {{ .Values.env.grpcAddr | quote }}
+            - name: KEYCLOAK_DISCOVERY_URL
+              value: {{ .Values.keycloak.discoveryUrl | quote }}
+            - name: REQUIRED_REALM_ROLE
+              value: {{ .Values.keycloak.requiredRealmRole | quote }}
+            - name: KEYCLOAK_JWK_B64
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "data-api.fullname" . }}-auth
+                  key: keycloak-jwk-b64

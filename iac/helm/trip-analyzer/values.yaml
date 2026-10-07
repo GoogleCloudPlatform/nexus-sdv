@@ -9,6 +9,10 @@ env:
     value: "15"
   - name: ENV
     value: "GCP"
+  - name: KEYCLOAK_TOKEN_URI
+    value: "http://keycloak.base-services.svc.cluster.local:8080/realms/sdv-telemetry/protocol/openid-connect/token"
+  - name: KEYCLOAK_CLIENT_ID
+    value: "factory-operator"
   - name: SCHEDULED_VINS
     value: "VEHICLE001,VEHICLE002,VEHICLE003,VEHICLE004,VEHICLE005,VEHICLE006,VEHICLE007,VEHICLE008,VEHICLE009,VEHICLE010,vin1,vin2,vin3,vin4,vin5,vin6,vin7,vin8,vin9,vin10"
 
@@ -20,7 +24,12 @@ image:
   tag: "latest"
 
 service:
-  type: LoadBalancer
+  # Cluster-internal on purpose. The trip analyzer reads the Data API, writes its
+  # scores to NATS and authenticates nobody; its HTTP API only schedules work.
+  # Nothing outside the cluster calls it - the README's localhost:8000 is the
+  # development server. Reach it with a port forward when you need it:
+  #   kubectl port-forward -n sample-services svc/trip-analyzer 8080:8080
+  type: ClusterIP
   httpPort: 8080
 
 resources:
@@ -45,3 +54,6 @@ readinessProbe:
   initialDelaySeconds: 25
   periodSeconds: 10
   timeoutSeconds: 8
+
+keycloak:
+  clientSecret: ""

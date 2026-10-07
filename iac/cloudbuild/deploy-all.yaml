@@ -119,7 +119,9 @@ steps:
   - id: 'build-push-deploy-data-api'
     name: 'gcr.io/cloud-builders/gcloud@sha256:abcad906c9fa0dd063c4b6e570994f34024673486b17e9f4c99c720165e03ae5'
     entrypoint: 'bash'
-    waitFor: ['deploy-external-secrets', 'deploy-external-dns']
+    # deploy-keycloak since #558: the Data API reads KEYCLOAK_JWK_B64,
+    # which that step writes, and refuses to serve without it.
+    waitFor: ['deploy-external-secrets', 'deploy-external-dns', 'deploy-keycloak']
     args:
       - '-c'
       - |
@@ -196,7 +198,9 @@ steps:
   - id: 'build-push-deploy-data-api-sampler'
     name: 'gcr.io/cloud-builders/gcloud@sha256:abcad906c9fa0dd063c4b6e570994f34024673486b17e9f4c99c720165e03ae5'
     entrypoint: 'bash'
-    waitFor: ['build-push-deploy-data-api']
+    # deploy-keycloak since #558: the sampler needs the factory-operator
+    # client secret, which that step provisions.
+    waitFor: ['build-push-deploy-data-api', 'deploy-keycloak']
     args:
       - '-c'
       - |

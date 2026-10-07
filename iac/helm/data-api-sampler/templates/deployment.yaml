@@ -14,6 +14,13 @@ spec:
     metadata:
       labels:
         {{- include "data-api-sampler.selectorLabels" . | nindent 8 }}
+      annotations:
+        # Roll the pods when the mounted configuration or the client secret
+        # changes. Neither is part of the pod-template hash, so without these a
+        # changed value never reaches the running process and the deploy still
+        # reports success - measured on dan1001b, 2026-10-02 (F26).
+        checksum/config: {{ include (print $.Template.BasePath "/configMap.yaml") . | sha256sum }}
+        checksum/auth: {{ .Values.keycloak.clientSecret | sha256sum }}
     spec:
       tolerations:
       - key: "cloud.google.com/compute-class"
@@ -47,6 +54,22 @@ spec:
             - name: http
               containerPort: 8080
               protocol: TCP
+          env:
+            - name: KEYCLOAK_DISCOVERY_URL
+              value: {{ .Values.keycloak.discoveryUrl | quote }}
+            - name: KEYCLOAK_JWK_SET_URI
+              value: {{ .Values.keycloak.jwkSetUri | quote }}
+            - name: KEYCLOAK_TOKEN_URI
+              value: {{ .Values.keycloak.tokenUri | quote }}
+            - name: KEYCLOAK_CLIENT_ID
+              value: {{ .Values.keycloak.clientId | quote }}
+            - name: REQUIRED_REALM_ROLE
+              value: {{ .Values.keycloak.requiredRealmRole | quote }}
+            - name: KEYCLOAK_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "data-api-sampler.fullname" . }}-auth
+                  key: keycloak-client-secret
           volumeMounts:
             - name: application-config-volume
               mountPath: /app/config

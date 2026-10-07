@@ -91,22 +91,47 @@ steps:
   # ============================================================================
   # 4. DEPLOY DATA API (Helmfile)
   # ============================================================================
+# ============================================================================
+# COLLECT WHAT THE DEPLOY NEEDS FROM SECRET MANAGER
+#
+# The Data API checks a Keycloak token on every call, so it needs the realm's
+# public keys (KEYCLOAK_JWK_B64, written by deploy-keycloak.yaml). It learns the
+# issuer from Keycloak itself at run time. It is cluster-internal and speaks
+# plaintext gRPC, so there is no certificate to issue.
+# ============================================================================
+  - id: 'collect-auth-config'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:575.0.0'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        set -e
+        # The helmfile container has no gcloud, so leave what it needs in the
+        # workspace (same approach as build-push-deploy-factory-helper.yaml).
+        gcloud secrets versions access latest --secret="KEYCLOAK_JWK_B64" --project="$PROJECT_ID" | tr -d '\n' > keycloak_jwk_b64.txt
+        echo "✓ Realm keys collected"
+    waitFor: ['-']
+
   - id: 'deploy-data-api'
     name: 'ghcr.io/helmfile/helmfile:latest'
     entrypoint: 'bash'
     args:
       - '-c'
       - |
+        # Read what collect-auth-config left in the workspace root before
+        # changing directory; this container has no gcloud of its own.
+        export KEYCLOAK_JWK_B64="$(cat keycloak_jwk_b64.txt)"
+
         cd iac/helm/helmfile.d
-        
+
         echo "Exporting environment variables for Helmfile..."
         export GCP_PROJECT_ID="$PROJECT_ID"
         export GCP_REGION="$$GCP_REGION"
         export IMAGE_REPO="$$IMAGE_REPO"
         export DATA_API_BIGTABLE_CONNECTOR_GCP_SERVICE_ACCOUNT="$$DATA_API_BIGTABLE_CONNECTOR_GCP_SERVICE_ACCOUNT"
-        
+
         echo "Running Helmfile ${_HELM_ACTION}..."
-        
+
         if ! helmfile --file data-api.yaml.gotmpl ${_HELM_ACTION} \
              --state-values-set arch=${_ARCH}; then
             echo "❌ Deployment Failed! Fetching Pod Logs for Debugging..."
@@ -123,7 +148,7 @@ steps:
         fi
 
     secretEnv: ['GCP_REGION', 'IMAGE_REPO', 'DATA_API_BIGTABLE_CONNECTOR_GCP_SERVICE_ACCOUNT']
-    waitFor: ['build-push-data-api', 'get-gke-credentials']
+    waitFor: ['build-push-data-api', 'get-gke-credentials', 'collect-auth-config']
 
 # ============================================================================
 # SUBSTITUTIONS & SECRETS CONFIG
