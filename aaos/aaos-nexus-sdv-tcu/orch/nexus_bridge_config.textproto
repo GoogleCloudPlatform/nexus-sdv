@@ -1,0 +1,18 @@
+# Per-bundle orchestration for the Nexus Bridge. Mirrors the
+# apex_update_with_service_bundles Provider sample: a self-contained
+# unconditional start state, so the bundle auto-starts from its own config
+# (no VM-level orch config or group needed — the active VM orch config is a
+# system config we deliberately don't modify).
+package_name: "com.android.nexus.aaos_nexus_sdv_tcu"
+service_bundle_name: "NexusBridge"
+instance: "instance"
+state { instances_states { started: "instance" } }
+
+# Restart the Bridge once if it dies. The Bridge is the connectivity path, so an
+# unattended crash should not silently end telemetry until the next VM reboot.
+# One retry only, matching the publisher — the orchestration proto is not
+# vendored here, so max_retries: 0/1 are the only values proven by the samples.
+retry_mapping {
+  instance: "instance"
+  retry_config { max_retries: 1 }
+}

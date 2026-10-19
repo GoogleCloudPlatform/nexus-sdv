@@ -1,0 +1,13 @@
+releases:
+  - name: nexus-registry
+    namespace: base-services
+    createNamespace: true
+    chart: ../nexus-registry
+    values:
+      - ../nexus-registry/values.yaml
+      - arch: '{{ .StateValues.arch | default "arm64" }}'
+        image:
+          repository: '{{ requiredEnv "IMAGE_REPO" }}'
+          tag: '{{ if hasKey .StateValues "image" }}{{ .StateValues.image.tag | default "latest" }}{{ else }}latest{{ end }}'
+        nats:
+          password: '{{ requiredEnv "NATS_REGISTRY_PASSWORD" }}'

@@ -1,0 +1,6 @@
+apiVersion: v2
+name: nexus-registry
+description: The Cloud Service Registry — what the cloud grants of each vehicle's offer
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

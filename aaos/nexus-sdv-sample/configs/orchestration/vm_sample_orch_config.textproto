@@ -1,0 +1,44 @@
+# Copyright (C) 2026 The Android Open Source Project
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# proto-file:
+# system/software_defined_vehicle/orchestration/src/distributed_config/protos/vm_config.proto
+# proto-message: VmConfig
+
+# Group all subgroups to be started on boot.
+group_mapping {group : "auto_start" subgroup : "vm_sample_auto_start"}
+
+# Start `auto_start` service bundles when system is started.
+state {
+  condition {
+    or {
+      power_state : "ON"
+      power_state : "POWER_OFF_EXIT"
+      power_state : "SUSPEND_TO_RAM_EXIT"
+    }
+  }
+  groups_states {started : "auto_start"}
+}
+
+# Stop `auto_start` service bundles when system is suspending to RAM.
+state {
+  condition {
+    or {
+      power_state : "SUSPEND_TO_RAM_ENTER"
+      power_state : "WAIT_FOR_FINISH"
+      power_state : "SUSPEND_TO_RAM_POST_FINISH"
+    }
+  }
+  groups_states {created : "auto_start"}
+}

@@ -1,0 +1,1 @@
+persist.nexus.telemetry_client.enabled  u:object_r:nexus_telemetry_client_prop:s0 exact bool

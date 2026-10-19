@@ -1,0 +1,102 @@
+# VehicleTelemetryData MetricsConfig whose speed comes from a driving simulation — the
+# configuration the nexus-telemetry-client activates (telemetry client spec, R6).
+#
+# The report type stays com.android.sdv.telemetry.VehicleTelemetryData, the only type the
+# nats-bigtable-connector's registry decodes. VELOCITY is live: Google's speed publisher on
+# the Data Tunnel (samples/telemetry/publishers/rust/data_tunnel_publisher_speed, shipped on
+# the image by device/google/sdv/sdv_core_base/sdv_samples_telemetry.mk:26) simulates a
+# vehicle that stands, pulls away, drives and stops, publishing
+# SpeedData { int32 speed = 1; bool above_speed_limit = 2; }. int32 -> TYPE_FLOAT is a
+# supported conversion, as in vehicle_telemetry_config_live. The other six fields are
+# constants: the tree has no source for them.
+#
+# Encode: aprotoc --encode=google.sdv.telemetry.MetricsConfig \
+#   -I external/protobuf/src -I . \
+#   system/software_defined_vehicle/telemetry/proto/metrics_configuration/metrics_configuration.proto \
+#   < vehicle_telemetry_config_drive.textproto > vehicle_telemetry_config_drive.pb
+# The UUID stays the same across versions of this configuration; `version` counts up. The
+# Telemetry Service keeps every configuration it was given: a new UUID does not replace the
+# old one, it adds a second, and both report (two rows a second in BigTable, 2026-10-10).
+uuid: "d322b902-2071-4d6a-9df5-7e271dd0f872"
+version: 2
+
+descriptor_protos {
+  package: "com.android.sdv.telemetry"
+  message_type {
+    name: "VehicleTelemetryData"
+    field { type: TYPE_FLOAT name: "ENGINE_RPM"     number: 2  label: LABEL_OPTIONAL }
+    field { type: TYPE_FLOAT name: "FUEL_LEVEL"     number: 4  label: LABEL_OPTIONAL }
+    field { type: TYPE_FLOAT name: "GPS_LATITUDE"   number: 5  label: LABEL_OPTIONAL }
+    field { type: TYPE_FLOAT name: "GPS_LONGITUDE"  number: 6  label: LABEL_OPTIONAL }
+    field { type: TYPE_BOOL  name: "IGNITION_STATE" number: 7  label: LABEL_OPTIONAL }
+    field { type: TYPE_FLOAT name: "VELOCITY"       number: 9  label: LABEL_OPTIONAL }
+    field { type: TYPE_BOOL  name: "LOCKED"         number: 10 label: LABEL_OPTIONAL }
+  }
+}
+
+# Live data source: Google's driving simulation on the Data Tunnel. The identifier is the one
+# Google's own sample configuration uses
+# (samples/telemetry/client/sample_protos/journey_summary.txtpb).
+# connection_type defaults to SUBSCRIPTION (required for data_trigger).
+sources {
+  name: "SpeedPub"
+  data_source { source_identifier: "com.google.sdv.telemetry.samples.DataTunnelPublisherSpeed#Speed" }
+}
+
+# expression_nodes[0] reads the live speed.
+expression_nodes {
+  field_leaf_node { source_name: "SpeedPub" field_names: "speed" }
+} # 0 VELOCITY (live)
+expression_nodes { constant_leaf_node { float_value: 2500.0 } }  # 1 ENGINE_RPM
+expression_nodes { constant_leaf_node { float_value: 75.5 } }    # 2 FUEL_LEVEL
+expression_nodes { constant_leaf_node { float_value: 52.5200 } } # 3 GPS_LATITUDE
+expression_nodes { constant_leaf_node { float_value: 13.4050 } } # 4 GPS_LONGITUDE
+expression_nodes { constant_leaf_node { bool_value: true } }     # 5 IGNITION_STATE
+expression_nodes { constant_leaf_node { bool_value: true } }     # 6 LOCKED
+
+triggers {
+  name: "StartTrigger"
+  periodic_trigger { interval { seconds: 2 } }
+}
+triggers {
+  name: "SpeedDataTrigger"
+  data_trigger { source_name: "SpeedPub" }
+}
+
+start_trigger_name: "StartTrigger"
+
+metrics_report_configs {
+  name: "vehicle_telemetry_report"
+  trigger_names: "SpeedDataTrigger"
+  message_builder {
+    message_type: ".com.android.sdv.telemetry.VehicleTelemetryData"
+    field_assignments {
+      field_name: "VELOCITY"
+      no_aggregation { expression_node_index: 0 }
+    }
+    field_assignments {
+      field_name: "ENGINE_RPM"
+      no_aggregation { expression_node_index: 1 }
+    }
+    field_assignments {
+      field_name: "FUEL_LEVEL"
+      no_aggregation { expression_node_index: 2 }
+    }
+    field_assignments {
+      field_name: "GPS_LATITUDE"
+      no_aggregation { expression_node_index: 3 }
+    }
+    field_assignments {
+      field_name: "GPS_LONGITUDE"
+      no_aggregation { expression_node_index: 4 }
+    }
+    field_assignments {
+      field_name: "IGNITION_STATE"
+      no_aggregation { expression_node_index: 5 }
+    }
+    field_assignments {
+      field_name: "LOCKED"
+      no_aggregation { expression_node_index: 6 }
+    }
+  }
+}

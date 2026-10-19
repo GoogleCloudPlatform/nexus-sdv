@@ -158,9 +158,15 @@ BigTable connector subscribes to these subjects and writes what arrives.
 
 | Client | Message | Subject |
 | :--- | :--- | :--- |
-| **Go Client** | `TelemetryMessage` — individual sensor readings | `telemetry.<VIN>.<sensor>` |
-| **Go Client** with `-message-type metrics_report` | `MetricsReport` — a vehicle metrics report | `telemetry-generic.<VIN>` |
-| **Python Client** | `TelemetryMessage` — individual sensor readings | `telemetry.prod.bigtable.<VIN>` |
+| **Go Client** | `TelemetryMessage` — individual sensor readings | `telemetry.<VIN>` |
+| **Python Client** | `TelemetryMessage` — individual sensor readings | `telemetry.<VIN>` |
+| **Go Client** with `-message-type metrics_report` | `MetricsReport` — a vehicle report in Google's SDV telemetry format | `telemetry-aaos-sdv.<VIN>` |
+
+The subject names the format and the vehicle: `telemetry.<VIN>` is the Nexus message,
+`telemetry-aaos-sdv.<VIN>` is Google's SDV report, and the VIN is always the second part. A
+further part may follow — a sensor's name, when a message carries readings of that one sensor
+only. The subjects used until release 1.2.2 (`telemetry.prod.bigtable.<VIN>`,
+`telemetry-generic.<VIN>`, `local.telemetry.<VIN>`) are still accepted for one more release.
 
 The message definitions live in [`proto/`](https://github.com/GoogleCloudPlatform/nexus-sdv/tree/main/proto):
 `telemetry.proto` for `TelemetryMessage`, `metrics_report.proto` for

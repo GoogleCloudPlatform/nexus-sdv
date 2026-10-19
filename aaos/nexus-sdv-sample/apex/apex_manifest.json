@@ -1,0 +1,10 @@
+{
+  "name": "com.nexussdv.sample",
+  "version": 1,
+  "requireNativeLibs": [
+    "libsdv_comms_ctx_ffi.so",
+    "libsdv_comms_dt_ffi.so",
+    "libsdv_comms_id_ffi.so",
+    "libsdv_comms_sd_ffi.so"
+  ]
+}

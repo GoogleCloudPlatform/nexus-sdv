@@ -12,6 +12,13 @@ spec:
     metadata:
       labels:
         app: nats-bigtable-connector
+      # The connector reads its pipeline and the message definitions once, at start. Without
+      # these a deploy that changes either leaves the old pod running the old pipeline —
+      # seen on dan1006 on 2026-10-09, where the new subject family was in the ConfigMap and
+      # not in the process.
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap-template.yaml") . | sha256sum }}
+        checksum/proto: {{ include (print $.Template.BasePath "/configmap-proto.yaml") . | sha256sum }}
     spec:
       # GKE Workload Identity — binds this pod to a GCP service account that
       # has roles/bigtable.user, so no GCP key files are needed in the container.

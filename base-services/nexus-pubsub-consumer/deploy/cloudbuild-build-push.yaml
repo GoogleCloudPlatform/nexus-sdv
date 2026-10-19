@@ -1,0 +1,70 @@
+# Builds the consumer image and pushes it to Artifact Registry. Submitted by hand:
+#
+#   gcloud builds submit --project <gcp-project> \
+#     --config base-services/nexus-pubsub-consumer/deploy/cloudbuild-build-push.yaml \
+#     --substitutions=_TAG=$(git rev-parse --short HEAD) .
+#
+# It lives here rather than in iac/cloudbuild/ on purpose: the design spec (§4.3)
+# keeps this service out of the platform's release machinery until the SDK in
+# Increment 3 has an opinion on how a Nexus service ships. No trigger points at
+# this file, and it deploys nothing — deploy/apply.sh does that, separately.
+#
+# The steps mirror build-push-nats-auth-callout.yaml so that folding this into the
+# standard pipeline later is a move, not a rewrite.
+steps:
+  - id: 'configure-ar'
+    name: 'gcr.io/cloud-builders/gcloud'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        TOKEN=$$(gcloud auth print-access-token)
+        AUTH=$$(printf '%s' "oauth2accesstoken:$$TOKEN" | base64 -w0)
+        mkdir -p /root/.docker
+        echo '{"auths":{"europe-west4-docker.pkg.dev":{"auth":"'$$AUTH'"}}}' \
+          > /root/.docker/config.json
+        echo "Artifact Registry auth configured (token-based, no credential helper)."
+    waitFor: ['-']
+
+  - id: 'build-push-nexus-pubsub-consumer'
+    name: 'gcr.io/cloud-builders/docker'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        # TAG and ARCH arrive as environment variables, not spliced into this script:
+        # Cloud Build substitutes a substitution variable as text before bash reads it, so a value with a
+        # quote or a semicolon would become part of the script itself.
+        [[ "$$TAG" =~ ^[A-Za-z0-9_.-]{1,128}$$ ]] || { echo "_TAG must be 1-128 characters of A-Z a-z 0-9 _ . -" >&2; exit 1; }
+        [[ "$$ARCH" =~ ^(amd64|arm64)$$ ]] || { echo "_ARCH must be amd64 or arm64" >&2; exit 1; }
+        cd base-services/nexus-pubsub-consumer
+        docker buildx create --name builder --use
+        echo "Building nexus-pubsub-consumer:$$TAG for linux/$$ARCH"
+        docker buildx build \
+          --platform "linux/$$ARCH" \
+          --build-arg DOCKER_HUB_MIRROR="$${IMAGE_REPO%/artifact-registry}/docker-hub" \
+          --tag "$${IMAGE_REPO}/nexus-pubsub-consumer:$$TAG" \
+          --push \
+          .
+        echo "pushed: $${IMAGE_REPO}/nexus-pubsub-consumer:$$TAG"
+    env: ['TAG=${_TAG}', 'ARCH=${_ARCH}']
+    secretEnv: ['IMAGE_REPO']
+    waitFor: ['configure-ar']
+
+substitutions:
+  _ARCH: "amd64"   # what iac/bootstrapping/.bootstrap_env sets for this platform
+  _TAG: "manual"
+
+availableSecrets:
+  secretManager:
+    - versionName: projects/$PROJECT_ID/secrets/IMAGE_REPO/versions/latest
+      env: 'IMAGE_REPO'
+
+# A native amd64 Rust release build takes minutes; an emulated arm64 one takes tens of
+# minutes (measured: 25 for this crate). The hour covers either.
+timeout: '3600s'
+
+options:
+  machineType: 'E2_HIGHCPU_8'
+  logging: CLOUD_LOGGING_ONLY
+  substitutionOption: 'ALLOW_LOOSE'

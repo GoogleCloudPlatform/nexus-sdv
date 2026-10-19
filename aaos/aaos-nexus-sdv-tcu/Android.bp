@@ -1,0 +1,122 @@
+// aaos-nexus-sdv-tcu — the Nexus TCU APEX (Increment 1.0):
+// nexus-connectivity-agent (Rust, prebuilt musl) + nats-server (upstream,
+// version-matched to the target Nexus cloud via fetch-nats-server.sh).
+// Staged into an AOSP tree by stage-into-aosp.sh, then:
+//   m com.android.nexus.aaos_nexus_sdv_tcu
+
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+apex {
+    name: "com.android.nexus.aaos_nexus_sdv_tcu",
+    binaries: [
+        "nexus_connectivity_agent_bin",
+        "nats_server_bin",
+        "nexus-telemetry-client",
+    ],
+    // Increment 1.1: the Nexus Bridge SDV service bundle (.so loaded by the
+    // lifecycle runtime) + its service-bundles manifest and AuthzPolicy.
+    native_shared_libs: [
+        "libnexus_bridge",
+    ],
+    prebuilts: [
+        "nexus_bridge_manifest",
+        "com.android.nexus.aaos_nexus_sdv_tcu.NexusBridge.permissions.config",
+        "nexus_bridge_publications",
+        "nexus_bridge_orch_config",
+        "nexus_bridge_linker_config",
+        "nexus_telemetry_metrics_config",
+        "nexus_connectivity_agent_apex.rc",
+        "nexus_telemetry_client_apex.rc",
+    ],
+    manifest: "apex_manifest.json",
+    compile_multilib: "64",
+    // The image pre-trusts the samples dev key in /product/etc/brand_new_apex/,
+    // so the APEX targets the product partition (not vendor).
+    product_specific: true,
+    file_contexts: "file_contexts",
+    key: "com.android.nexus.aaos_nexus_sdv_tcu.key",
+    updatable: true,
+    min_sdk_version: "35",
+}
+
+// The shared AAOS-SDV samples dev key (deliberately public in the samples
+// tree, pre-trusted on stock images for brand-new APEXes). Copied here because
+// the in-tree apex_key module restricts visibility to the samples subtree.
+apex_key {
+    name: "com.android.nexus.aaos_nexus_sdv_tcu.key",
+    public_key: "com.android.sdv.samples.avbpubkey",
+    private_key: "com.android.sdv.samples.pem",
+}
+
+// The APEX-wide service-bundles manifest (lists the Nexus Bridge bundle),
+// installed at etc/sdv_service_bundles_manifest.textproto.
+prebuilt_etc {
+    name: "nexus_bridge_manifest",
+    src: "sdv_service_bundles_manifest.textproto",
+    filename: "sdv_service_bundles_manifest.textproto",
+    installable: false,
+    product_specific: true,
+}
+
+// Per-bundle orchestration: assigns NexusBridge to the auto-start subgroup.
+prebuilt_etc {
+    name: "nexus_bridge_orch_config",
+    src: "orch/nexus_bridge_config.textproto",
+    sub_dir: "orch",
+    filename: "nexus_bridge.config",
+    installable: false,
+    product_specific: true,
+}
+
+// Linker config so the bundle .so can load its libraries from inside the APEX
+// (required for service-bundle-hosting APEXes).
+linker_config {
+    name: "nexus_bridge_linker_config",
+    src: "linker.config.json",
+    installable: false,
+    product_specific: true,
+}
+
+// Both are statically linked (musl / upstream Go) — no bionic deps, hence
+// check_elf_files off.
+cc_prebuilt_binary {
+    name: "nexus_connectivity_agent_bin",
+    stem: "nexus-connectivity-agent",
+    srcs: ["prebuilt/nexus-connectivity-agent"],
+    product_specific: true,
+    check_elf_files: false,
+    strip: { none: true },
+    min_sdk_version: "35",
+    apex_available: ["com.android.nexus.aaos_nexus_sdv_tcu"],
+}
+
+cc_prebuilt_binary {
+    name: "nats_server_bin",
+    stem: "nats-server",
+    srcs: ["prebuilt/nats-server"],
+    product_specific: true,
+    check_elf_files: false,
+    strip: { none: true },
+    min_sdk_version: "35",
+    apex_available: ["com.android.nexus.aaos_nexus_sdv_tcu"],
+}
+
+// The init files of the two services, installed at etc/ in the APEX, where init reads
+// /apex/*/etc/*rc.
+prebuilt_etc {
+    name: "nexus_connectivity_agent_apex.rc",
+    src: "init/nexus_connectivity_agent.rc",
+    filename: "nexus_connectivity_agent.rc",
+    installable: false,
+    product_specific: true,
+}
+
+prebuilt_etc {
+    name: "nexus_telemetry_client_apex.rc",
+    src: "init/nexus_telemetry_client.rc",
+    filename: "nexus_telemetry_client.rc",
+    installable: false,
+    product_specific: true,
+}

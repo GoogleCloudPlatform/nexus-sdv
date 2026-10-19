@@ -1,0 +1,13 @@
+releases:
+  - name: reference-services
+    namespace: sample-services
+    createNamespace: true
+    chart: ../reference-services
+    values:
+      - ../reference-services/values.yaml
+      - arch: '{{ .StateValues.arch | default "arm64" }}'
+        image:
+          repository: '{{ requiredEnv "IMAGE_REPO" }}'
+          tag: '{{ if hasKey .StateValues "image" }}{{ .StateValues.image.tag | default "latest" }}{{ else }}latest{{ end }}'
+        nats:
+          password: '{{ requiredEnv "NATS_CONNECTOR_PASSWORD" }}'

@@ -1,0 +1,22 @@
+[package]
+name = "nexus-registry"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1"
+async-nats = "0.50.0"
+async-trait = "0.1"
+bytes = "1"
+futures = "0.3"
+nexus-aaos-sdk = { path = "../../aaos/nexus-aaos-sdk" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+axum = { version = "0.8", features = ["tokio", "macros"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+http-body-util = "0.1"
+tower = { version = "0.5", features = ["util"] }

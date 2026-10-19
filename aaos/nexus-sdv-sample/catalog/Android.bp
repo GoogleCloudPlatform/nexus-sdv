@@ -1,0 +1,22 @@
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+rust_protobuf {
+    name: "libnexus_sample_proto",
+    crate_name: "nexus_sample_proto",
+    protos: ["nexus_sample.proto"],
+    source_stem: "nexus_sample_proto_source",
+    vendor_available: true,
+    product_available: true,
+    apex_available: [
+        "//apex_available:platform",
+        "//apex_available:anyapex",
+    ],
+    min_sdk_version: "35",
+}
+
+filegroup {
+    name: "vsidl_nexus_sample_catalog",
+    srcs: ["**/*"],
+}

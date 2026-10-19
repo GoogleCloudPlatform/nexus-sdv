@@ -11,6 +11,15 @@ natsUsers:
     password: "placeholder"  # Set via helmfile
 
 container:
+  # The leaf port's certificate, key and CA bundle, from the secret deploy-nats.yaml creates.
+  # Lists are patched, not merged — the chart's JSON-patch hook.
+  patch:
+    - op: add
+      path: /volumeMounts/-
+      value:
+        name: nats-leaf-tls
+        mountPath: /etc/nats-certs/leafnodes
+        readOnly: true
   env:
     GOMEMLIMIT: 800MiB
   merge:
@@ -46,22 +55,43 @@ service:
       enabled: true
     monitor:
       enabled: true
-    cluster:
-      enabled: true
 
 config:
+  # JetStream: the Cloud Service Registry's store (Increment 2.2). One file-backed
+  # persistent volume; the buckets nexus-registry-grants and nexus-registry-offers live
+  # here. Durability for the data path itself is a later increment (2.5).
+  jetstream:
+    enabled: true
+    fileStore:
+      enabled: true
+      dir: /data
+      # The class is named, not left to the cluster's default: the default creates a disk
+      # type (pd-balanced) the arm64 nodes Autopilot provides refuse to attach. dynamic-rwo
+      # is GKE's own class that picks the type the node accepts; 4Gi is the smallest size
+      # both disk families offer.
+      pvc:
+        enabled: true
+        size: 4Gi
+        storageClassName: dynamic-rwo
   merge:
     debug: true
     trace: true
     listen: 0.0.0.0:4222
     http: 8222
-    cluster:
-      name: nats-cluster
-      listen: 0.0.0.0:4248
-      routes:
-        - nats://127.0.0.1:4248
+    # No cluster block: one replica, no failover. A cluster port with a route to itself
+    # made JetStream run clustered and wait forever for a meta leader (review, 2026-09-28).
     leafnodes:
       listen: 0.0.0.0:7422
+      tls:
+        cert_file: /etc/nats-certs/leafnodes/tls.crt
+        key_file: /etc/nats-certs/leafnodes/tls.key
+        # Every leaf must present a certificate issued by the registration CA — a vehicle's
+        # operational certificate. The auth-callout then receives the verified chain and
+        # reads the VIN from it (Increment 2.2, spec R1). Partner leafs (certificates from
+        # the server CA, sample-clients/generate-leaf-node-cert*.sh) are not admitted: they
+        # carry no VIN and leaf enforcement refuses them — their own design is a 1.3 topic.
+        ca_file: /etc/nats-certs/leafnodes/ca-bundle.crt
+        verify: true
     # Authorization configuration is set via helmfile using config.merge.authorization.users
     # This section is intentionally left minimal here and populated by helmfile set directives
 
@@ -92,6 +122,13 @@ natsBox:
                   - arm64
 
 podTemplate:
+  patch:
+    - op: add
+      path: /spec/volumes/-
+      value:
+        name: nats-leaf-tls
+        secret:
+          secretName: nats-leaf-tls
   merge:
     spec:
       affinity:

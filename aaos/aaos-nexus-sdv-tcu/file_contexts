@@ -1,0 +1,8 @@
+# SELinux labels for the files inside the APEX. The three programs carry their own exec types,
+# defined by the product policy in aaos/aaos-nexus-sdv-tcu-sepolicy/, so they enter their
+# own domains at exec. Everything else stays system_file, as in the platform's
+# brand-new-APEX sample.
+(/.*)?                          u:object_r:system_file:s0
+/bin/nexus-connectivity-agent   u:object_r:nexus_connectivity_agent_exec:s0
+/bin/nats-server                u:object_r:nexus_nats_server_exec:s0
+/bin/nexus-telemetry-client     u:object_r:nexus_telemetry_client_exec:s0

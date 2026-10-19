@@ -1,0 +1,7 @@
+// The SELinux policy for the Nexus-Bridge APEX, picked up through PRODUCT_PRIVATE_SEPOLICY_DIRS
+// — the Nexus-Bridge APEX's stage-into-aosp.sh adds the line. The init files are in the APEX
+// (aaos-nexus-sdv-tcu/init/).
+
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}

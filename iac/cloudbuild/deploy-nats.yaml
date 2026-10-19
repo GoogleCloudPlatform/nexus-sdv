@@ -48,6 +48,22 @@ steps:
   # ============================================================================
 
   # LOCAL mode: download Server CA, generate key + CSR, sign with Server CA
+  # The CA that issues the vehicles' operational certificates. The hub verifies every leaf
+  # certificate against it (and against the server CA, for partner leafs) — Increment 2.2.
+  - id: 'download-registration-ca-cert'
+    name: 'gcr.io/cloud-builders/gcloud@sha256:abcad906c9fa0dd063c4b6e570994f34024673486b17e9f4c99c720165e03ae5'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        mkdir -p temp-nats-leaf
+        gcloud secrets versions access latest --secret="REGISTRATION_CA_CERT" --project="$PROJECT_ID" > temp-nats-leaf/registration-ca.crt.pem
+        if [ ! -s temp-nats-leaf/registration-ca.crt.pem ]; then
+            echo "::error::Could not fetch Registration CA from Secret Manager"
+            exit 1
+        fi
+    waitFor: ['get-gke-credentials']
+
   - id: 'generate-nats-leaf-tls-local'
     name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:575.0.0'
     entrypoint: 'bash'
@@ -64,12 +80,18 @@ steps:
         gcloud secrets versions access latest --secret="SERVER_CA_KEY"  --project="$PROJECT_ID" > temp-nats-leaf/ca.key.pem
 
         echo "Generating NATS leaf node server key and CSR..."
+        # Go verifies a server certificate by its SAN, never by its CN. Under local PKI the
+        # name is nats.<domain> when a domain exists, else the placeholder — a vehicle then
+        # has to dial with NEXUS_CLOUD_NATS_NAME set to it.
+        SAN_NAME="nats.$$(cat domain.txt 2>/dev/null)"
+        [ "$$SAN_NAME" = "nats." ] && SAN_NAME="nats-leaf-node"
         openssl genpkey -algorithm RSA -out temp-nats-leaf/tls.key.pem
 
         openssl req -new \
           -key temp-nats-leaf/tls.key.pem \
           -out temp-nats-leaf/tls.csr.pem \
-          -subj "/CN=nats-leaf-node"
+          -subj "/CN=nats-leaf-node" \
+          -addext "subjectAltName=DNS:$$SAN_NAME"
 
         echo "Signing CSR with Server CA..."
         openssl x509 -req -days 365 \
@@ -151,21 +173,76 @@ steps:
     waitFor: [ 'generate-nats-leaf-tls-remote' ]
 
   # Create / update the Kubernetes secret that NATS mounts at /etc/nats-certs/leaf
+  - id: 'publish-leaf-tls-anchor'
+    name: 'gcr.io/cloud-builders/gcloud@sha256:abcad906c9fa0dd063c4b6e570994f34024673486b17e9f4c99c720165e03ae5'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        set -e
+        # Vehicles verify the hub's leaf certificate against its issuing CA, not against the
+        # certificate itself (the way the other two anchors are pinned): a renewal of the
+        # hub's certificate then needs no re-provisioning of any vehicle. The helper owns
+        # the bucket, its public-read binding and the fallback name.
+        source iac/bootstrapping/lib/public-pki.sh
+        publish_public_pki "$PROJECT_ID" "${_REGION}" "NATS_LEAF_TLS_CA.pem" temp-nats-leaf/ca.crt.pem
+        echo "✓ NATS_LEAF_TLS_CA.pem published"
+    waitFor: [ 'store-nats-leaf-tls-secrets' ]
+
   - id: 'create-nats-leaf-tls-k8s-secret'
     name: 'gcr.io/cloud-builders/kubectl'
     entrypoint: 'bash'
     args:
       - '-c'
       - |
+        # The CAs the hub verifies leaf certificates against: the registration CA only —
+        # it issues the vehicles' operational certificates. The server CA (partner leafs,
+        # sample-clients/generate-leaf-node-cert*.sh) is deliberately NOT in the bundle: a
+        # partner certificate whose name reads VIN:<vin> would otherwise obtain that
+        # vehicle's grant. Partner leafs get their own design in 1.3.
+        #
+        # Fail when kubectl fails: without this the step printed its success line
+        # after "namespaces base-services not found" and NATS never started.
+        set -euo pipefail
+        cat temp-nats-leaf/registration-ca.crt.pem > temp-nats-leaf/ca-bundle.crt.pem
         kubectl create secret generic nats-leaf-tls \
           --namespace=base-services \
           --from-file=tls.crt=temp-nats-leaf/tls.crt.pem \
           --from-file=tls.key=temp-nats-leaf/tls.key.pem \
           --from-file=ca.crt=temp-nats-leaf/ca.crt.pem \
+          --from-file=ca-bundle.crt=temp-nats-leaf/ca-bundle.crt.pem \
           --dry-run=client -o yaml | kubectl apply -f -
 
-        echo "✓ Kubernetes secret nats-leaf-tls created/updated"
-    waitFor: [ 'store-nats-leaf-tls-secrets' ]
+        echo "✓ Kubernetes secret nats-leaf-tls created/updated (with the CA bundle)"
+    waitFor: [ 'store-nats-leaf-tls-secrets', 'download-registration-ca-cert' ]
+
+  # JetStream adds a volumeClaimTemplate to the StatefulSet, a field Kubernetes refuses to
+  # change on an existing one. So a StatefulSet from before Increment 2.2 — one without a
+  # claim — is deleted here, with its pod, and helm creates it again with the volume. A
+  # StatefulSet that already has a claim is left alone.
+  #
+  # The pod has to go too. Until 2026-10-09 this step deleted with --cascade=orphan, to keep
+  # the hub running meanwhile; but a running pod cannot be given a volume, the new
+  # StatefulSet adopted the old pod and could not update it ("pod updates may not change
+  # fields"), and the hub went on without its store and without the users of the new
+  # configuration — seen on the upgrade of dan1006 from 1.2.2. The hub is away from here
+  # until helm has started the new pod.
+  - id: 'prepare-jetstream-volume'
+    name: 'gcr.io/cloud-builders/kubectl'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        set -e
+        if kubectl -n base-services get statefulset nats >/dev/null 2>&1 \
+           && ! kubectl -n base-services get statefulset nats -o jsonpath='{.spec.volumeClaimTemplates[*].metadata.name}' | grep -q .; then
+          kubectl -n base-services delete statefulset nats --wait=true --timeout=120s
+          kubectl -n base-services wait --for=delete pod/nats-0 --timeout=120s || true
+          echo "StatefulSet nats and its pod deleted; helm recreates them with the JetStream volume"
+        else
+          echo "StatefulSet nats absent, or it already has a volume claim — nothing to do"
+        fi
+    waitFor: [ 'get-gke-credentials' ]
 
   - id: 'deploy-nats'
     name: 'ghcr.io/helmfile/helmfile:latest'
@@ -184,8 +261,8 @@ steps:
         export BASE_DOMAIN="$$BASE_DOMAIN"
         
         helmfile --file nats.yaml.gotmpl ${_HELM_ACTION} --state-values-set pkiStrategy=$$PKI_STRATEGY --state-values-set baseDomain="$$BASE_DOMAIN" --state-values-set arch=${_ARCH}
-    secretEnv: [ 'PKI_STRATEGY', 'ENVIRONMENT', 'NATS_BASIC_AUTH_USER', 'NATS_BASIC_AUTH_PASSWORD', 'NATS_AUTH_CALLOUT_PASSWORD', 'NATS_CONNECTOR_PASSWORD', 'NATS_AUTH_CALLOUT_NKEY_PUB', 'JWT_ACC_SIGNING_KEY' ]
-    waitFor: [ 'create-nats-leaf-tls-k8s-secret' ]
+    secretEnv: [ 'PKI_STRATEGY', 'ENVIRONMENT', 'NATS_BASIC_AUTH_USER', 'NATS_BASIC_AUTH_PASSWORD', 'NATS_AUTH_CALLOUT_PASSWORD', 'NATS_CONNECTOR_PASSWORD', 'NATS_AUTH_CALLOUT_NKEY_PUB', 'JWT_ACC_SIGNING_KEY' , 'NATS_GRANT_READER_PASSWORD', 'NATS_REGISTRY_PASSWORD' ]
+    waitFor: [ 'create-nats-leaf-tls-k8s-secret', 'prepare-jetstream-volume' ]
 
   - id: 'create-nats-hostname-secret'
     name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:575.0.0'
@@ -266,6 +343,10 @@ availableSecrets:
       env: 'NATS_AUTH_CALLOUT_PASSWORD'
     - versionName: projects/$PROJECT_ID/secrets/NATS_CONNECTOR_PASSWORD/versions/latest
       env: 'NATS_CONNECTOR_PASSWORD'
+    - versionName: projects/$PROJECT_ID/secrets/NATS_GRANT_READER_PASSWORD/versions/latest
+      env: 'NATS_GRANT_READER_PASSWORD'
+    - versionName: projects/$PROJECT_ID/secrets/NATS_REGISTRY_PASSWORD/versions/latest
+      env: 'NATS_REGISTRY_PASSWORD'
     - versionName: projects/$PROJECT_ID/secrets/NATS_AUTH_CALLOUT_NKEY_PUB/versions/latest
       env: 'NATS_AUTH_CALLOUT_NKEY_PUB'
     - versionName: projects/$PROJECT_ID/secrets/JWT_ACC_SIGNING_KEY/versions/latest

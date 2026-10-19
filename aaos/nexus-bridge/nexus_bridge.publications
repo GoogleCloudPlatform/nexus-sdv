@@ -1,0 +1,15 @@
+# Slot size per publish target, in bytes.
+#
+# A Data Tunnel publication registers a fixed message_size, and the Bridge cannot derive
+# it from a payload it has not seen yet. The AuthzPolicy beside this file says WHAT may be
+# published; this file says only how large the slot is registered. A payload that does not
+# fit is dropped and counted, never truncated: a truncated protobuf would surface as a
+# decode error far away from its cause.
+#
+# Format: <unit_type> <topic> <bytes>
+# Both messages encode to at most six bytes plus a one-byte length; 64 leaves room without
+# sending kilobytes of padding over the Data Tunnel for each command.
+com.nexussdv.sample.PressureLimit pressure-limit 64
+com.nexussdv.sample.DoorCommand door-command 64
+# Room for a participant's payload; a larger one is dropped and counted.
+com.nexussdv.sdk.Command command 1024

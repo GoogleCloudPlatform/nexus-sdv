@@ -5,6 +5,7 @@ import nats
 import asyncio
 import requests
 from . import telemetry
+from .subjects import telemetry_subject
 import tempfile
 import time
 import json
@@ -233,7 +234,7 @@ class NexusCar:
         message = telemetry.telemetry_message(vin, readings_list)
         
         # 2. Nexus-Telemetry-Subject
-        subject = f"telemetry.prod.bigtable.{vin}"
+        subject = telemetry_subject(vin)
         
         # 3. Publish and flush
         await self.nc.publish(subject, message.SerializeToString())

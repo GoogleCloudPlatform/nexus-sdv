@@ -3,6 +3,7 @@ module telemetry-subscriber
 go 1.25.0
 
 require (
+	github.com/google/uuid v1.6.0
 	github.com/nats-io/nats.go v1.48.0
 	google.golang.org/protobuf v1.36.10
 )

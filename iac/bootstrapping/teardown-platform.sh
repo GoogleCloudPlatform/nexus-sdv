@@ -132,6 +132,23 @@ delete_gke_cluster() {
       echo ""
 }
 
+# A cluster takes its nodes with it, not the disks its volume claims created.
+# Since Increment 2.2 NATS has one, the registry's store, and it stayed in the
+# project after every teardown while the preflight called the project empty.
+# GKE labels such a disk with the name of the cluster it was created for.
+delete_cluster_disks() {
+      local name zone
+      gcloud compute disks list --project "$GCP_PROJECT_ID" \
+          --filter="labels.goog-k8s-cluster-name=${ENV}-gke AND -users:*" \
+          --format="value(name,zone.basename())" 2>/dev/null \
+      | while read -r name zone; do
+          [ -n "$name" ] || continue
+          log_info "  - Deleting disk left by the cluster: $name ($zone)"
+          gcloud compute disks delete "$name" --zone "$zone" --project "$GCP_PROJECT_ID" --quiet \
+              || log_warn "Could not delete disk $name in $zone"
+      done
+}
+
 cleanup_ca_pools() {
       # Build list of pools to delete based on user choices
       CA_POOLS_TO_DELETE=()
@@ -374,6 +391,9 @@ main() {
     (( ++i ))
     log_section_title "Step ${i}: Running Terraform destroy"
     run_terraform_destroy
+    # After the destroy, not after the cluster deletion above: if that one failed,
+    # Terraform removes the cluster, and only then are its disks unattached.
+    delete_cluster_disks
     # Step 11: Get user inputs for project configuration
     (( ++i ))
     log_section_title "Step ${i}: Deleting the public PKI bucket"

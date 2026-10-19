@@ -1,0 +1,3 @@
+# Local cargo build artefacts of the host-tested core; the binary is built by Soong.
+core/target/
+core/Cargo.lock

@@ -40,8 +40,42 @@ releases:
               {{- if $base_domain }}
               advertise: "nats.{{ $base_domain }}:7422"
               {{- end }}
-            # Define accounts for proper auth_callout isolation
+            # Accounts. NEXUS is where everything Nexus-side lives: the vehicles (the callout
+            # places every vehicle connection here — its issued JWT names NEXUS as audience),
+            # the connector and the consumers behind it, the grant store and the registry.
+            # It is a named account because the default global account cannot have
+            # JetStream once any other account is defined (nats-server; spec D8, 2026-09-29),
+            # and JetStream is where the registry's buckets live — and, from Increment 2.5
+            # on, where store-and-forward for the vehicles will. AUTH holds the callout
+            # service, APP the basic user, SYS the server itself.
             accounts:
+              NEXUS:
+                jetstream: enabled
+                users:
+                  - user: connector
+                    password: '{{ requiredEnv "NATS_CONNECTOR_PASSWORD" }}'
+                    permissions:
+                      # pubsub.> on subscribe for Increment 1.2's nexus-pubsub-consumer (finding F29:
+                      # this grant lived on a feature branch and a deploy from main removed it); on
+                      # publish since Increment 2.2 so a cloud-side test can send a command. The
+                      # split into per-consumer identities stays scheduled for release 1.3.
+                      subscribe: ["telemetry.>", "telemetry-aaos-sdv.>", "telemetry-generic.>", "local.telemetry.>", "scoring.>", "pubsub.>"]
+                      publish: ["telemetry.>", "telemetry-aaos-sdv.>", "telemetry-generic.>", "local.telemetry.>", "scoring.>", "pubsub.>"]
+                  - user: grant-reader
+                    password: '{{ requiredEnv "NATS_GRANT_READER_PASSWORD" }}'
+                    permissions:
+                      # Reads the per-VIN grants for the auth-callout (Increment 2.2). JetStream's
+                      # request subjects are the only publishes it needs; replies come on its inbox.
+                      publish: ["$JS.API.STREAM.INFO.KV_nexus-registry-grants", "$JS.API.DIRECT.GET.KV_nexus-registry-grants.>", "$JS.API.STREAM.MSG.GET.KV_nexus-registry-grants"]
+                      subscribe: ["_INBOX_grant_reader.>"]
+                  - user: nexus-registry
+                    password: '{{ requiredEnv "NATS_REGISTRY_PASSWORD" }}'
+                    permissions:
+                      # The Cloud Service Registry (Increment 2.2): its three buckets —
+                      # registrations, offers, grants — and the control subjects. Broad on
+                      # the JetStream API on purpose: it creates its buckets at start-up.
+                      publish: ["$JS.API.>", "$KV.nexus-registry-grants.>", "$KV.nexus-registry-offers.>", "$KV.nexus-registry-services.>", "registry.>"]
+                      subscribe: ["_INBOX.>", "registry.>"]
               AUTH:
                 users:
                   - user: auth-callout-service
@@ -53,15 +87,8 @@ releases:
               SYS: {}
             # Specify system account for NATS server operations
             system_account: SYS
-            # Authorization configuration
+            # Authorization: every connection not listed in auth_users goes through the callout
             authorization:
-              # Global account users (same account as JWT-authenticated vehicles)
-              users:
-                - user: connector
-                  password: '{{ requiredEnv "NATS_CONNECTOR_PASSWORD" }}'
-                  permissions:
-                    subscribe: ["telemetry.>", "telemetry-generic.>", "local.telemetry.>", "scoring.>"]
-                    publish: ["telemetry.>", "telemetry-generic.>", "local.telemetry.>", "scoring.>"]
               auth_callout:
                 issuer: '{{ requiredEnv "NATS_AUTH_CALLOUT_NKEY_PUB" }}'
                 # auth_users lists users who BYPASS the callout (authenticate directly)
@@ -69,6 +96,8 @@ releases:
                 auth_users:
                   - auth-callout-service                      # Auth service bypasses to respond to requests
                   - connector                                 # Connector authenticates directly with password
+                  - grant-reader                              # Reads grants for the callout, by password
+                  - nexus-registry                            # The registry, by password
                   - '{{ requiredEnv "NATS_BASIC_AUTH_USER" }}' # Basic auth user bypasses callout
                 account: AUTH
     set:

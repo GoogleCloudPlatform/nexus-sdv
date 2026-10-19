@@ -1,0 +1,20 @@
+arch: arm64
+
+image:
+  repository: ""
+  tag: latest
+  pullPolicy: Always
+
+registryUrl: http://nexus-registry.base-services.svc.cluster.local:8080
+
+nats:
+  url: nats://nats.base-services.svc.cluster.local:4222
+  user: connector
+  password: ""
+
+# masked: the last four characters of a VIN; full: the whole VIN.
+logDetail: masked
+
+resources:
+  requests: { cpu: "50m", memory: "32Mi" }
+  limits:   { cpu: "250m", memory: "128Mi" }

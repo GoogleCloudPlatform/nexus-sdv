@@ -1,0 +1,8 @@
+# nats-server, the leaf. Started only by the nexus-connectivity-agent.
+type nexus_nats_server, domain;
+typeattribute nexus_nats_server coredomain;
+type nexus_nats_server_exec, exec_type, file_type, system_file_type;
+
+net_domain(nexus_nats_server)
+allow nexus_nats_server nexus_data_file:dir r_dir_perms;
+allow nexus_nats_server nexus_data_file:file create_file_perms;
