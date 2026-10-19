@@ -1,0 +1,92 @@
+# =============================================================================
+# run-nexus-vhal-example.yaml — build and test gate for the IVI example app
+#
+# Protects the Android app for the head unit, aaos/nexus-vhal-example. On every
+# change under aaos/nexus-vhal-example/** this builds the Android APK and runs
+# the JVM unit tests.
+#
+# Until 2026-10-09 this file was run-aaos-client.yaml and also ran the unit tests
+# of the Go command-publisher: the app it built then (sample-clients/aaos-client)
+# received commands from the cloud. The example sends only, so that step is gone;
+# the command-publisher itself is untouched.
+#
+# It needs NO deployed Nexus environment — it is a pure build+test gate, so it is
+# fast, hermetic, and safe to run on every PR. A PR that breaks the mapping from a
+# VHAL property to a reading or the telemetry subject fails here.
+#
+# Run manually against a branch:
+#   gcloud builds submit . \
+#     --config=iac/cloudbuild/run-nexus-vhal-example.yaml \
+#     --project=<PROJECT_ID> --region=<REGION>
+#
+# As a path-filtered PR trigger (owner action — needs a Cloud Build host
+# connection to the repository this file lives in). Steps:
+#   1. Create a Cloud Build host connection + link this repo
+#      (console / OAuth — interactive), giving a repository resource:
+#        projects/<PROJECT>/locations/<REGION>/connections/<CONN>/repositories/<REPO>
+#   2. Create the trigger against it (2nd-gen syntax):
+#        gcloud builds triggers create github \
+#          --name=nexus-vhal-example-pr --region=<REGION> --project=<PROJECT> \
+#          --repository=<that repository resource> \
+#          --pull-request-pattern='.*' \
+#          --build-config=iac/cloudbuild/run-nexus-vhal-example.yaml \
+#          --included-files='aaos/nexus-vhal-example/**;proto/telemetry.proto'
+# Until then, run the gate manually:
+#   gcloud builds submit . --config=iac/cloudbuild/run-nexus-vhal-example.yaml \
+#     --project=<PROJECT_ID> --region=<REGION>
+#
+# NOTE: shell variables inside args must be written $$VAR so Cloud Build does not
+# treat them as ${_SUBSTITUTION} variables.
+#
+# --- Amendment note (F6): nightly emulator smoke (plan task 4A-2) is NOT
+# implemented. No Android 17 (API 37) *automotive* emulator system image exists
+# on any sdkmanager channel (verified 2026-07; newest automotive image is API 35),
+# and the phase-4 design rules Cuttlefish out of CI as too heavy. On-device
+# validation is therefore a manual re-validation checklist against the Cuttlefish
+# AAOS-SDV twin (see aaos/nexus-vhal-example/README.md and the phase-1 E2E
+# results) run when the NATS/auth/proto surfaces change — not a CloudBuild job.
+# =============================================================================
+
+steps:
+  # ===========================================================================
+  # Android: assemble the debug APK + run JVM unit tests.
+  # Toolchain (as-built): AGP 9.2.1 / Gradle 9.6.1 (wrapper self-downloads),
+  # JDK 21 daemon, compileSdk 37. See docs/aaos-sdv-integration.md.
+  # ===========================================================================
+  - id: 'nexus-vhal-example-build-test'
+    name: 'eclipse-temurin:21-jdk'
+    entrypoint: 'bash'
+    waitFor: ['-']
+    env:
+      - 'ANDROID_HOME=/workspace/android-sdk'
+      - 'ANDROID_SDK_ROOT=/workspace/android-sdk'
+    args:
+      - '-c'
+      - |
+        set -euo pipefail
+        apt-get update -qq && apt-get install -y -qq curl unzip >/dev/null
+
+        # --- Android command-line tools ---
+        echo "Installing Android command-line tools…"
+        mkdir -p "$$ANDROID_HOME/cmdline-tools"
+        curl -sSL -o /tmp/cmdtools.zip \
+          https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+        unzip -q /tmp/cmdtools.zip -d "$$ANDROID_HOME/cmdline-tools"
+        mv "$$ANDROID_HOME/cmdline-tools/cmdline-tools" "$$ANDROID_HOME/cmdline-tools/latest"
+        SM="$$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+
+        # --- SDK packages matching the as-built toolchain ---
+        yes | "$$SM" --licenses >/dev/null 2>&1 || true
+        "$$SM" "platform-tools" "platforms;android-37.0" "build-tools;37.0.0" >/dev/null
+
+        # --- Build + unit test ---
+        cd aaos/nexus-vhal-example
+        chmod +x gradlew
+        ./gradlew --no-daemon assembleDebug testDebugUnitTest
+        echo "✓ nexus-vhal-example APK built and unit tests passed"
+
+options:
+  machineType: 'E2_HIGHCPU_8'
+  logging: CLOUD_LOGGING_ONLY
+
+timeout: '1800s'

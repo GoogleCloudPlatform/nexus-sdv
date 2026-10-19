@@ -53,8 +53,7 @@ type VehicleClient struct {
 	MessageType           string // "telemetry" or "metrics_report"
 
 	// Optional static IPs to dial instead of resolving the request's hostname via DNS —
-	// needed on guests with no resolver at all (see docs/superpowers/plans/2026-08-07-
-	// nexus-connectivity-agent.md, Task 3). TLS SNI/cert validation is unaffected: Go's
+	// needed on guests with no resolver at all. TLS SNI/cert validation is unaffected: Go's
 	// http.Transport infers ServerName from the original request host, not the dialed addr.
 	RegistrationResolveIP string
 	KeycloakResolveIP     string
@@ -522,23 +521,18 @@ func (v *VehicleClient) ConnectToNATS(jwt string) error {
 	return nil
 }
 
-// buildTelemetrySubject constructs the NATS subject for generic TelemetryMessage publishing
-// Supports configurable prefix via TELEMETRY_PREFIX environment variable
-// Examples:
-//   - Without prefix: telemetry-generic.{VIN}.{sensor}
-//   - With prefix "prod.bigtable": telemetry-generic.prod.bigtable.{VIN}.{sensor}
-func (v *VehicleClient) buildTelemetrySubject(sensor string) string {
-	prefix := os.Getenv("TELEMETRY_PREFIX")
-	if prefix != "" {
-		return fmt.Sprintf("telemetry-generic.%s.%s.%s", prefix, v.VIN, sensor)
-	}
-	return fmt.Sprintf("telemetry.%s.%s", v.VIN, sensor)
+// The subject names the format and the vehicle.
+
+// buildTelemetrySubject: the Nexus message, TelemetryMessage, goes on telemetry.<VIN>. A
+// message carries readings of several sensors, so no sensor is named in the subject.
+func (v *VehicleClient) buildTelemetrySubject() string {
+	return fmt.Sprintf("telemetry.%s", v.VIN)
 }
 
-// buildMetricsReportSubject constructs the NATS subject for MetricsReport publishing
-// Format: telemetry.{VIN}
+// buildMetricsReportSubject: Google's SDV report, MetricsReport, goes on
+// telemetry-aaos-sdv.<VIN> — the subject an AAOS vehicle's telemetry client uses.
 func (v *VehicleClient) buildMetricsReportSubject() string {
-	return fmt.Sprintf("telemetry-generic.%s", v.VIN)
+	return fmt.Sprintf("telemetry-aaos-sdv.%s", v.VIN)
 }
 
 // PublishTelemetryContinuously sends telemetry data to NATS continuously

@@ -1,0 +1,56 @@
+// nexus-telemetry-client — built into the Nexus-Bridge APEX
+// (com.android.nexus.aaos_nexus_sdv_tcu, aaos/aaos-nexus-sdv-tcu/Android.bp), beside the leaf.
+// Google's telemetry SDK needs a min_sdk_version for that; the Nexus-Bridge APEX's
+// stage-into-aosp.sh sets it (set-sdk-min-sdk-version.py here).
+
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+rust_library {
+    name: "libnexus_telemetry_client_core",
+    crate_name: "nexus_telemetry_client_core",
+    edition: "2021",
+    srcs: [
+        "core/src/lib.rs",
+        ":nexus_common_nats_wire_rs",
+        ":nexus_common_leaf_connect_rs",
+    ],
+    product_specific: true,
+    min_sdk_version: "35",
+    apex_available: ["com.android.nexus.aaos_nexus_sdv_tcu"],
+}
+
+rust_binary {
+    name: "nexus-telemetry-client",
+    crate_name: "nexus_telemetry_client",
+    edition: "2021",
+    srcs: ["src/main.rs"],
+    // Only the SDK's public crates (rust_wrapper, proto_rust).
+    rustlibs: [
+        "libanyhow",
+        "libbinder_rs",
+        "liblog_rust",
+        "liblogger",
+        "libnexus_telemetry_client_core",
+        "libprotobuf",
+        "librustutils",
+        "libsdv_telemetry_proto_rust",
+        "libsdv_telemetry_rust_wrapper",
+        "libtokio",
+    ],
+    prefer_rlib: true,
+    product_specific: true,
+    min_sdk_version: "35",
+    apex_available: ["com.android.nexus.aaos_nexus_sdv_tcu"],
+}
+
+// The metrics configuration the client activates; static in this version.
+prebuilt_etc {
+    name: "nexus_telemetry_metrics_config",
+    src: "metrics/vehicle_telemetry_config_live.pb",
+    filename: "vehicle_telemetry_config_live.pb",
+    sub_dir: "nexus",
+    installable: false,
+    product_specific: true,
+}

@@ -1,0 +1,50 @@
+// Copyright (C) 2026 The Android Open Source Project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+    default_team: "trendy_team_automotive",
+}
+
+rust_ffi_shared {
+    name: "libsdv_lm_door_controller",
+    srcs: ["src/main.rs"],
+    defaults: [
+        "sdv_tracing@rust_defaults",
+    ],
+    crate_name: "sdv_lm_door_controller",
+    product_specific: true,
+    rustlibs: [
+        "libtokio",
+        "libtokio_util",
+        "libanyhow",
+        "libfutures",
+        "libfutures_util",
+        "libsdv_rs",
+        "libsdv_mw_rs_com_nexussdv_sample_door_controller",
+        "liblog_rust",
+        "libprotobuf",
+        "libnexus_sample_proto",
+        "libsdv_status_rs",
+        "librand",
+    ],
+    proc_macros: [
+        "libasync_trait",
+    ],
+    apex_available: [
+        "//apex_available:platform",
+        "//apex_available:anyapex",
+    ],
+    min_sdk_version: "35",
+}

@@ -1,0 +1,10 @@
+[package]
+name = "nexus_telemetry_client_core"
+version = "0.1.0"
+edition = "2021"
+
+# The part of the nexus-telemetry-client that needs no platform SDK, tested on the host
+# (`cargo test`). The on-device binary is built in-tree by Soong (see ../Android.bp);
+# Soong ignores this manifest.
+[lib]
+path = "src/lib.rs"

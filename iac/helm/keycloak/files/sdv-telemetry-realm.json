@@ -85,6 +85,13 @@
         "clientRole": false,
         "containerId": "132405e0-e764-4249-bd39-8b66ffcdf496",
         "attributes": {}
+      },
+      {
+        "name": "telemetry-client",
+        "description": "Publishes vehicle telemetry: telemetry.<vin>.> and telemetry.*.*.<vin>",
+        "composite": false,
+        "clientRole": false,
+        "attributes": {}
       }
     ],
     "client": {
@@ -470,7 +477,8 @@
       "disableableCredentialTypes": [],
       "requiredActions": [],
       "realmRoles": [
-        "default-roles-sdv-telemetry"
+        "default-roles-sdv-telemetry",
+        "telemetry-client"
       ],
       "notBefore": 0,
       "groups": []

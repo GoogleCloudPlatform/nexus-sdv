@@ -1,0 +1,21 @@
+[package]
+name = "pressure-monitor"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1"
+async-trait = "0.1"
+axum = "0.8"
+nexus-aaos-sdk = { path = "../../../aaos/nexus-aaos-sdk" }
+nexus-sample-messages = { path = "../messages" }
+prost = "0.14.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+[dev-dependencies]
+http-body-util = "0.1"
+tower = { version = "0.5", features = ["util"] }

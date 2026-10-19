@@ -1,0 +1,21 @@
+// The two messages the cloud sends into the vehicle in the demonstration. This file is the
+// one source of both types on both sides: vsidlc generates the vehicle's code from it, and
+// the cloud services' types are generated from it at build time
+// (sample-services/aaos/messages).
+syntax = "proto3";
+
+package com.nexussdv.sample;
+
+// Modelled on TireInfoResponse.max_pressure in Google's quickstart tire.proto.
+message PressureLimit {
+  uint32 max_pressure = 1;
+}
+
+message DoorCommand {
+  enum Action {
+    ACTION_UNSPECIFIED = 0;
+    LOCK = 1;
+    UNLOCK = 2;
+  }
+  Action action = 1;
+}

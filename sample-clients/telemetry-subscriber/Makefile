@@ -36,6 +36,11 @@ proto: deps
 	protoc --proto_path=../../proto --go_out=$(PROTO_OUT_DIR) --go_opt=paths=source_relative telemetry.proto metrics_report.proto vehicle_telemetry.proto
 	@mkdir -p $(AAOS_PROTO_OUT_DIR)
 	protoc --proto_path=../../proto --go_out=$(AAOS_PROTO_OUT_DIR) --go_opt=paths=source_relative aaos_vehicle_telemetry.proto display_safety.proto
+	@mkdir -p command
+	protoc --proto_path=../../proto \
+		--go_out=command --go_opt=paths=source_relative \
+		--go_opt=Mcommand.proto=telemetry-subscriber/command \
+		command.proto
 	@echo ""
 
 build: deps

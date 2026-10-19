@@ -20,6 +20,8 @@ RUN go mod download
 
 # Copy the rest of the application's source code
 COPY *.go ./
+# The grant reader is a package of its own; its nested test module is not copied.
+COPY grant/*.go ./grant/
 
 # Build the Go application.
 # CGO_ENABLED=0 creates a static binary without any C dependencies.

@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: nexus-registry
+  labels: { app.kubernetes.io/name: nexus-registry }
+# ClusterIP on purpose: cloud services register from inside the cluster; nothing here is
+# exposed, and the service carries no authentication of its own (spec, "Out of scope").
+spec:
+  type: ClusterIP
+  selector: { app.kubernetes.io/name: nexus-registry }
+  ports:
+    - { name: http, port: {{ .Values.service.port }}, targetPort: 8080, protocol: TCP }

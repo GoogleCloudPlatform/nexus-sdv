@@ -1,0 +1,2 @@
+# go build ./... in this directory writes the binary here; never tracked (see 946765ee)
+auth-callout

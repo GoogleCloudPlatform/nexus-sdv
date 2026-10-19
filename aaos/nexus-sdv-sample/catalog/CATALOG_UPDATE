@@ -1,0 +1,2 @@
+output_path: ".."
+vsidlc_gen_args: "--genrule --services --apex --target-api latest"

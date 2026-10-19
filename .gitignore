@@ -59,7 +59,10 @@ terraform.rc
 !**/src/test/**/target/
 **/.gemini
 **/.specify
-**/.claude
+**/.claude/*
+# Our working rules are versioned; everything else under .claude stays local.
+!/.claude/rules/
+**/.obsidian
 
 # Zed specific
 .zed/
@@ -116,6 +119,7 @@ base-services/registration/pki/factory-ca/data
 #Binaries of the example clients
 sample-clients/vehicle-client/vehicle-client
 sample-clients/telemetry-subscriber/telemetry-subscriber
+base-services/auth-callout/auth-callout
 
 #Generated protobuf files
 **/*.pb.go
@@ -154,3 +158,6 @@ sample-clients/telemetry-subscriber/telemetry-subscriber
 # gh token for release
 set-gh-token-for-release-dae.sh
 tmp/**
+
+# Working directories of the superpowers plan tooling (ledgers, briefs) — scratch, never code
+.superpowers/

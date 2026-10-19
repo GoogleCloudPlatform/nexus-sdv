@@ -1,0 +1,13 @@
+[package]
+name = "nexus-sample-messages"
+version = "0.1.0"
+edition = "2024"
+description = "The message types of the AAOS examples, generated from the VSIDL catalogs' .proto files"
+
+[dependencies]
+prost = "0.14.4"
+
+[build-dependencies]
+prost-build = "0.14.4"
+# A protobuf compiler in Rust, so the build needs no protoc on the machine or in the image.
+protox = "0.10.0"

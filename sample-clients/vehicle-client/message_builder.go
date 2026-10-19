@@ -56,23 +56,25 @@ func buildMetricsReport(sim *VehicleSimulator, reportNumber int, now time.Time) 
 	gpsLat := float32(0.0)
 	gpsLon := float32(0.0)
 
+	// Every field the simulator has a value for is set, zero included: the report type marks
+	// its scalars optional, so an unset field means "not reported" and 0 means 0.
 	vehicleData := &pbVehicle.VehicleTelemetryData{
-		ENGINE_POWER:   float32(sim.EnginePower),
-		ENGINE_RPM:     float32(sim.EngineRPM),
-		FUEL_CAPACITY:  50.0, // Static value
-		FUEL_LEVEL:     float32(sim.FuelLevel),
-		TIRE_PRESSURE:  2.2, // Static value
-		VELOCITY:       float32(sim.Velocity),
+		ENGINE_POWER:   proto.Float32(float32(sim.EnginePower)),
+		ENGINE_RPM:     proto.Float32(float32(sim.EngineRPM)),
+		FUEL_CAPACITY:  proto.Float32(50.0), // Static value
+		FUEL_LEVEL:     proto.Float32(float32(sim.FuelLevel)),
+		TIRE_PRESSURE:  proto.Float32(2.2), // Static value
+		VELOCITY:       proto.Float32(float32(sim.Velocity)),
 		IGNITION_STATE: &ignitionState,
 		GPS_LATITUDE:   &gpsLat,
 		GPS_LONGITUDE:  &gpsLon,
 		VehicleDynamics: &pbVehicle.CarlaVehicleDynamics{
-			SteeringAngleDeg:    sim.SteeringAngle,
-			AcceleratorPedalPct: sim.AcceleratorPct,
-			BrakePedalPct:       sim.BrakePct,
+			SteeringAngleDeg:    proto.Float64(sim.SteeringAngle),
+			AcceleratorPedalPct: proto.Float64(sim.AcceleratorPct),
+			BrakePedalPct:       proto.Float64(sim.BrakePct),
 		},
-		GearStatus: &pbVehicle.CarlaVehicleGearStatus{
-			Gear: pbVehicle.CarlaVehicleGearStatus_NEUTRAL,
+		GearStatus: &pbVehicle.CurrentGear{
+			Gear: pbVehicle.CurrentGear_N.Enum(),
 		},
 	}
 
@@ -98,7 +100,7 @@ func buildMetricsReport(sim *VehicleSimulator, reportNumber int, now time.Time) 
 func buildPayload(v *VehicleClient, sim *VehicleSimulator, reportNumber int, now time.Time) (subject string, payload []byte, err error) {
 	switch v.MessageType {
 	case "telemetry":
-		subject = v.buildTelemetrySubject("battery")
+		subject = v.buildTelemetrySubject()
 		payload, err = proto.Marshal(buildTelemetryMessage(sim, v.VIN, now))
 		if err != nil {
 			return "", nil, fmt.Errorf("failed to marshal TelemetryMessage: %w", err)

@@ -1,3 +1,11 @@
+{{- /*
+  The rows one vehicle report becomes: one per field of
+  com.android.sdv.telemetry.VehicleTelemetryData, in its column family. One list for every
+  subject that carries the report; the subject only says at which token the vehicle stands.
+*/ -}}
+{{- define "connector.vehicleReportRows" -}}
+"let device_id = metadata(\"nats_subject\").split(\".\").index({{ .vinToken }})\nlet ts = this.report_timestamp.ts_format(\"2006-01-02T15:04:05.000000000Z07:00\")\nroot = [\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"static\", \"sensor\": \"report_timestamp\", \"value\": this.report_timestamp.ts_unix_milli()},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"static\", \"sensor\": \"received_at\", \"value\": now().ts_unix_milli()},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"static\", \"sensor\": \"FUEL_CAPACITY\", \"value\": this.report_data.FUEL_CAPACITY},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"static\", \"sensor\": \"TIRE_PRESSURE\", \"value\": this.report_data.TIRE_PRESSURE},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"static\", \"sensor\": \"max_speed\", \"value\": this.report_data.max_speed},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"static\", \"sensor\": \"speedlimit\", \"value\": this.report_data.speedlimit},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"static\", \"sensor\": \"speed_limit_displayed\", \"value\": this.report_data.speed_limit_displayed},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"static\", \"sensor\": \"trip_start_ms\", \"value\": this.report_data.trip_status.start_timestamp_ms},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"static\", \"sensor\": \"trip_end_ms\", \"value\": this.report_data.trip_status.end_timestamp_ms},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"dynamic\", \"sensor\": \"ENGINE_POWER\", \"value\": this.report_data.ENGINE_POWER},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"dynamic\", \"sensor\": \"ENGINE_RPM\", \"value\": this.report_data.ENGINE_RPM},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"dynamic\", \"sensor\": \"FUEL_LEVEL\", \"value\": this.report_data.FUEL_LEVEL},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"dynamic\", \"sensor\": \"IGNITION_STATE\", \"value\": this.report_data.IGNITION_STATE},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"dynamic\", \"sensor\": \"VELOCITY\", \"value\": this.report_data.VELOCITY},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"dynamic\", \"sensor\": \"LOCKED\", \"value\": this.report_data.LOCKED},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"dynamic\", \"sensor\": \"acceleration_modulus_m_s2\", \"value\": this.report_data.acceleration_modulus_m_s2},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"dynamic\", \"sensor\": \"distance_meters\", \"value\": this.report_data.distance_meters.number(0)},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"dynamic\", \"sensor\": \"steering_angle_deg\", \"value\": this.report_data.vehicle_dynamics.steering_angle_deg},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"dynamic\", \"sensor\": \"accelerator_pct\", \"value\": this.report_data.vehicle_dynamics.accelerator_pedal_pct},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"dynamic\", \"sensor\": \"brake_pct\", \"value\": this.report_data.vehicle_dynamics.brake_pedal_pct},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"dynamic\", \"sensor\": \"gear\", \"value\": this.report_data.gear_status.gear},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"dynamic\", \"sensor\": \"GPS_LATITUDE\", \"value\": this.report_data.GPS_LATITUDE},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"dynamic\", \"sensor\": \"GPS_LONGITUDE\", \"value\": this.report_data.GPS_LONGITUDE},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"dynamic\", \"sensor\": \"trunk_open\", \"value\": this.report_data.trunk_open},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"dynamic\", \"sensor\": \"fog_lights\", \"value\": this.report_data.fog_lights},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"dynamic\", \"sensor\": \"park_lights\", \"value\": this.report_data.park_lights},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"dynamic\", \"sensor\": \"hibeam\", \"value\": this.report_data.hibeam},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"dynamic\", \"sensor\": \"lowbeam\", \"value\": this.report_data.lowbeam},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"dynamic\", \"sensor\": \"turn_signal_left\", \"value\": this.report_data.turn_signal_left},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"dynamic\", \"sensor\": \"turn_signal_right\", \"value\": this.report_data.turn_signal_right},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"dynamic\", \"sensor\": \"ambient_light\", \"value\": this.report_data.carla_vehicle_ambient_light},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"dynamic\", \"sensor\": \"ambient_fog\", \"value\": this.report_data.carla_vehicle_ambient_fog},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"dynamic\", \"sensor\": \"trip_active\", \"value\": this.report_data.trip_status.is_active}\n]"
+{{- end -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -13,31 +21,31 @@ data:
         '@service': wombat
 
     # --- INPUT ---
-    # A broker merges multiple NATS subscriptions into a single message stream.
-    # This connector handles three distinct protobuf message types published on
-    # different NATS subjects:
+    # A broker merges several NATS subscriptions into one stream. The subject names the
+    # format and the vehicle:
     #
-    #   telemetry.>         — flat sensor readings, decoded as
-    #                         telemetry.TelemetryMessage (message_id, device_id,
-    #                         repeated SensorReading). Published by Nexus SDK
-    #                         vehicle clients.
-    #                         Subject pattern: telemetry.<VIN>
+    #   telemetry.<vin>[.<sensor>]   — the Nexus message, telemetry.TelemetryMessage
+    #                                  (message_id, device_id, repeated SensorReading).
+    #                                  The vehicle is read from the message.
     #
-    #   telemetry-generic.> — structured SDV metrics report, decoded as
-    #                         google.sdv.telemetry.MetricsReport (report_timestamp
-    #                         + flat report_data: VELOCITY, ENGINE_RPM, GPS, ...).
-    #                         Published by the Go vehicle client.
-    #                         Subject pattern: telemetry-generic.<VIN>.<sensor>
+    #   telemetry-aaos-sdv.<vin>     — Google's SDV report, google.sdv.telemetry.MetricsReport,
+    #                                  whose report_data holds the vehicle report
+    #                                  com.android.sdv.telemetry.VehicleTelemetryData.
+    #                                  The vehicle is the second token; what follows it is
+    #                                  ignored.
     #
-    #   local.telemetry.>   — AAOS vehicle telemetry from leaf-node connected
-    #                         Android SDV devices. Same MetricsReport envelope,
-    #                         inner Any is com.android.sdv.someip.VehicleTelemetryData
-    #                         (proto2, 27 fields including lights, trip status, gear).
-    #                         Subject pattern: local.telemetry.<VIN>
+    # Accepted for one more release, from senders of before 2026-10-09:
     #
-    # All three subscriptions share the same credentials. Each message carries a
-    # nats_subject metadata field that the pipeline switch uses to route it to
-    # the correct decoder.
+    #   telemetry-generic.<vin>      — MetricsReport from the Go sample client; despite the
+    #                                  name it carried Google's format, not a generic one.
+    #   local.telemetry.<vin>        — MetricsReport from an AAOS vehicle, with the report
+    #                                  type com.android.sdv.someip.VehicleTelemetryData.
+    #   telemetry.prod.bigtable.<vin> — the Nexus message with the vehicle last; it falls
+    #                                  under telemetry. like any other.
+    #
+    # All subscriptions share the same credentials. Each message carries its subject as the
+    # metadata field nats_subject, which the pipeline's switch uses to pick the decoder.
+    # tests/routing.test.sh runs this pipeline on sample messages of every family.
     input:
       broker:
         inputs:
@@ -62,10 +70,17 @@ data:
               auto_replay_nacks: true
               send_ack: true
 
+          - label: "nats_telemetry_aaos_sdv"
+            nats:
+              urls: ["nats://${NATS_USER}:${NATS_PASSWORD}@${NATS_HOST}"]
+              subject: telemetry-aaos-sdv.>
+              auto_replay_nacks: true
+              send_ack: true
+
     # --- PIPELINE ---
     # The switch processor inspects the nats_subject metadata field on each
     # incoming message and routes it into the appropriate decode+transform branch.
-    # All three branches produce the same output shape:
+    # All branches produce the same output shape:
     #   { device_id, timestamp_str, family, sensor, value }
     # so they share a single Bigtable output with no further branching.
     #
@@ -94,6 +109,24 @@ data:
                     - unarchive:
                         format: json_array
 
+                - check: metadata("nats_subject").has_prefix("telemetry-aaos-sdv.")
+                  processors:
+                    - protobuf:
+                        operator: to_json
+                        message: google.sdv.telemetry.MetricsReport
+                        use_proto_names: true
+                        import_paths: [/proto]
+
+                    - log:
+                        level: DEBUG
+                        message: "SDV MetricsReport decoded"
+                        fields_mapping: 'root = this'
+
+                    - mapping: {{ include "connector.vehicleReportRows" (dict "vinToken" 1) }}
+
+                    - unarchive:
+                        format: json_array
+
                 - check: metadata("nats_subject").has_prefix("local.telemetry.")
                   processors:
                     - protobuf:
@@ -107,7 +140,7 @@ data:
                         message: "AAOS MetricsReport decoded"
                         fields_mapping: 'root = this'
 
-                    - mapping: "let device_id = metadata(\"nats_subject\").split(\".\").index(2)\nlet ts = this.report_timestamp.ts_format(\"2006-01-02T15:04:05.000000000Z07:00\")\nroot = [\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"static\", \"sensor\": \"report_timestamp\", \"value\": this.report_timestamp.ts_unix_milli()},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"static\", \"sensor\": \"received_at\", \"value\": now().ts_unix_milli()},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"static\", \"sensor\": \"FUEL_CAPACITY\", \"value\": this.report_data.FUEL_CAPACITY},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"static\", \"sensor\": \"TIRE_PRESSURE\", \"value\": this.report_data.TIRE_PRESSURE},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"static\", \"sensor\": \"max_speed\", \"value\": this.report_data.max_speed},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"static\", \"sensor\": \"speedlimit\", \"value\": this.report_data.speedlimit},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"static\", \"sensor\": \"speed_limit_displayed\", \"value\": this.report_data.speed_limit_displayed},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"static\", \"sensor\": \"trip_start_ms\", \"value\": this.report_data.trip_status.start_timestamp_ms},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"static\", \"sensor\": \"trip_end_ms\", \"value\": this.report_data.trip_status.end_timestamp_ms},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"dynamic\", \"sensor\": \"ENGINE_POWER\", \"value\": this.report_data.ENGINE_POWER},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"dynamic\", \"sensor\": \"ENGINE_RPM\", \"value\": this.report_data.ENGINE_RPM},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"dynamic\", \"sensor\": \"FUEL_LEVEL\", \"value\": this.report_data.FUEL_LEVEL},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"dynamic\", \"sensor\": \"IGNITION_STATE\", \"value\": this.report_data.IGNITION_STATE},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"dynamic\", \"sensor\": \"VELOCITY\", \"value\": this.report_data.VELOCITY},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"dynamic\", \"sensor\": \"LOCKED\", \"value\": this.report_data.LOCKED},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"dynamic\", \"sensor\": \"acceleration_modulus_m_s2\", \"value\": this.report_data.acceleration_modulus_m_s2},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"dynamic\", \"sensor\": \"distance_meters\", \"value\": this.report_data.distance_meters.number(0)},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"dynamic\", \"sensor\": \"steering_angle_deg\", \"value\": this.report_data.vehicle_dynamics.steering_angle_deg},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"dynamic\", \"sensor\": \"accelerator_pct\", \"value\": this.report_data.vehicle_dynamics.accelerator_pedal_pct},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"dynamic\", \"sensor\": \"brake_pct\", \"value\": this.report_data.vehicle_dynamics.brake_pedal_pct},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"dynamic\", \"sensor\": \"gear\", \"value\": this.report_data.gear_status.gear},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"dynamic\", \"sensor\": \"GPS_LATITUDE\", \"value\": this.report_data.GPS_LATITUDE},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"dynamic\", \"sensor\": \"GPS_LONGITUDE\", \"value\": this.report_data.GPS_LONGITUDE},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"dynamic\", \"sensor\": \"trunk_open\", \"value\": this.report_data.trunk_open},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"dynamic\", \"sensor\": \"fog_lights\", \"value\": this.report_data.fog_lights},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"dynamic\", \"sensor\": \"park_lights\", \"value\": this.report_data.park_lights},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"dynamic\", \"sensor\": \"hibeam\", \"value\": this.report_data.hibeam},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"dynamic\", \"sensor\": \"lowbeam\", \"value\": this.report_data.lowbeam},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"dynamic\", \"sensor\": \"turn_signal_left\", \"value\": this.report_data.turn_signal_left},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"dynamic\", \"sensor\": \"turn_signal_right\", \"value\": this.report_data.turn_signal_right},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"dynamic\", \"sensor\": \"ambient_light\", \"value\": this.report_data.carla_vehicle_ambient_light},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"dynamic\", \"sensor\": \"ambient_fog\", \"value\": this.report_data.carla_vehicle_ambient_fog},\n  {\"device_id\": $device_id, \"timestamp_str\": $ts, \"family\": \"dynamic\", \"sensor\": \"trip_active\", \"value\": this.report_data.trip_status.is_active}\n]"
+                    - mapping: {{ include "connector.vehicleReportRows" (dict "vinToken" 2) }}
 
                     - unarchive:
                         format: json_array

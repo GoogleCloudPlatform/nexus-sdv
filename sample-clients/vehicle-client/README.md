@@ -184,20 +184,20 @@ The easiest way to run the vehicle client is using the provided run script, whic
 The vehicle client supports two different message formats:
 
 #### 1. TelemetryMessage (Default)
-Flat, generic sensor readings published to `telemetry.{VIN}.battery` subject
+Flat, generic sensor readings published to the `telemetry.{VIN}` subject
 ```bash
 ./vehicle-client -vin=VEHICLE001 -message-type=telemetry ...
 ```
-- Publishes to: `telemetry.{VIN}.battery`
+- Publishes to: `telemetry.{VIN}`
 - Contains: Battery voltage, current, state-of-charge, temperature
 - Message Format: `telemetry.TelemetryMessage` (flat structure with repeated SensorReading)
 
 #### 2. MetricsReport (Android SDV)
-Structured vehicle telemetry reports published to `vehicle_reports.{VIN}` subject
+Structured vehicle telemetry reports published to the `telemetry-aaos-sdv.{VIN}` subject
 ```bash
 ./vehicle-client -vin=VEHICLE001 -message-type=metrics_report ...
 ```
-- Publishes to: `vehicle_reports.{VIN}`
+- Publishes to: `telemetry-aaos-sdv.{VIN}`
 - Contains: Engine metrics, fuel level, velocity, vehicle dynamics, gear status
 - Message Format: `google.sdv.telemetry.MetricsReport` (outer envelope) + `com.android.sdv.telemetry.VehicleTelemetryData` (inner payload via protobuf.Any)
 
@@ -230,27 +230,18 @@ Structured vehicle telemetry reports published to `vehicle_reports.{VIN}` subjec
 | Variable | Description | Example | Default |
 |----------|-------------|---------|---------|
 | `REGISTRATION_URL` | Registration server URL (alternative to `-registration-url` flag) | `https://34.185.214.249` | - |
-| `TELEMETRY_PREFIX` | Optional prefix for telemetry NATS subjects | `prod.bigtable` | - |
 
-#### TELEMETRY_PREFIX Examples
+#### Where the messages go
 
-Without prefix (default):
-```bash
-# Publishes to: telemetry.{VIN}.battery
-./vehicle-client -vin vehicle001 ...
-# → telemetry.vehicle001.battery
-```
+The subject names the format and the vehicle:
 
-With prefix:
-```bash
-# Publishes to: telemetry.{PREFIX}.{VIN}.battery
-TELEMETRY_PREFIX="prod.bigtable" ./vehicle-client -vin vehicle001 ...
-# → telemetry.prod.bigtable.vehicle001.battery
-```
+| `-message-type` | Message | Subject |
+|---|---|---|
+| `telemetry` (default) | Nexus `TelemetryMessage` | `telemetry.<VIN>` |
+| `metrics_report` | Google's SDV `MetricsReport`, holding the vehicle report `com.android.sdv.telemetry.VehicleTelemetryData` | `telemetry-aaos-sdv.<VIN>` |
 
-This allows the NATS-Bigtable connector to subscribe to specific environments:
-- Development: `telemetry.dev.>` or `telemetry.{VIN}.>`
-- Production: `telemetry.prod.bigtable.>`
+`TELEMETRY_PREFIX` existed until 2026-10-09 and has no effect any more: with it set, the
+Nexus message landed in the subject family of the other format.
 
 ## Expected Output
 

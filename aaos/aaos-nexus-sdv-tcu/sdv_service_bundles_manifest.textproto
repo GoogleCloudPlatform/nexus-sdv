@@ -1,0 +1,12 @@
+# Service bundles hosted by the aaos-nexus-sdv-tcu APEX.
+# proto-message: SdvServiceBundleManifestEntry
+# proto-file: system/software_defined_vehicle/service_bundles_registry/proto/sdv_service_bundles_manifest.proto
+
+sdv_service_bundle_metadata {
+  name: "NexusBridge"
+  version_number: 0
+  version_name: "0.1"
+  native_library_path: "lib64/libnexus_bridge.so"
+  authorization_policy_path: "etc/permissions/com.android.nexus.aaos_nexus_sdv_tcu.NexusBridge.permissions"
+  orchestration_config_path: "etc/orch/nexus_bridge.config"
+}

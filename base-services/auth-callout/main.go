@@ -9,6 +9,8 @@ import (
 	"os"
 	"time"
 
+	"auth-callout/grant"
+
 	"github.com/golang-jwt/jwt/v5"
 	glog "github.com/labstack/gommon/log"
 	"github.com/lestrrat-go/jwx/jwk"
@@ -22,6 +24,13 @@ var keycloakJwkB64 = os.Getenv("KEYCLOAK_JWK_B64")
 var natsUrl = os.Getenv("NATS_URL")
 var natsUser = os.Getenv("NATS_USER")
 var natsPassword = os.Getenv("NATS_PASSWORD")
+var natsGrantUser = os.Getenv("NATS_GRANT_USER")
+var natsGrantPassword = os.Getenv("NATS_GRANT_PASSWORD")
+
+// The account every vehicle's connection is placed in — the one that has JetStream, where
+// the grant store and the registry live (spec D8). The default global account cannot have
+// JetStream once named accounts exist, which is why it is not "$G".
+var vehicleAccount = envOr("NATS_VEHICLE_ACCOUNT", "NEXUS")
 
 func main() {
 	// Configure log level from environment variable
@@ -60,7 +69,7 @@ func main() {
 			}
 		}
 		glog.Debugf("NATS connection details:")
-		glog.Debugf("  URL: %s", natsUrl)
+		glog.Debugf("  URL: %s", redactURL(natsUrl))
 		glog.Debugf("  User: %s", natsUser)
 		glog.Debugf("  Password: %s", maskedPassword)
 	}
@@ -86,6 +95,26 @@ func main() {
 	if err != nil {
 		glog.Fatalf("Failed to load account signing key: %v", err)
 	}
+
+	// The grant store — the registry's decision per VIN (Increment 2.2). Without it, fail
+	// closed: every vehicle gets its control subject only, never allow-all.
+	var grants grant.Source = grant.None{}
+	if natsGrantUser != "" && natsGrantPassword != "" {
+		if kv, err := grant.NewKV(natsUrl, natsGrantUser, natsGrantPassword); err != nil {
+			glog.Errorf("grant reader unavailable: %v — every vehicle gets its control subject only", err)
+		} else {
+			grants = kv
+			// Not "bound": the reader connects in the background and binds at its first
+			// read, where it says so. This line once claimed more than was true.
+			glog.Infof("grant reader set up for bucket %s", grant.Bucket)
+		}
+	} else {
+		glog.Warn("NATS_GRANT_USER/NATS_GRANT_PASSWORD not set — every vehicle gets its control subject only")
+	}
+	if err := validateEnforcement(leafEnforcement, clientEnforcement); err != nil {
+		glog.Fatalf("%v", err)
+	}
+	glog.Infof("enforcement: leaf=%s client=%s", leafEnforcement, clientEnforcement)
 
 	// base64 decode the JWK
 	keycloakJwk, err := base64.StdEncoding.DecodeString(keycloakJwkB64)
@@ -118,7 +147,7 @@ func main() {
 			keyID, ok := token.Header["kid"].(string)
 			if !ok {
 				errMessage := "expecting JWT header to have string kid"
-				glog.Errorf(errMessage)
+				glog.Error(errMessage)
 				return nil, errors.New(errMessage)
 			}
 
@@ -127,20 +156,20 @@ func main() {
 				var rawKey any
 				if err := key.Raw(&rawKey); err != nil {
 					errMessage := fmt.Sprintf("failed to create public key: %s", err)
-					glog.Errorf(errMessage)
+					glog.Error(errMessage)
 					return []byte(""), errors.New(errMessage)
 				}
 				rsaPublicKey, ok := rawKey.(*rsa.PublicKey)
 				if !ok {
 					errMessage := fmt.Sprintf("expected rsa key, got: %v", rawKey)
-					glog.Errorf(errMessage)
+					glog.Error(errMessage)
 					return nil, errors.New(errMessage)
 				}
 				glog.Info("Found public key")
 				return rsaPublicKey, nil
 			} else {
 				errMessage := fmt.Sprintf("unable to find key with kid: %q", keyID)
-				glog.Errorf(errMessage)
+				glog.Error(errMessage)
 				return nil, errors.New(errMessage)
 			}
 		})
@@ -161,15 +190,27 @@ func main() {
 			return
 		}
 
-		// Was: glog.Infof("Claims: %v", claims) — the whole decoded claim set at
-		// INFO level, in a log many people can read. Log what the decision uses.
-		glog.Debugf("Token accepted for azp=%v", claims["azp"])
+		// 3. Who is this — from the certificate the server verified, if the connection is
+		//    a leaf with one — then the decision: refused, served as today, or granted.
+		//    Log what the decision uses, never the whole claim set.
+		id := resolveIdentityFrom(authRequestClaims.TLS, claims)
+		roles := extractRealmRoles(claims)
+		kind := authRequestClaims.ClientInformation.Kind
+		d := decide(id, kind, roles, grants)
+		glog.Infof("vin=%s source=%s kind=%s legacy=%v grant=%v", id.vin, id.source, kind, id.legacy || d.reason != "", d.granted)
+		glog.Debugf("  roles=%v -> pub=%v sub=%v", roles, d.perms.Pub.Allow, d.perms.Sub.Allow)
+		if d.deny {
+			glog.Warnf("deny: %s", d.reason)
+			respondWithError(msg, "unauthorized")
+			return
+		}
+		if d.reason != "" {
+			glog.Warnf("would-deny: %s", d.reason)
+		}
+		perms := d.perms
 
-		userRoles := claims["realm_access"].(map[string]any)["roles"].([]any)
-		userName := claims["azp"].(string)
-
-		// 3. Create a new NATS User JWT based on the claims
-		userJWT, err := createNATSUserJWT(userName, userRoles, accountKeyPair, authRequestClaims)
+		// 4. Sign the permissions into a NATS user JWT
+		userJWT, err := createNATSUserJWT(perms, accountKeyPair, authRequestClaims)
 		if err != nil {
 			glog.Errorf("Failed to create NATS user JWT: %v", err)
 			respondWithError(msg, "internal server error")
@@ -196,7 +237,7 @@ func main() {
 			return
 		}
 
-		glog.Infof("Successfully issued NATS JWT for user '%s' with roles '%v'", userName, userRoles)
+		glog.Infof("Successfully issued NATS JWT for '%s' (vin=%s source=%s)", authRequestClaims.ConnectOptions.Name, id.vin, id.source)
 	})
 
 	if err != nil {
@@ -207,45 +248,65 @@ func main() {
 	select {}
 }
 
-// createNATSUserJWT generates and signs a NATS user JWT.
-func createNATSUserJWT(name string, roles []any, accountKeyPair nkeys.KeyPair, authReqClaims *natsjwt.AuthorizationRequestClaims) (string, error) {
-	vin := name
-
-	// Define permissions based on the roles from the external JWT
+// buildPermissions issues, for one VIN: its control subject — always —, what the registry
+// has granted it under pubsub.<vin>., and the telemetry grants its realm roles carry (the
+// non-AAOS path, D5a). Never empty, so a vehicle that is known but has no grant yet can
+// still announce itself.
+func buildPermissions(vin string, roles []string, g *grant.Grant) natsjwt.Permissions {
 	var perms natsjwt.Permissions
+	control := fmt.Sprintf("registry.%s.>", vin)
+	perms.Pub.Allow.Add(control)
+	perms.Sub.Allow.Add(control)
 
-	// roles are extracted from the Keycloak JWT
 	for _, role := range roles {
-		role = role.(string)
-		// there can be special handling for specific role names
 		switch role {
 		case "edge-device":
-			// this allows the subscription of a commands subject for this specific VIN/deviceID
-			permission := fmt.Sprintf("commands.%s.>", vin)
-			perms.Sub.Allow.Add(permission)
-			glog.Debugf("Allowing the subscription of %s", permission)
+			perms.Sub.Allow.Add(fmt.Sprintf("commands.%s.>", vin))
 		case "telemetry-client":
-			permission := fmt.Sprintf("telemetry.%s.>", vin)
-			perms.Pub.Allow.Add(permission)
-			glog.Debugf("Allowing the publish of %s", permission)
+			// The subject names the format and the vehicle: telemetry.<vin> is the Nexus
+			// message, telemetry-aaos-sdv.<vin> Google's SDV report, each with room for a
+			// suffix.
+			perms.Pub.Allow.Add(fmt.Sprintf("telemetry.%s", vin))
+			perms.Pub.Allow.Add(fmt.Sprintf("telemetry.%s.>", vin))
+			perms.Pub.Allow.Add(fmt.Sprintf("telemetry-aaos-sdv.%s", vin))
+			perms.Pub.Allow.Add(fmt.Sprintf("telemetry-aaos-sdv.%s.>", vin))
+			// Accepted for one more release: the shapes in use before that rule — the VIN
+			// last (telemetry.prod.bigtable.<vin>), and the report under local.telemetry.
+			perms.Pub.Allow.Add(fmt.Sprintf("telemetry.*.*.%s", vin))
+			perms.Pub.Allow.Add(fmt.Sprintf("local.telemetry.%s", vin))
+			perms.Pub.Allow.Add(fmt.Sprintf("local.telemetry.%s.>", vin))
 		case "telemetry-collector":
-			// TODO: check if the service has consent for the given VIN
-			permission := fmt.Sprintf("telemetry.%s.>", vin)
-			perms.Sub.Allow.Add(permission)
-			glog.Debugf("Allowing the subscription of %s", permission)
-		default:
-			continue
+			perms.Sub.Allow.Add(fmt.Sprintf("telemetry.%s", vin))
+			perms.Sub.Allow.Add(fmt.Sprintf("telemetry.%s.>", vin))
 		}
 	}
 
-	// Create the NATS user claims
+	if g != nil {
+		for _, s := range g.Pub {
+			if grant.InVinNamespace(vin, s) {
+				perms.Pub.Allow.Add(s)
+			} else {
+				glog.Warnf("grant for vin=%s names %q outside its namespace — dropped", vin, s)
+			}
+		}
+		for _, s := range g.Sub {
+			if grant.InVinNamespace(vin, s) {
+				perms.Sub.Allow.Add(s)
+			} else {
+				glog.Warnf("grant for vin=%s names %q outside its namespace — dropped", vin, s)
+			}
+		}
+	}
+	return perms
+}
+
+// createNATSUserJWT signs the permissions into a NATS user JWT.
+func createNATSUserJWT(perms natsjwt.Permissions, accountKeyPair nkeys.KeyPair, authReqClaims *natsjwt.AuthorizationRequestClaims) (string, error) {
 	userClaims := natsjwt.NewUserClaims(authReqClaims.UserNkey)
 	userClaims.Permissions = perms
 	userClaims.Expires = time.Now().Add(1 * time.Hour).Unix()
 	userClaims.Name = authReqClaims.ConnectOptions.Name
-	userClaims.Audience = "$G"
-
-	// Sign the claims with the account signing key to get the final JWT
+	userClaims.Audience = vehicleAccount
 	return userClaims.Encode(accountKeyPair)
 }
 

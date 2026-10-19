@@ -69,6 +69,10 @@ the common causes are distinct enough to tell apart:
 - **An endpoint does not answer** — look at the pods in the `base-services`
   namespace first. A GKE Autopilot cluster in `RECONCILING` or `PROVISIONING` is
   transient; give it a few minutes rather than redeploying.
+- **`nats-0` stays in `ContainerCreating`, or a NATS deploy is refused at the
+  StatefulSet** — the hub's store still has its disk from before 2026-10-08.
+  `iac/helm/nats/README.md`, "Deploying onto a platform that still has the old
+  disk", names the two objects to delete.
 - **A certificate is expiring or expired** — see the next section. This is the
   most common cause of a platform that worked last month and does not today.
 - **An API is disabled** — someone turned it off, or the project was recreated.
@@ -111,6 +115,11 @@ both configurable in the `.bootstrap_env`.
 
 The end-to-end proof: a real client registers, authenticates and publishes, and
 the data arrives in BigTable.
+
+A client publishes on a subject that names the format and the vehicle:
+`telemetry.<VIN>` for the Nexus message, `telemetry-aaos-sdv.<VIN>` for a report
+in Google's SDV telemetry format. A message on any other subject is not written
+anywhere, and nothing reports it — when data is missing, check the subject first.
 
 ```bash
 gcloud builds submit . --config=iac/cloudbuild/run-sample-clients.yaml \

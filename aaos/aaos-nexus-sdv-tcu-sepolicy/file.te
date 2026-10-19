@@ -1,0 +1,3 @@
+# The run directory of both daemons, /data/misc/nexus. Provisioning creates it from the adb
+# shell and gives it this label with restorecon.
+type nexus_data_file, file_type, data_file_type, core_data_file_type;

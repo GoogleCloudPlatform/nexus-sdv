@@ -1,0 +1,26 @@
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+rust_protobuf {
+    name: "libnexus_sdk_proto",
+    crate_name: "nexus_sdk_proto",
+    protos: ["nexus_sdk.proto"],
+    source_stem: "nexus_sdk_proto_source",
+    // The size annotations, as Google's catalogs import them
+    // (samples/diagnostics/v1/catalog/Android.bp).
+    proto_flags: ["-I external/protobuf/src"],
+    rustlibs: ["libvsidl_v1_stdlib_proto_rs"],
+    vendor_available: true,
+    product_available: true,
+    apex_available: [
+        "//apex_available:platform",
+        "//apex_available:anyapex",
+    ],
+    min_sdk_version: "35",
+}
+
+filegroup {
+    name: "vsidl_nexus_sdk_catalog",
+    srcs: ["**/*"],
+}

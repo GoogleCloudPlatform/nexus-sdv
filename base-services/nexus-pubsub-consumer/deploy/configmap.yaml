@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nexus-pubsub-consumer
+  namespace: base-services
+data:
+  # This key name, deployment.yaml's volumeMounts.mountPath, and the
+  # Dockerfile's ENV CONFIG_PATH must together compose to
+  # /etc/nexus-pubsub-consumer/config.toml. Change one, change all three.
+  config.toml: |
+    nats_url = "nats://nats.base-services.svc.cluster.local:4222"
+    nats_user = "connector"
+    nats_password = "${NATS_PASSWORD}"
+    subject = "pubsub.>"
+    # "full" logs the whole VIN and every value, which is what makes "does it arrive,
+    # decoded, field by field" visible. This environment carries test vehicles only. Before
+    # a real vehicle's data flows through it, change this to "masked" (the default when the
+    # key is absent) or drop the line.
+    log_detail = "full"

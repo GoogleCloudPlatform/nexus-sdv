@@ -1,0 +1,18 @@
+# The Nexus Bridge as the platform sees it: what it subscribes to in the vehicle and what it
+# publishes there on the cloud's behalf. Its code is written by hand, hence skip_codegen —
+# the way Google declares such a bundle (samples/cujs/catalog/ivi_publisher.vsidl). Its
+# permissions file is generated from this, and the vehicle's offer to the registry is read
+# from that file (aaos/nexus-connectivity-agent/src/offer.rs).
+package: "com.android.nexus.aaos_nexus_sdv_tcu"
+
+service_bundle {
+  name: "NexusBridge"
+  subscriber { message: "com.android.sdv.sample.quickstart.TirePressure" topic: "pressure" }
+  publisher { message: "com.nexussdv.sample.PressureLimit" topic: "pressure-limit" capacity: 8 }
+  publisher { message: "com.nexussdv.sample.DoorCommand" topic: "door-command" capacity: 8 }
+  # The generic paths of aaos/nexus-sdk-catalog: any bundle's Uplink to the cloud, the
+  # cloud's Command to any bundle.
+  subscriber { message: "com.nexussdv.sdk.Uplink" topic: "uplink" }
+  publisher { message: "com.nexussdv.sdk.Command" topic: "command" capacity: 8 }
+  build_cfg { skip_codegen: true }
+}

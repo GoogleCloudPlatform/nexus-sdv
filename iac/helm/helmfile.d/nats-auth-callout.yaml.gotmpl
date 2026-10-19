@@ -25,3 +25,11 @@ releases:
         value: '{{ requiredEnv "NATS_AUTH_CALLOUT_PASSWORD" }}'
       - name: logLevel
         value: '{{ env "LOG_LEVEL" | default "DEBUG" }}'
+      - name: nats.grantUser
+        value: 'grant-reader'
+      - name: nats.grantPassword
+        value: '{{ requiredEnv "NATS_GRANT_READER_PASSWORD" }}'
+      - name: leafEnforcement
+        value: '{{ env "LEAF_ENFORCEMENT" | default "enforce" }}'
+      - name: clientEnforcement
+        value: '{{ env "CLIENT_ENFORCEMENT" | default "log" }}'
