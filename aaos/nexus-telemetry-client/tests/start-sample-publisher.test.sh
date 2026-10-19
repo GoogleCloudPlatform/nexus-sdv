@@ -15,6 +15,7 @@ cat > "$WORK/adb" <<'FAKE'
 #!/usr/bin/env bash
 [ "${1:-}" = "shell" ] || exit 0
 shift
+echo "$*" >> "$FAKE_DIR/log"
 starts="$(cat "$FAKE_DIR/starts" 2>/dev/null || echo 0)"
 case "$*" in
     pidof*) [ "$starts" -ge "$STAYS_FROM" ] && echo 4711 ;;
@@ -28,7 +29,7 @@ esac
 FAKE
 chmod +x "$WORK/adb"
 run() {   # run <stays from start n>
-    rm -f "$WORK/starts" "$WORK/client" "$WORK/kills"
+    rm -f "$WORK/starts" "$WORK/client" "$WORK/kills" "$WORK/log"
     out="$(FAKE_DIR="$WORK" STAYS_FROM="$1" ADB="$WORK/adb" PUBLISHER_START_WAIT=0 bash "$SCRIPT" 2>&1)"; rc=$?
     starts="$(cat "$WORK/starts" 2>/dev/null || echo 0)"
 }
@@ -58,6 +59,19 @@ DIES_ON_CLIENT=1 run 1
 DIES_ON_CLIENT=9 run 1
 [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q 'did not survive the client' \
   && ok "after three rounds it gives up and says so" || bad "after three rounds it gives up and says so ($rc)"
+# On Core3 the Telemetry Service kept our configuration on disk and loaded it again at every
+# start, so every publisher start aborted, also with the client stopped (2026-10-19). Before
+# the publisher starts, the service is stopped, the stored configuration removed and the
+# service started again.
+run 1
+first_pub="$(grep -n 'telemetry_sample_publisher' "$WORK/log" | grep -v pidof | head -1 | cut -d: -f1)"
+order="$(grep -nE '^(stop sdv_telemetry_service_agent|rm -f /data/telemetry/active_configs/|start sdv_telemetry_service_agent)' "$WORK/log" | cut -d: -f1 | tr '\n' ' ')"
+set -- $order
+[ "$#" -eq 3 ] && [ "$1" -lt "$2" ] && [ "$2" -lt "$3" ] && [ "$3" -lt "${first_pub:-0}" ] \
+  && ok "the stored configuration is removed before the publisher starts" || bad "the stored configuration is removed before the publisher starts ($(tr '\n' ';' < "$WORK/log"))"
+uuid="$(sed -n 's/^uuid: "\(.*\)"/\1/p' "$HERE/../metrics/vehicle_telemetry_config_live.textproto")"
+grep -q "active_configs/$uuid" "$SCRIPT" \
+  && ok "the configuration removed is ours ($uuid)" || bad "the configuration removed is ours ($uuid)"
 run 0
 [ ! -s "$WORK/client" ] && ok "a running publisher leaves the client alone" || bad "a running publisher leaves the client alone"
 out="$(bash "$SCRIPT" 2>&1)"; rc=$?
