@@ -1,0 +1,106 @@
+# LIVE-signal VehicleTelemetryData MetricsConfig for the full vehicle->NATS->cloud->BigTable
+# E2E (issue #365, task 3b). Upgrades the static vehicle_telemetry_config.textproto by
+# sourcing ONE field (VELOCITY) from a LIVE on-device publisher instead of a constant,
+# so its BigTable value CHANGES across successive reports.
+#
+# Live source: the shipped "SampleService" configurable publisher
+# (system/software_defined_vehicle/samples/telemetry/publishers/rust/sample_publisher,
+# a random_integer_publisher already running on the SDV Core VM). On subscription it
+# emits SampleMessage { int32 sample_data } with a fresh random value (0-255) per tick.
+# The telemetry service reads sample_data via a DataSource (SUBSCRIPTION) + FieldLeafNode
+# and assigns it to VELOCITY. int32 -> TYPE_FLOAT is a supported reflection conversion
+# (node_value_to_protobuf_reflection.rs: i64 -> F32(as f32)).
+#
+# Everything else mirrors vehicle_telemetry_config.textproto so the emitted report_data
+# Any keeps type-URL type.googleapis.com/com.android.sdv.telemetry.VehicleTelemetryData
+# (the only type the nats-bigtable-connector /proto registry decodes). The other six
+# fields stay constant; only VELOCITY is live.
+#
+# Encode: aprotoc --encode=google.sdv.telemetry.MetricsConfig \
+#   -I external/protobuf/src -I . \
+#   system/software_defined_vehicle/telemetry/proto/metrics_configuration/metrics_configuration.proto \
+#   < vehicle_telemetry_config_live.textproto > vehicle_telemetry_config_live.pb
+# The UUID stays the same across versions of this configuration; `version` counts up. The
+# Telemetry Service keeps every configuration it was given: a new UUID does not replace the
+# old one, it adds a second, and both report (two rows a second in BigTable, 2026-10-10).
+uuid: "778f6d44-0c8a-4240-9937-0b92f90b4b4a"
+version: 2
+
+descriptor_protos {
+  package: "com.android.sdv.telemetry"
+  message_type {
+    name: "VehicleTelemetryData"
+    field { type: TYPE_FLOAT name: "ENGINE_RPM"     number: 2  label: LABEL_OPTIONAL }
+    field { type: TYPE_FLOAT name: "FUEL_LEVEL"     number: 4  label: LABEL_OPTIONAL }
+    field { type: TYPE_FLOAT name: "GPS_LATITUDE"   number: 5  label: LABEL_OPTIONAL }
+    field { type: TYPE_FLOAT name: "GPS_LONGITUDE"  number: 6  label: LABEL_OPTIONAL }
+    field { type: TYPE_BOOL  name: "IGNITION_STATE" number: 7  label: LABEL_OPTIONAL }
+    field { type: TYPE_FLOAT name: "VELOCITY"       number: 9  label: LABEL_OPTIONAL }
+    field { type: TYPE_BOOL  name: "LOCKED"         number: 10 label: LABEL_OPTIONAL }
+  }
+}
+
+# Live data source: subscribe to the "SampleService" configurable publisher.
+# connection_type defaults to SUBSCRIPTION (required for data_trigger).
+sources {
+  name: "SamplePub"
+  data_source { source_identifier: "SampleService" }
+}
+
+# expression_nodes[0] reads the LIVE sample_data field from the source.
+expression_nodes {
+  field_leaf_node { source_name: "SamplePub" field_names: "sample_data" }
+} # 0 VELOCITY (live)
+expression_nodes { constant_leaf_node { float_value: 2500.0 } }  # 1 ENGINE_RPM
+expression_nodes { constant_leaf_node { float_value: 75.5 } }    # 2 FUEL_LEVEL
+expression_nodes { constant_leaf_node { float_value: 52.5200 } } # 3 GPS_LATITUDE
+expression_nodes { constant_leaf_node { float_value: 13.4050 } } # 4 GPS_LONGITUDE
+expression_nodes { constant_leaf_node { bool_value: true } }     # 5 IGNITION_STATE
+expression_nodes { constant_leaf_node { bool_value: true } }     # 6 LOCKED
+
+triggers {
+  name: "StartTrigger"
+  periodic_trigger { interval { seconds: 2 } }
+}
+triggers {
+  name: "SampleDataTrigger"
+  data_trigger { source_name: "SamplePub" }
+}
+
+start_trigger_name: "StartTrigger"
+
+metrics_report_configs {
+  name: "vehicle_telemetry_report"
+  trigger_names: "SampleDataTrigger"
+  message_builder {
+    message_type: ".com.android.sdv.telemetry.VehicleTelemetryData"
+    field_assignments {
+      field_name: "VELOCITY"
+      no_aggregation { expression_node_index: 0 }
+    }
+    field_assignments {
+      field_name: "ENGINE_RPM"
+      no_aggregation { expression_node_index: 1 }
+    }
+    field_assignments {
+      field_name: "FUEL_LEVEL"
+      no_aggregation { expression_node_index: 2 }
+    }
+    field_assignments {
+      field_name: "GPS_LATITUDE"
+      no_aggregation { expression_node_index: 3 }
+    }
+    field_assignments {
+      field_name: "GPS_LONGITUDE"
+      no_aggregation { expression_node_index: 4 }
+    }
+    field_assignments {
+      field_name: "IGNITION_STATE"
+      no_aggregation { expression_node_index: 5 }
+    }
+    field_assignments {
+      field_name: "LOCKED"
+      no_aggregation { expression_node_index: 6 }
+    }
+  }
+}

@@ -1,0 +1,5 @@
+<resources>
+    <style name="Theme.NexusVhalExample" parent="Theme.AppCompat.Light.DarkActionBar">
+        <item name="colorPrimary">#444</item>
+    </style>
+</resources>

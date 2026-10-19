@@ -1,0 +1,8 @@
+[target.x86_64-unknown-linux-musl]
+linker = "x86_64-linux-musl-gcc"
+
+# `ring` compiles C and assembly for the target, so a linker alone is not enough.
+# These only take effect for this target, so a host build is unaffected.
+[env]
+CC_x86_64_unknown_linux_musl = "x86_64-linux-musl-gcc"
+AR_x86_64_unknown_linux_musl = "x86_64-linux-musl-ar"

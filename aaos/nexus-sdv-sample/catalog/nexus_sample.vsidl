@@ -1,0 +1,13 @@
+# Two receivers for what the cloud sends. Their publisher is the Nexus Bridge, declared in
+# its own catalog (aaos/nexus-bridge/catalog), so vsidlc warns E504 here: expected.
+package: "com.nexussdv.sample"
+
+service_bundle {
+  name: "PressureAdvisor"
+  subscriber { message: "PressureLimit" topic: "pressure-limit" }
+}
+
+service_bundle {
+  name: "DoorController"
+  subscriber { message: "DoorCommand" topic: "door-command" }
+}

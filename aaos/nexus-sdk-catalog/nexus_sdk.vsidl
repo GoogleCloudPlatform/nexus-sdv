@@ -1,0 +1,3 @@
+# The Nexus SDK's generic message types. Their subscriber and publisher in the vehicle is the
+# Nexus Bridge, declared in its own catalog (aaos/nexus-bridge/catalog).
+package: "com.nexussdv.sdk"

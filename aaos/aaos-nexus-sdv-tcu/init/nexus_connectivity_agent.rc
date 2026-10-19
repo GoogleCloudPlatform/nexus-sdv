@@ -1,0 +1,6 @@
+# Init service of the nexus-connectivity-agent, started with class diagnostics.
+service nexus_connectivity_agent /apex/com.android.nexus.aaos_nexus_sdv_tcu/bin/nexus-connectivity-agent --env-file /data/misc/nexus/nexus.env
+    class diagnostics
+    user system
+    group system inet
+    stdio_to_kmsg

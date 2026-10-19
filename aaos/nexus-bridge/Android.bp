@@ -1,0 +1,49 @@
+// nexus-bridge — the Nexus Bridge SDV service bundle (Increment 1.1).
+// A rust_ffi_shared .so loaded by the SDV lifecycle runtime; subscribes to
+// onboard Data Tunnel publications cross-VM and logs receipt (raw bytes only).
+// Staged into an AOSP tree alongside aaos-nexus-sdv-tcu; packaged into that APEX.
+
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+rust_ffi_shared {
+    name: "libnexus_bridge",
+    // The extra entry declares egress_wire.rs (pulled in by link.rs's
+    // `#[path]`, see aaos/common/Android.bp) as a real input of this module —
+    // required by the APEX sandbox, which rejects an undeclared cross-package
+    // file read. The Bridge speaks no NATS: it writes handover frames, and the
+    // connectivity agent turns them into publishes.
+    srcs: [
+        "src/lib.rs",
+        ":nexus_common_egress_wire_rs",
+        ":nexus_common_authz_policy_rs",
+        ":nexus_common_slot_wire_rs",
+        ":nexus_common_read_all_rs",
+    ],
+    crate_name: "nexus_bridge",
+    defaults: ["sdv@rust_defaults"],
+    rustlibs: [
+        "libsdv_lifecycle_client_rust",
+        "libsdv_comms_rs",
+        "liblog_rust",
+        "libtokio",
+        "libtokio_util",
+        "libfutures",
+    ],
+    apex_available: ["com.android.nexus.aaos_nexus_sdv_tcu"],
+    product_specific: true,
+    min_sdk_version: "35",
+}
+
+// The Bridge's AuthzPolicy permissions are generated from its VSIDL catalog
+// (catalog/, configs/permissions/, aaos/vsidl-generate.sh).
+// Slot size per publish target, read by the Bridge at startup beside the policy.
+prebuilt_etc {
+    name: "nexus_bridge_publications",
+    src: "nexus_bridge.publications",
+    filename: "nexus_bridge.publications",
+    sub_dir: "permissions",
+    installable: false,
+    product_specific: true,
+}

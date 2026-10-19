@@ -1,0 +1,5 @@
+# Init service of the nexus-telemetry-client, started with class diagnostics.
+service nexus_telemetry_client /apex/com.android.nexus.aaos_nexus_sdv_tcu/bin/nexus-telemetry-client
+    class diagnostics
+    user system
+    group system inet

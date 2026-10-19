@@ -5,8 +5,6 @@ factory-CA-signed certificates via GCP Private CA — callers need a Keycloak
 `factory-operator` token, never GCP access. The CA private key never leaves
 Google-managed infrastructure; this service holds a single IAM permission
 (`roles/privateca.certificateRequester` on the factory CA pool) and no other.
-Design: `docs/superpowers/specs/2026-08-27-factory-helper-design.md`.
-
 ## Operator setup (once per environment)
 
 ```bash

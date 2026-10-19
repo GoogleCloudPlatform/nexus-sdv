@@ -1,0 +1,44 @@
+// aaos/common — shared vehicle-side Rust source, pulled into consumers via
+// `#[path = "..."]` (see README.md), never built as its own crate.
+//
+// A cdylib bound into an APEX (rust_ffi_shared with apex_available) is built
+// under Siso's hermetic sandbox, which requires every file a module's source
+// reaches to be a declared input of that module — a raw `#[path]` into a
+// sibling package directory is invisible to it. This filegroup makes
+// nats_wire.rs a declared, cross-package input via Soong's normal module
+// reference (":name") without changing where the file physically lives or
+// how the Rust source includes it.
+
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+filegroup {
+    name: "nexus_common_nats_wire_rs",
+    srcs: ["nats_wire.rs"],
+}
+
+filegroup {
+    name: "nexus_common_leaf_connect_rs",
+    srcs: ["leaf_connect.rs"],
+}
+
+filegroup {
+    name: "nexus_common_slot_wire_rs",
+    srcs: ["slot_wire.rs"],
+}
+
+filegroup {
+    name: "nexus_common_authz_policy_rs",
+    srcs: ["authz_policy.rs"],
+}
+
+filegroup {
+    name: "nexus_common_egress_wire_rs",
+    srcs: ["egress_wire.rs"],
+}
+
+filegroup {
+    name: "nexus_common_read_all_rs",
+    srcs: ["read_all.rs"],
+}

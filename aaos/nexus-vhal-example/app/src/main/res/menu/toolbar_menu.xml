@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <item
+        android:id="@+id/actionToggleService"
+        android:title="@string/start_sending"
+        app:showAsAction="ifRoom" />
+
+    <item
+        android:id="@+id/actionSendOnce"
+        android:title="@string/send_once"
+        app:showAsAction="ifRoom" />
+
+    <item
+        android:id="@+id/actionReload"
+        android:title="@string/reload"
+        app:showAsAction="ifRoom" />
+
+    <item
+        android:id="@+id/action_select_all"
+        android:title="@string/toggle_all"
+        app:showAsAction="ifRoom" />
+
+    <item
+        android:id="@+id/infoAvailableProperties"
+        android:enabled="false"
+        android:title=""
+        app:showAsAction="ifRoom" />
+</menu>

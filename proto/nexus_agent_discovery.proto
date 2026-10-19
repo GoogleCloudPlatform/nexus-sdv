@@ -1,0 +1,20 @@
+syntax = "proto3";
+package nexus.discovery;
+
+option java_package = "nexus.discovery";
+option java_multiple_files = true;
+
+// Deliberately minimal: a placeholder for knowledge the Connectivity Agent
+// already computes to render its own leaf.conf — not a general service
+// registry. One provider (the agent), point-to-point
+// queries from known consumers (IVI, the telemetry uploader).
+service Discovery {
+  rpc GetLeafAddress(GetLeafAddressRequest) returns (GetLeafAddressResponse);
+}
+
+message GetLeafAddressRequest {}
+
+message GetLeafAddressResponse {
+  string host = 1;
+  int32 port = 2;
+}

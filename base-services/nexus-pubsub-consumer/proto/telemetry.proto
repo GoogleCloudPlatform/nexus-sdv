@@ -1,0 +1,54 @@
+syntax = "proto3";
+
+package telemetry;
+
+option go_package = "github.com/valtech-sdv/vehicle-client/telemetry";
+
+// Import for proper timestamp handling
+import "google/protobuf/timestamp.proto";
+
+// Device type enumeration
+enum DataType {
+    // Always have a default 0 value in proto3
+    STATIC = 0;
+    DYNAMIC = 1;
+    reserved 2 to 20;
+}
+
+// Represents a single sensor reading with its value and metadata
+message SensorReading {
+    // When the reading was taken
+    google.protobuf.Timestamp timestamp = 1;
+
+    // The actual sensor value as string to support different value types
+    // (can be parsed based on sensor_type)
+    string value = 2;
+
+    // Type of data ("static" or "dynamic")
+    DataType data_type = 3;
+
+    // Type of the sensor (e.g., "location.lat", "speed")
+    string sensor = 4;
+
+    // Reserved for future use
+    reserved 7 to 15;
+}
+
+
+// Main telemetry message structure
+message TelemetryMessage {
+    // Unique identifier for this message (UUID as string)
+    string message_id = 1;
+
+    // Version of the message schema
+    uint32 schema_version = 3;
+
+    // Device identifier (e.g., VIN for vehicles)
+    string device_id = 5;
+
+    // Collection of sensor readings
+    repeated SensorReading sensor_data = 6;
+
+    // Reserved for future use
+    reserved 9 to 20;
+}

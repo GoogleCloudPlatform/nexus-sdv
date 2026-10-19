@@ -1,0 +1,22 @@
+// The two generic messages of the Nexus Bridge: any bundle publishes an Uplink to the cloud,
+// the cloud sends a Command to a bundle. The Bridge carries both without decoding them.
+// The one source of both types on both sides, like nexus_sample.proto.
+syntax = "proto3";
+
+package com.nexussdv.sdk;
+
+import "sdv/vsidl/v1/annotations.proto";
+
+// Sizes: VSIDL needs a maximum for every string and bytes field. A Command fits the Bridge's
+// 1024-byte slot (aaos/nexus-bridge/nexus_bridge.publications) with its encoding overhead.
+
+message Uplink {
+  string name = 1 [(.sdv.vsidl.v1.variable_type_max_size) = 64];      // chosen by the bundle
+  bytes payload = 2 [(.sdv.vsidl.v1.variable_type_max_size) = 880];
+}
+
+message Command {
+  string target = 1 [(.sdv.vsidl.v1.variable_type_max_size) = 64];    // the receiving bundle; others ignore it
+  string name = 2 [(.sdv.vsidl.v1.variable_type_max_size) = 64];
+  bytes payload = 3 [(.sdv.vsidl.v1.variable_type_max_size) = 880];
+}

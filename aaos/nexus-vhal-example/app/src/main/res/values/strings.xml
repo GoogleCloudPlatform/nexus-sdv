@@ -1,0 +1,10 @@
+<resources>
+    <string name="app_name">Nexus VHAL example</string>
+    <string name="start_sending">Start sending</string>
+    <string name="stop_sending">Stop sending</string>
+    <string name="send_once">Send once</string>
+    <string name="reload">Reload</string>
+    <string name="toggle_all">Toggle all</string>
+    <string name="send">Send</string>
+    <string name="available_properties">Properties: %1$d</string>
+</resources>

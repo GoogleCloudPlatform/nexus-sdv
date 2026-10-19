@@ -6,13 +6,15 @@
 #
 # Dependency graph:
 #
-#   deploy-external-secrets ────────────────┐
+#   create-namespaces
+#     └─ deploy-external-secrets ───────────┐
 #                                           ├─ deploy-external-dns (remote only) ─┐
 #                                           │                                     ├─ deploy-keycloak ──┐
 #                                           │                                     │    └─ build-push-nats-auth-callout
 #                                           │                                     │         └─ deploy-nats-auth-callout ──┐
 #                                           │                                     ├─ deploy-nats ──────────────────────────┼─ build-push-deploy-registration
-#                                           │                                     │    └─ deploy-nats-bigtable-connector
+#                                           │                                     │    ├─ deploy-nats-bigtable-connector
+#                                           │                                     │    └─ build-push-deploy-nexus-registry
 #                                           │                                     └─ build-push-deploy-data-api
 #                                           │                                          └─ build-push-deploy-data-api-sampler
 #                                           └─ (all services depend on external-secrets for secret syncing)
@@ -20,12 +22,39 @@
 
 steps:
   # ===========================================================================
+  # WAVE 0 — The namespaces (blocks all other deployments)
+  #
+  # No chart owns a namespace: each helmfile says createNamespace, so a namespace
+  # used to appear with whichever release reached it first. deploy-nats writes a
+  # secret into base-services before its chart runs, and Keycloak starts in the
+  # same second — when NATS was faster the secret was never created and the pod
+  # never started (both fresh bootstraps of 2026-10-08). Creating them here fixes
+  # the order instead of leaving it to the race.
+  # ===========================================================================
+  - id: 'create-namespaces'
+    name: 'gcr.io/cloud-builders/gcloud@sha256:abcad906c9fa0dd063c4b6e570994f34024673486b17e9f4c99c720165e03ae5'
+    entrypoint: 'bash'
+    waitFor: ['-']
+    args:
+      - '-c'
+      - |
+        set -euo pipefail
+        CLUSTER=$$(gcloud secrets versions access latest --secret=GKE_CLUSTER_NAME --project=$PROJECT_ID)
+        gcloud container clusters get-credentials "$$CLUSTER" --region=${_REGION} --project=$PROJECT_ID
+        TOKEN=$$(gcloud auth print-access-token)
+        kubectl config set-credentials build-user --token="$${TOKEN}"
+        kubectl config set-context "$$(kubectl config current-context)" --user=build-user
+        for ns in base-services sample-services factory; do
+          kubectl create namespace "$$ns" --dry-run=client -o yaml | kubectl apply -f -
+        done
+
+  # ===========================================================================
   # WAVE 0a — External Secrets Operator (blocks all other deployments)
   # ===========================================================================
   - id: 'deploy-external-secrets'
     name: 'gcr.io/cloud-builders/gcloud@sha256:abcad906c9fa0dd063c4b6e570994f34024673486b17e9f4c99c720165e03ae5'
     entrypoint: 'bash'
-    waitFor: ['-']
+    waitFor: ['create-namespaces']
     args:
       - '-c'
       - |
@@ -194,6 +223,23 @@ steps:
           --project=$PROJECT_ID \
           --region=${_REGION} \
           --substitutions=^::^_ARCH=${_ARCH}::_HELM_ACTION=${_HELM_ACTION}
+
+  # The Cloud Service Registry writes the grants the callout reads. Without it a
+  # freshly installed hub asks for grants nobody can write. It logs in at NATS as
+  # a static user, so NATS is all it waits for.
+  - id: 'build-push-deploy-nexus-registry'
+    name: 'gcr.io/cloud-builders/gcloud@sha256:abcad906c9fa0dd063c4b6e570994f34024673486b17e9f4c99c720165e03ae5'
+    entrypoint: 'bash'
+    waitFor: ['deploy-nats']
+    args:
+      - '-c'
+      - |
+        echo "Building and deploying the Cloud Service Registry..."
+        gcloud builds submit . \
+          --config=iac/cloudbuild/build-push-deploy-nexus-registry.yaml \
+          --project=$PROJECT_ID \
+          --region=${_REGION} \
+          --substitutions=^::^_ARCH=${_ARCH}::_HELM_ACTION=${_HELM_ACTION}::_COMMIT_SHA=${_COMMIT_SHA}
 
   - id: 'build-push-deploy-data-api-sampler'
     name: 'gcr.io/cloud-builders/gcloud@sha256:abcad906c9fa0dd063c4b6e570994f34024673486b17e9f4c99c720165e03ae5'

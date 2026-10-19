@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-feature android:name="android.hardware.type.automotive" android:required="true" />
+
+    <!-- The leaf, inside the vehicle. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Reading vehicle properties, granted at install. There is no permission here that
+         lets the app change anything in the vehicle. -->
+    <uses-permission android:name="android.car.permission.CAR_INFO" />
+    <uses-permission android:name="android.car.permission.CAR_POWERTRAIN" />
+    <uses-permission android:name="android.car.permission.CAR_ENERGY_PORTS" />
+    <uses-permission android:name="android.car.permission.CAR_EXTERIOR_ENVIRONMENT" />
+    <uses-permission android:name="android.car.permission.READ_CAR_DISPLAY_UNITS" />
+
+    <!-- Reading vehicle properties, asked from the user at first start. -->
+    <uses-permission android:name="android.car.permission.CAR_SPEED" />
+    <uses-permission android:name="android.car.permission.CAR_ENERGY" />
+    <uses-permission android:name="android.car.permission.CAR_MILEAGE_3P" />
+    <uses-permission android:name="android.car.permission.CAR_ENGINE_DETAILED_3P" />
+    <uses-permission android:name="android.car.permission.CAR_TIRES_3P" />
+    <uses-permission android:name="android.car.permission.READ_CAR_STEERING_3P" />
+    <uses-permission android:name="android.car.permission.READ_WINDSHIELD_WIPERS_3P" />
+
+    <application
+        android:icon="@android:drawable/ic_dialog_info"
+        android:label="@string/app_name"
+        android:theme="@style/Theme.NexusVhalExample">
+        <!-- required=false: on the AAOS SDV Cuttlefish image the Car API ships as
+             the updatable car module (car-frameworks-service / com.android.car.updatable),
+             so "android.car" is not a registered uses-library name and required=true
+             fails install. The classes still resolve from the framework at runtime. -->
+        <uses-library android:name="android.car" android:required="false" />
+        <activity android:name=".MainActivity" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <service android:name=".VhalExampleService"
+                 android:foregroundServiceType="dataSync"
+                 android:exported="false" />
+    </application>
+</manifest>

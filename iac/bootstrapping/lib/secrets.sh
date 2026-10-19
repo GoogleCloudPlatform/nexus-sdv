@@ -55,6 +55,10 @@ configure_secrets() {
     add_secret "NATS_SERVER_PASSWORD" "$(openssl rand -hex 32)"
     add_secret "NATS_AUTH_CALLOUT_PASSWORD" "$(openssl rand -hex 32)"
     add_secret "NATS_CONNECTOR_PASSWORD" "$(openssl rand -hex 32)"
+    # Increment 2.2: the auth-callout reads per-vehicle grants as grant-reader; the registry
+    # (and, until it exists, the operator writing grants by hand) is nexus-registry.
+    add_secret "NATS_GRANT_READER_PASSWORD" "$(openssl rand -hex 32)"
+    add_secret "NATS_REGISTRY_PASSWORD" "$(openssl rand -hex 32)"
     add_secret "KEYCLOAK_INSTANCE_CON_SQL_PROXY" "${GCP_PROJECT_ID}:${GCP_REGION}:cloud-sql-${ENV}"
     add_secret "IMAGE_REPO" "${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/artifact-registry"
 
@@ -364,6 +368,8 @@ delete_gcp_secrets() {
         "NATS_SERVER_PASSWORD"
         "NATS_AUTH_CALLOUT_PASSWORD"  # Service user for nats-auth-callout pod
         "NATS_CONNECTOR_PASSWORD"  # Restricted connector user for BigTable connector (read-only telemetry access)
+        "NATS_GRANT_READER_PASSWORD"  # Increment 2.2: the auth-callout's read-only access to the grant store
+        "NATS_REGISTRY_PASSWORD"  # Increment 2.2: the Cloud Service Registry
         "KEYCLOAK_INSTANCE_CON_SQL_PROXY"
         "IMAGE_REPO"
         "JWT_ACC_SIGNING_KEY"

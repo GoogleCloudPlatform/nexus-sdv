@@ -74,6 +74,41 @@ make run
 make test
 ```
 
+### AAOS SDV integration (Rust) — `aaos/`
+The vehicle-side software that runs on the AAOS SDV platform: the Nexus Bridge service
+bundle, the `nexus-connectivity-agent`, the TCU APEX that ships both, and example service
+bundles generated from a VSIDL catalog. Built by AOSP's Soong, not by cargo — the `Android.bp` files are what counts.
+Each module has its own README; the installer's path is `aaos/INSTALL.md`, the tester's
+`aaos/aaos-nexus-sdv-tcu/TESTING.md`.
+```bash
+cd aaos/nexus-connectivity-agent
+cargo test && cargo clippy --all-targets            # before every AOSP build, see below
+cargo build --release --target x86_64-unknown-linux-musl
+cd ../aaos-nexus-sdv-tcu
+./fetch-nats-server.sh                              # once: the version-matched prebuilt
+./stage-into-aosp.sh <aosp-root>                    # then: m com.android.nexus.aaos_nexus_sdv_tcu
+```
+**Soong treats clippy findings as build errors**, and `rustc -D warnings` does not catch
+them — an unused function or a `%` where `is_multiple_of` exists fails the APEX build
+after the tree has already been staged. Run clippy locally first; it costs seconds and
+saves a full build round trip.
+
+Installing a rebuilt APEX needs a higher `version` in `apex_manifest.json` than the one
+on the device — the update manager rejects an equal number without saying why.
+
+Naming: the `nexus-connectivity-agent` is never shortened to "agent" in code, commits or
+docs. The bare word means too many different things in this repo.
+
+### Nexus VHAL example (Kotlin/Android Automotive) — `aaos/nexus-vhal-example/`
+App for the head unit: lists the vehicle's VHAL properties and sends the ticked ones to the
+NATS leaf in the vehicle as the native Nexus telemetry message on `telemetry.{vin}`; no
+credential in the app. Built by Gradle, not by Soong; needs a JDK 21 or newer.
+```bash
+make build     # Gradle assembleDebug (AGP 9.2.1 / Gradle 9.6.1)
+make test      # JVM unit tests
+make install   # adb install to a running Android 17 Automotive runtime
+```
+
 ### Python Clients & Services — `sample-clients/python/`, `sample-services/*/`
 ```bash
 make proto           # Generate gRPC Python stubs
@@ -166,7 +201,8 @@ Vehicle (AAOS VHAL) / IoT device (ESP32) / Python simulator
   → Vehicle Client (Go) / IoT Client (C++) / devices client: reads signals,
     serializes to protobuf
       IoT devices may instead publish MQTT, converted to NATS protobuf by Data Converter (Go)
-  → NATS topic: telemetry.{env}.{destination}.{vin}
+  → NATS subject: telemetry.{vin} for the Nexus message, telemetry-aaos-sdv.{vin} for
+      Google's SDV report — the subject names the format and the vehicle, VIN second
       ↑ Auth Callout (Go) validates JWT on each connection
   → Telemetry Subscriber (Go): parses protobuf, writes to BigTable
       row key: {vehicleId}#{ISO8601_timestamp}
@@ -185,6 +221,24 @@ Factory Helper (Rust): issues a factory identity over HTTPS
   → VIN Registry (Go): records the vehicle; FleetView reads it from there
 ```
 
+The AAOS SDV path is a second, separate flow — it starts inside the vehicle's own
+middleware rather than at a client reading signals:
+
+```
+SDV service bundle publishes on the onboard Data Tunnel (dt)
+  → Nexus Bridge (other VM): subscribes cross-VM, never decodes the payload
+  → Unix socket in the Bridge's bundle data directory
+      the Bridge's SELinux domain has no tcp_socket permissions; this is why the split exists
+  → nexus-connectivity-agent: publishes to the local NATS leaf
+  → NATS subject: pubsub.{vin}.{topic}
+  → nexus-pubsub-consumer (cloud): decodes the protobuf field by field
+```
+
+Since Increment 2.2 the hub lets a vehicle use a `pubsub.{vin}.{topic}` subject only while the
+Cloud Service Registry grants it: the callout reads the VIN from the operational certificate
+on the TLS leaf link and issues the control subject `registry.{vin}.>` plus the grant from the
+store.
+
 ### Key Components
 
 | Directory | Language | Role |
@@ -195,6 +249,14 @@ Factory Helper (Rust): issues a factory identity over HTTPS
 | `base-services/registration/` | Rust (Axum) | Vehicle registration + PKI certificate issuance |
 | `base-services/factory-helper/` | Rust (Axum) | Issues factory identities over HTTPS, without project IAM; remote PKI only |
 | `base-services/vin-registry/` | Go | Which vehicles the platform knows; FleetView's source |
+| `base-services/nexus-pubsub-consumer/` | Rust | Cloud end of the vehicle→cloud pub/sub path; subscribes `pubsub.>` and decodes every field |
+| `aaos/nexus-bridge/` | Rust (SDV service bundle) | Subscribes onboard Data Tunnel signals, hands the bytes over a Unix socket; speaks no NATS |
+| `aaos/nexus-connectivity-agent/` | Rust | Owns connectivity on the vehicle: credentials, the local NATS leaf, and publishing what the Bridge hands it |
+| `aaos/nexus-telemetry-client/` | Rust | Publishes the reports of the platform's Telemetry Service on `telemetry-aaos-sdv.{vin}`; an APEX of its own, `com.android.nexus.telemetry_client`; its policy and init service are on the image |
+| `aaos/common/` | Rust | Sources shared by Bridge, agent and sample (wire framing, VIN resolution), included by path because Soong has no crate graph |
+| `aaos/nexus-sdv-sample/` | VSIDL catalog + Rust (SDV service bundles) | `PressureAdvisor` and `DoorController`, generated by `vsidlc` from their catalog; receive what the cloud sends through the Bridge |
+| `aaos/nexus-vhal-example/` | Kotlin (Android Automotive) | Example app for the head unit: lists the VHAL properties and sends the ticked ones to the leaf as `TelemetryMessage` on `telemetry.{vin}` |
+| `aaos/aaos-nexus-sdv-tcu/` | APEX | Ships agent + nats-server + Bridge to the vehicle; provisioning and acceptance scripts |
 | `sample-clients/vehicle-client/` | Go | Transmits vehicle telemetry to NATS |
 | `sample-clients/telemetry-subscriber/` | Go | Receives NATS messages |
 | `sample-clients/iot-client/` | C++ (ESP32/PlatformIO) | Firmware publishing telemetry via MQTT/nanopb |

@@ -1,0 +1,78 @@
+/*
+ * Copyright (C) 2026 The Android Open Source Project
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+// Defines custom annotations to support SDV definition via VSIDL.
+
+// Custom options index values 50000-59999 are reserved for SDV.
+// OEMs may introduce own custom options with indexes 60000-99999
+
+syntax = "proto3";
+
+package sdv.vsidl.v1;
+
+import "google/protobuf/descriptor.proto";
+
+// Represents metadata associated with a publication.
+message SdvPublication {
+  // Specifies the publication model, determining whether a single or multiple
+  // publishers are allowed.
+  enum PublisherModel {
+    // Each channel can only have one publisher. A single service bundle can
+    // publish multiple channels. Multiple service bundles can exclusively
+    // publish different channels.
+    SINGLE_PUB = 0;
+    // Only one channel exists however it can have multiple publishers.
+    // Subscribers will receive messages from all publishers.
+    MULTI_PUB = 1;
+  }
+  // Required. Specifies the publisher model, indicating whether a single or
+  // multiple publishers are allowed.
+  PublisherModel model = 1;
+  // Deprecated, use 'channels_enum' instead.
+  string instances_enum = 2;
+  // The number of messages a publication queue can hold.
+  uint32 message_count = 3;
+  // Designates the name of an enum that represents the possible channels for
+  // this publication. Can be empty for `SINGLE_PUB` meaning that there is only
+  // one unique channel exist. Must be empty for `MULTI_PUB`.
+  string channels_enum = 4;
+}
+
+// Used by the VSIDL compiler as a placeholder type for unique publications.
+// TODO(437299045): Rename to UniqueChannel for consistency with channels_enum.
+enum UniqueInstance {
+  UNIQUE = 0;
+}
+
+extend google.protobuf.MessageOptions {
+  // Designates a protobuf message as a unit type within the SDV ecosystem,
+  // enabling it to be referenced as a publisher or subscriber type in VSIDL
+  // files. The maximum message size is automatically computed from the schema,
+  // necessitating the configuration of 'repeated_field_max_count' for repeated
+  // fields and 'variable_type_max_size' for variable-sized fields (string or
+  // bytes).
+  SdvPublication publication = 50001;
+}
+
+extend google.protobuf.FieldOptions {
+  // Specifies the maximum number of elements allowed in a repeated field.
+  // Required for fields in messages exchanged via pub/sub, for message size
+  // calculation.
+  optional int32 repeated_field_max_count = 50050;
+  // Specifies the maximum size (in bytes) allowed for string or bytes fields.
+  // Required for fields in messages exchanged via pub/sub, for message size
+  // calculation.
+  optional int32 variable_type_max_size = 50051;
+}

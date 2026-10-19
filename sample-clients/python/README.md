@@ -10,7 +10,7 @@ make all
 You will see terminal output confirming the connection:
 ```bash
 NATS connection established.
-[NATS] Telemetry sent to telemetry.prod.bigtable....
+[NATS] Telemetry sent to telemetry.<VIN>
 ...
 ```
 

@@ -1,0 +1,13 @@
+# Copy to config.toml (gitignored) or render into a ConfigMap.
+# ${VAR} is substituted from the environment, so secrets come from the
+# Kubernetes Secret and never sit in this file.
+nats_url = "nats://nats.base-services.svc.cluster.local:4222"
+nats_user = "connector"
+nats_password = "${NATS_PASSWORD}"
+
+# Static in Increment 1.2. Increment 2's registry fills this seam.
+subject = "pubsub.>"
+
+# "masked" (default): the VIN shows only its last four characters and readings show no
+# value. "full": everything, for an environment that carries test vehicles only.
+# log_detail = "masked"

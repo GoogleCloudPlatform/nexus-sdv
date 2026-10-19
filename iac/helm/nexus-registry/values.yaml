@@ -1,0 +1,24 @@
+arch: arm64
+
+image:
+  repository: ""
+  name: nexus-registry
+  tag: latest
+  pullPolicy: Always
+
+service:
+  port: 8080
+
+nats:
+  url: nats://nats.base-services.svc.cluster.local:4222
+  user: nexus-registry
+  password: ""
+
+# A registration not renewed within this time is dropped and its grants close (spec section
+# 4, "Lease"). The spec has the library renew every 5 minutes; 900 s lets three renewals go missing.
+lease:
+  seconds: 900
+
+resources:
+  requests: { cpu: "50m", memory: "64Mi" }
+  limits:   { cpu: "250m", memory: "256Mi" }

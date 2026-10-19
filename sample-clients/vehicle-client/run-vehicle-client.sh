@@ -105,8 +105,7 @@ fi
 #
 # Both are public certs (no private key) needed by every Nexus SDV client, so they are
 # published to a public, read-only GCS bucket (no GCP credential needed to fetch) instead of
-# handed out via Secret Manager IAM per consumer — see
-# docs/superpowers/specs/2026-07-20-leaf-core3-tcu-design.md. Bucket creation and refresh
+# handed out via Secret Manager IAM per consumer. Bucket creation and refresh
 # now live in the platform's deploy pipelines (#478); this script only fetches.
 # The bucket is created and kept current by the platform's own deploy pipelines
 # (iac/bootstrapping/lib/public-pki.sh), not by this script. Its name is derived
@@ -115,8 +114,7 @@ fi
 PKI_BUCKET="${GCP_PROJECT_ID}-nexus-sdv-public"
 PKI_BASE_URL="${PKI_BUCKET_URL:-https://storage.googleapis.com/${PKI_BUCKET}/pki}"
 
-# Optional: on guests with no DNS resolver at all (e.g. Cuttlefish Core/Core3 — see
-# docs/superpowers/plans/2026-08-07-nexus-connectivity-agent.md, Task 3), the caller
+# Optional: on guests with no DNS resolver at all (e.g. Cuttlefish Core/Core3), the caller
 # resolves these hostnames once on a host that has real DNS and passes the IPs here.
 # curl's --resolve keeps SNI/cert validation against the real hostname. Unset by
 # default, so behavior on hosts with working DNS is unchanged.

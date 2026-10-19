@@ -1,0 +1,19 @@
+# The nexus-connectivity-agent: credentials, the leaf's lifecycle, the handover from the
+# Bridge, the discovery server. Same pattern as Google's product daemons
+# (device/google/sdv/sdv_core_base/sepolicy/samples/product/private/sdv_diagnostics_agent.te).
+type nexus_connectivity_agent, domain;
+typeattribute nexus_connectivity_agent coredomain;
+type nexus_connectivity_agent_exec, exec_type, file_type, system_file_type;
+
+init_daemon_domain(nexus_connectivity_agent)
+net_domain(nexus_connectivity_agent)
+
+# It starts the leaf, which enters its own domain at exec.
+domain_auto_trans(nexus_connectivity_agent, nexus_nats_server_exec, nexus_nats_server)
+
+# Its run directory: certificates, configuration, leaf.conf, logs.
+allow nexus_connectivity_agent nexus_data_file:dir create_dir_perms;
+allow nexus_connectivity_agent nexus_data_file:file create_file_perms;
+
+# The rules below this line are filled from the avc denials collected in permissive mode
+# (spec R6, stage permissive). Each one names the denial it answers.

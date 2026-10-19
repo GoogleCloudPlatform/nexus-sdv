@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nexus-pubsub-consumer
+  namespace: base-services
+  labels: { app: nexus-pubsub-consumer }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: nexus-pubsub-consumer }
+  template:
+    metadata:
+      labels: { app: nexus-pubsub-consumer }
+    spec:
+      # The consumer never talks to the Kubernetes API, so it gets no token for it.
+      automountServiceAccountToken: false
+      # Numeric uid: the Dockerfile's `USER app` is a name, which the kubelet cannot check
+      # against runAsNonRoot.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
+      # amd64 because that is what the environment runs: iac/bootstrapping/.bootstrap_env
+      # sets ARCH="amd64", and the helm charts' arm64 default is only a default. An
+      # arm64 pod stayed Pending here with "didn't trigger scale-up" — the Arm compute
+      # class is not available in this region. Autopilot accepts a plain amd64 selector
+      # without a compute class; anything else has to name one.
+      nodeSelector:
+        kubernetes.io/arch: amd64
+      containers:
+        - name: nexus-pubsub-consumer
+          image: IMAGE_PLACEHOLDER
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          env:
+            - name: NATS_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: nexus-pubsub-consumer, key: NATS_PASSWORD }
+          volumeMounts:
+            - name: config
+              mountPath: /etc/nexus-pubsub-consumer
+              readOnly: true
+          # Explicit values keep GKE Autopilot from assigning its own defaults.
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits:   { cpu: 500m, memory: 256Mi }
+      volumes:
+        - name: config
+          configMap: { name: nexus-pubsub-consumer }

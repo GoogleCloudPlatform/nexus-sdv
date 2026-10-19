@@ -326,6 +326,24 @@ else
     result UNKNOWN "no leftover secrets" "could not list secrets ($LAST_STATUS)"
 fi
 
+# A deleted cluster leaves the disks of its volume claims behind. They do not get
+# in a bootstrap's way, so this never blocks — but a project holding them is not
+# empty, and each one is billed until someone deletes it.
+g compute disks list --project="$PROJECT" --filter="labels.goog-k8s-cluster-name:* AND -users:*" --format="value(name,zone.basename(),labels.goog-k8s-cluster-name)"
+if [ "$LAST_STATUS" = ok ]; then
+    # gcloud warns on stderr when no disk at all has a users field; g merges it in.
+    DISK_ROWS=$(grep -v '^WARNING' <<<"$G_OUT" || true)
+    DISKS=$(grep -c . <<<"$DISK_ROWS" || true)
+    if [ "${DISKS:-0}" -eq 0 ]; then
+        result OK "no leftover disks" "none"
+    else
+        FROM=$(awk '{print $3}' <<<"$DISK_ROWS" | sort -u | paste -sd, -)
+        result WARN "no leftover disks" "${DISKS} unattached, from: ${FROM} — an earlier teardown left them. Delete each with: gcloud compute disks delete NAME --zone ZONE --project $PROJECT"
+    fi
+else
+    result UNKNOWN "no leftover disks" "could not list disks ($LAST_STATUS)"
+fi
+
 # Terraform keeps one state per project, and every bootstrap migrates it from the
 # previous environment to the new one. A completed teardown removes the bucket, so
 # a state left behind means an earlier run did not finish — and the next bootstrap

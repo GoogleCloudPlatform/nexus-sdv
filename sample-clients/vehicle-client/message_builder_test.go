@@ -79,17 +79,17 @@ func TestBuildMetricsReportFieldMapping(t *testing.T) {
 		t.Fatalf("failed to unmarshal ReportData: %v", err)
 	}
 
-	if vehicleData.ENGINE_POWER != float32(sim.EnginePower) {
-		t.Errorf("ENGINE_POWER = %v, want %v", vehicleData.ENGINE_POWER, sim.EnginePower)
+	if vehicleData.GetENGINE_POWER() != float32(sim.EnginePower) {
+		t.Errorf("ENGINE_POWER = %v, want %v", vehicleData.GetENGINE_POWER(), sim.EnginePower)
 	}
-	if vehicleData.VELOCITY != float32(sim.Velocity) {
-		t.Errorf("VELOCITY = %v, want %v", vehicleData.VELOCITY, sim.Velocity)
+	if vehicleData.GetVELOCITY() != float32(sim.Velocity) {
+		t.Errorf("VELOCITY = %v, want %v", vehicleData.GetVELOCITY(), sim.Velocity)
 	}
 	if vehicleData.IGNITION_STATE == nil || *vehicleData.IGNITION_STATE != true {
 		t.Errorf("IGNITION_STATE = %v, want true (EngineRPM > 0)", vehicleData.IGNITION_STATE)
 	}
-	if vehicleData.VehicleDynamics.SteeringAngleDeg != sim.SteeringAngle {
-		t.Errorf("SteeringAngleDeg = %v, want %v", vehicleData.VehicleDynamics.SteeringAngleDeg, sim.SteeringAngle)
+	if vehicleData.GetVehicleDynamics().GetSteeringAngleDeg() != sim.SteeringAngle {
+		t.Errorf("SteeringAngleDeg = %v, want %v", vehicleData.GetVehicleDynamics().GetSteeringAngleDeg(), sim.SteeringAngle)
 	}
 }
 
@@ -119,8 +119,8 @@ func TestBuildPayloadTelemetry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildPayload returned error: %v", err)
 	}
-	if subject != "telemetry.VIN123.battery" {
-		t.Errorf("subject = %q, want telemetry.VIN123.battery", subject)
+	if subject != "telemetry.VIN123" {
+		t.Errorf("subject = %q, want telemetry.VIN123", subject)
 	}
 
 	var msg pb.TelemetryMessage
@@ -157,5 +157,29 @@ func TestBuildPayloadUnknownMessageType(t *testing.T) {
 	_, _, err := buildPayload(v, sim, 1, time.Now())
 	if err == nil {
 		t.Fatal("expected an error for unknown message type, got nil")
+	}
+}
+
+// A standing vehicle reports a speed of 0; the report must say so rather than leave the
+// field out, and the gear is one of Google's P, R, N, D.
+func TestMetricsReportKeepsZeroAndNamesTheGear(t *testing.T) {
+	sim := NewVehicleSimulator()
+	sim.Velocity = 0
+	report, err := buildMetricsReport(sim, 1, time.Now())
+	if err != nil {
+		t.Fatalf("buildMetricsReport: %v", err)
+	}
+	if got := report.ReportData.TypeUrl; got != "type.googleapis.com/com.android.sdv.telemetry.VehicleTelemetryData" {
+		t.Errorf("report type = %q", got)
+	}
+	var data pbVehicle.VehicleTelemetryData
+	if err := report.ReportData.UnmarshalTo(&data); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if data.VELOCITY == nil {
+		t.Error("VELOCITY is absent; a speed of 0 must be present as 0")
+	}
+	if data.GetGearStatus().GetGear() != pbVehicle.CurrentGear_N {
+		t.Errorf("gear = %v, want N", data.GetGearStatus().GetGear())
 	}
 }

@@ -454,6 +454,10 @@ What a finished teardown looks like:
   the secret step did not finish. Offer to clear them, as described in step 1;
   a bootstrap reuses any secret that already has a version, private keys
   included
+- **no leftover disks** — the teardown deletes the disk of the NATS store after
+  the cluster is gone. A warning names the clusters the disks came from; they
+  do not get in a bootstrap's way, but they are billed until deleted, and the
+  warning gives the command
 
 Two things survive on purpose and are not faults: **the Cloud Build triggers**,
 because recreating them needs a browser sign-in, and **the DNS zone** where it

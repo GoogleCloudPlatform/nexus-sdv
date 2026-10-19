@@ -1,0 +1,6 @@
+apiVersion: v2
+name: reference-services
+description: pressure-monitor and door-control — the cloud end of the Increment 2.2 demo
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

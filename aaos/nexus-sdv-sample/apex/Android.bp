@@ -1,0 +1,79 @@
+// Copyright (C) 2026 The Android Open Source Project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+// Apex to store the com.nexussdv.sample sample.
+apex {
+    name: "com.nexussdv.sample",
+    native_shared_libs: [
+        "libsdv_lm_pressure_advisor",
+        "libsdv_lm_door_controller",
+    ],
+    // Security contexts to files in the APEX.
+    file_contexts: "file_contexts",
+    // Json manifest file describing meta info of this APEX bundle.
+    // The 'name' filed from this json is used for mounting point.
+    manifest: "apex_manifest.json",
+    // Control whether this module compiles for 32-bit, 64-bit, or both.
+    compile_multilib: "both",
+    prebuilts: [
+        // SDV service bundles manifest file.
+        "com.nexussdv.sample.manifest",
+        // Linker configuration to enable loading library from apex.
+        "com.nexussdv.sample.linker-config",
+        // Permissions policy files.
+        "com.nexussdv.sample.PressureAdvisor.permissions.config",
+        "com.nexussdv.sample.DoorController.permissions.config",
+        // Orchestration configuration.
+        "com_nexussdv_sample_orchestration_configurations",
+        "com.nexussdv.pressure_advisor.orch.config",
+        "com.nexussdv.door_controller.orch.config",
+    ],
+    // Name of the apex_key module that provides the private key to sign the APEX bundle.
+    key: "com.nexussdv.sample.apex_key",
+    updatable: true,
+    min_sdk_version: "35",
+    product_specific: true,
+}
+
+// The key for signing the apex.
+apex_key {
+    name: "com.nexussdv.sample.apex_key",
+    public_key: "com.nexussdv.sample.avbpubkey",
+    private_key: "com.nexussdv.sample.pem",
+}
+
+// SDV manifest file with the metadata information about service bundles stored in the apex.
+prebuilt_etc {
+    name: "com.nexussdv.sample.manifest",
+    // The source name of the manifest file.
+    src: "sdv_service_bundles_manifest.textproto",
+    // The name of the installed file shall be `sdv_service_bundles_manifest.textproto`.
+    filename: "sdv_service_bundles_manifest.textproto",
+    // Disable direct installation of the manifest to one of the partitions.
+    // The manifest will be used only inside of service bundles registry apexes.
+    installable: false,
+}
+
+// The linker config to allow libraries for the apex to be linkable.
+linker_config {
+    name: "com.nexussdv.sample.linker-config",
+    src: "linker.config.json",
+    // Disable direct installation of the linker config to one of the partitions.
+    // The linker configuration will be used only inside of service bundles registry apexes.
+    installable: false,
+}

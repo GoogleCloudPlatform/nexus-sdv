@@ -1,0 +1,4 @@
+# The switch of the nexus-telemetry-client (persist.nexus.telemetry_client.enabled): set by
+# the operator at installation, read by the client at start. A product property, declared
+# the way Google declares its own (device/google/sdv/sdv_core_cf/sepolicy/product/private/property.te).
+product_internal_prop(nexus_telemetry_client_prop)

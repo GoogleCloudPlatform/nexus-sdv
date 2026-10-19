@@ -1,0 +1,18 @@
+# The nexus-telemetry-client: asks the platform's Telemetry Service for reports over binder
+# and publishes them to the Nexus leaf. Shaped like Google's own product telemetry client
+# (device/google/sdv/sdv_core_base/sepolicy/samples/product/private/sdv_telemetry_product_client.te).
+type nexus_telemetry_client, domain;
+typeattribute nexus_telemetry_client coredomain;
+type nexus_telemetry_client_exec, exec_type, system_file_type, file_type;
+
+init_daemon_domain(nexus_telemetry_client)
+
+typeattribute nexus_telemetry_client sdv_telemetry_client;
+typeattribute nexus_telemetry_client sdv_configurable_publisher_registry_client;
+
+net_domain(nexus_telemetry_client)
+
+# Its switch, persist.nexus.telemetry_client.enabled (property.te).
+get_prop(nexus_telemetry_client, nexus_telemetry_client_prop)
+
+# The rules below this line are filled from the avc denials collected in permissive mode.
