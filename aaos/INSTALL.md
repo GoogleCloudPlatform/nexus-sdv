@@ -269,7 +269,7 @@ $ADB logcat -d | grep -E 'sdv_lm_manager: Publishing|sdv_lm_monitor: Received me
 # … sdv_lm_manager: Publishing on TirePressure#PRESSURE: 230
 # … sdv_lm_monitor: Received message on TirePressure#PRESSURE: [TirePressure { pressure: 230, …
 kubectl -n sample-services logs deploy/pressure-monitor --tail=2
-# … pressure received vin=…<last four characters of the VIN> pressure=230
+# … pressure received vin=***<last four characters of the VIN> pressure=230
 ```
 
 **Check:** the cloud logs the vehicle's values, 240 down to 200 in steps of 5.

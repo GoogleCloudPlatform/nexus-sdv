@@ -147,7 +147,7 @@ adb logcat -d | grep door-controller
 | 2 | `publisher` line and slot size | `subscriber` line |
 | 3, types | from our catalog | from an excerpt of Google's `.proto` in [`messages/proto/`](../sample-services/aaos/messages/proto/) |
 | 3, service | `Direction::CloudToVehicle`, `publish_message` | `Direction::VehicleToCloud`, `subscribe`, `Delivery::decode` |
-| 5 | `logcat` in the vehicle | `pressure received vin=… pressure=<n>` in the service's log |
+| 5 | `logcat` in the vehicle | `pressure received vin=***<last four> pressure=<n>` in the service's log |
 
 ## Roadmap to a complete SDK
 
