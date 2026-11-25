@@ -1,0 +1,20 @@
+flowchart LR
+  subgraph vehicle["Vehicle"]
+    subgraph vm["AAOS SDV VM"]
+      subgraph sapex["APEX of the service"]
+        FRAG["Policy entries for the Nexus Bridge<br/>Subscriber: TirePressure, topic pressure<br/>Publisher: DoorCommand, topic door-command"]
+        S["Service bundle S"]
+      end
+      subgraph nb["Nexus Bridge APEX"]
+        POL["Policy of the Nexus Bridge<br/>(no entries)"]
+        BB["Bridge service bundle"]
+        LEAF["NATS leaf"]
+      end
+    end
+  end
+  HUB["NATS hub<br/>(Nexus SDV)"]
+
+  S -- "TirePressure on pressure" --> BB
+  BB -- "DoorCommand on door-command" --> S
+  BB <--> LEAF
+  LEAF <--> HUB
