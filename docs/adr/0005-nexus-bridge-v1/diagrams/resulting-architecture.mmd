@@ -1,0 +1,32 @@
+flowchart LR
+  subgraph vehicle["Vehicle"]
+    subgraph vm["AAOS SDV VM"]
+      S["SDV service bundles<br/>(annotated items)"]
+      TS["Telemetry Service"]
+      subgraph nb["Nexus Bridge APEX"]
+        BB["Bridge service bundle<br/>(cloud carrier)"]
+        TC["nexus-telemetry-client"]
+        CM["nexus-connectivity-manager"]
+        LEAF["NATS leaf"]
+      end
+    end
+  end
+  subgraph nexus["Nexus SDV"]
+    HUB["NATS hub"]
+    CALLOUT["auth callout"]
+    REG["Cloud Service Registry"]
+    KV["JetStream key-value buckets"]
+  end
+  CS["Cloud services<br/>with Nexus SDK"]
+
+  S <-- "Data Tunnel" --> BB
+  TS -- "telemetry reports" --> TC
+  BB <-- "NATS over TCP" --> LEAF
+  TC -- "NATS over TCP" --> LEAF
+  CM -- "identity, configuration" --> LEAF
+  LEAF <-- "leaf link (TLS):<br/>data, offer, grants" --> HUB
+  CS <-- "data, registration (lease)" --> HUB
+  HUB <--> REG
+  REG <--> KV
+  HUB -- "asks" --> CALLOUT
+  CALLOUT -- "reads grants" --> KV

@@ -1,0 +1,21 @@
+flowchart LR
+  subgraph vehicle["Vehicle"]
+    subgraph nb["Nexus Bridge APEX"]
+      BB["Bridge service bundle"]
+      LEAF["NATS leaf"]
+    end
+  end
+  subgraph nexus["Nexus SDV"]
+    HUB["NATS hub"]
+    CALLOUT["auth callout"]
+    PERM["NATS permissions<br/>of the vehicles"]
+  end
+  CS["Cloud service<br/>(own implementation of the interaction)"]
+  PIPE["Deployment pipeline"]
+
+  BB <--> LEAF
+  LEAF <-- "leaf link (TLS)" --> HUB
+  CS <-- "subjects of the Nexus Bridge interface" --> HUB
+  HUB -- "asks" --> CALLOUT
+  CALLOUT -- "reads" --> PERM
+  PIPE -- "changes at each deployment" --> PERM

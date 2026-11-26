@@ -1,0 +1,21 @@
+flowchart LR
+  subgraph vehicle["Vehicle"]
+    subgraph vm["AAOS SDV VM"]
+      S["SDV service bundle"]
+      TS["Telemetry Service"]
+      subgraph nb["Nexus Bridge APEX"]
+        BB["Bridge service bundle"]
+        TC["nexus-telemetry-client"]
+        CM["nexus-connectivity-manager"]
+        LEAF["NATS leaf<br/>(nats-server)"]
+      end
+    end
+  end
+  HUB["NATS hub<br/>(Nexus SDV)"]
+
+  S <-- "Data Tunnel" --> BB
+  TS -- "telemetry reports" --> TC
+  BB <-- "NATS over TCP<br/>(needs tcp_socket)" --> LEAF
+  TC <-- "NATS over TCP" --> LEAF
+  CM -- "identity, configuration" --> LEAF
+  LEAF <-- "leaf link (TLS)" --> HUB
